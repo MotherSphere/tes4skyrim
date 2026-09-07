@@ -172,7 +172,7 @@ def _descriptor(constraint):
     if cname == 'bhkLimitedHingeConstraint':
         return 'hinge', constraint.limited_hinge
     if cname == 'bhkHingeConstraint':
-        return 'plain_hinge', constraint.hinge
+        return 'hinge', constraint.hinge
     if cname == 'bhkMalleableConstraint':
         sub = constraint.sub_constraint     # PyFFI 2.2.3 SubConstraint
         t = int(sub.type)
@@ -181,7 +181,7 @@ def _descriptor(constraint):
         if t == 2:      # limited hinge
             return 'hinge', sub.limited_hinge
         if t == 1:
-            return 'plain_hinge', sub.hinge
+            return 'hinge', sub.hinge
     return None, None
 
 

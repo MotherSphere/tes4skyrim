@@ -1260,6 +1260,10 @@ needs_landdreugh = pytest.mark.skipif(not os.path.exists(LANDDREUGH_SKEL),
                                       reason='Oblivion export assets missing')
 needs_mudcrab = pytest.mark.skipif(not os.path.exists(MUDCRAB_SKEL),
                                    reason='Oblivion export assets missing')
+TURRET_SKEL = os.path.join(REPO, 'export', 'FalloutNV.esm', 'meshes',
+                           'creatures', 'sentryturret', 'skeleton.nif')
+needs_turret = pytest.mark.skipif(not os.path.exists(TURRET_SKEL),
+                                  reason='FalloutNV export assets missing')
 
 
 class TestRagdollBijection:
@@ -1463,6 +1467,43 @@ class TestRagdollBijection:
         counts = [len(n.collision_object.body.constraints)
                   for n in plan['body_nodes']]
         assert counts == [0] + [1] * (len(counts) - 1)
+
+    @needs_turret
+    def test_plain_hinge_is_promoted_to_limited_hinge(self):
+        """No bhkHingeConstraint may survive in a ragdoll tree.
+
+        hkpConstraintUtils::convertToPowered accepts only limited hinge and
+        ragdoll data and returns NULL for anything else, which the engine's
+        ragdoll attach then dereferences (the FalloutNV sentry turret CTD).
+        The promoted joint must span the full circle a free hinge means.
+        """
+        from asset_convert.collision.collision_constraints import (
+            enforce_ragdoll_tree)
+        from asset_convert.havok.hkx_ragdoll import plan_ragdoll_tree
+        from pyffi.formats.nif import NifFormat
+        d = NifFormat.Data()
+        with open(TURRET_SKEL, 'rb') as f:
+            d.read(f)
+        plan = plan_ragdoll_tree(d)
+        authored = [n for n in plan['body_nodes']
+                    for c in n.collision_object.body.constraints
+                    if c.__class__.__name__ == 'bhkHingeConstraint']
+        assert authored, 'fixture changed: turret no longer authors a plain hinge'
+
+        enforce_ragdoll_tree(d, d.roots[0])
+
+        kinds = [c.__class__.__name__ for n in plan['body_nodes']
+                 for c in n.collision_object.body.constraints]
+        assert 'bhkHingeConstraint' not in kinds
+        assert set(kinds) <= {'bhkLimitedHingeConstraint',
+                              'bhkRagdollConstraint'}
+        promoted = [c for n in plan['body_nodes']
+                    for c in n.collision_object.body.constraints
+                    if c.__class__.__name__ == 'bhkLimitedHingeConstraint']
+        spans = [(c.limited_hinge.min_angle, c.limited_hinge.max_angle)
+                 for c in promoted]
+        assert any(lo <= -np.pi + 1e-4 and hi >= np.pi - 1e-4
+                   for lo, hi in spans)
 
     @needs_landdreugh
     def test_nif_side_reverses_a_forward_joint_in_place(self):

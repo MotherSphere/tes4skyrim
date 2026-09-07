@@ -470,6 +470,53 @@ build `perp_b1` by Gram-Schmidt from `perp_a1`, then
 `perp_b2 = axle_b × perp_b1`. When `perp_a1` is parallel to `axle_b`, fall
 back to whichever world axis is not.
 
+### <a id="plain-hinge-promotion"></a>Plain hinges are ILLEGAL in a ragdoll — promote to limited hinge
+
+A `bhkHingeConstraint` on a ragdoll body crashes SSE at actor Load3D
+(2026-09-07, the FalloutNV sentry turret). Read out of the GOG/AE exe:
+the ragdoll attach (id 63792) calls `hkpConstraintUtils::convertToPowered`
+(id 62885, `0xb04e80`), which dispatches on the constraint data's `getType()`
+and accepts **only type 2 (limited hinge) and type 7 (ragdoll)** — the
+`0xb04ebb`/`0xb04ec4` compares. Every other type takes the error path, which
+emits
+
+    Cannot convert constraint "<name>" to a powered constraint.
+    Only limited hinges and ragdoll constraints can be powered.
+    Constraint\Bilateral\hkpConstraintUtils.cpp
+
+and returns **NULL** (`0xb04faa xor eax,eax`). The caller stores that in `rdi`
+(`0xb34443`) and immediately calls `hkReferencedObject::removeReference`
+(id 57011) on it **unguarded** at `0xb34459`, so `rcx = 0` and the crash lands
+on `cmp word ptr [rcx+8], 0` — id `57011+0x6`, returning to `63792+0x4EE`.
+Note the sibling call at `0xb344ea` guards the same call with `test rbx,rbx`;
+this one does not.
+
+The crash is therefore about the joint's TYPE, not its geometry (the turret's
+hinge has fully populated axes and pivots) and not the tree order (its tree is
+a clean chain: 4 bodies, bare root, each joint to the previous body).
+
+**Census.** 50 vanilla actor skeletons carry 853 ragdoll constraints: 453
+`bhkRagdollConstraint` + 400 `bhkLimitedHingeConstraint` and **zero** plain
+hinges. Skyrim never ships one in a ragdoll. Ours had 3 of 5,006 across 296
+rigs, all FalloutNV: `sentryturret`, `minisentryturret`, `zaxeye`.
+
+**Fix** (`promote_plain_hinge`, applied from `_chosen_joints` so it runs on
+exactly the joints the shared `plan_ragdoll_tree` keeps): rewrite the block as
+a `bhkLimitedHingeConstraint` with limits ±pi. The seven frame vectors are
+common to both descriptors, so it is a field copy; `_fix_limited_hinge` then
+derives the B-side perpendicular as for any other limited hinge. ±pi is a full
+circle, which is the free rotation a plain hinge means — the joint binds only
+at the wrap point, which a corpse never reaches under the motor.
+
+The hkx side already did this implicitly: `_joint_info` has no `plain_hinge`
+branch, so a plain hinge fell through to the `else` and got ±pi limits inside
+an `hkpLimitedHingeConstraintData`. That made the two files disagree on the
+joint's type while the ENGINE USES THE NIF's copy (it overwrites hkx
+`constraint[i-1]` with NIF `B[j-1]`), so the well-formed hkx constraint was
+discarded and the illegal NIF one converted. `plain_hinge` is now deleted as a
+kind: a plain hinge classifies as `hinge` everywhere, with the limits carried
+in the descriptor.
+
 ### <a id="prismatic-descriptor-fix"></a>Prismatic
 
 Oblivion stores `pivot_a`, `pivot_b`, `sliding_b`, `plane_b` and a rotation;

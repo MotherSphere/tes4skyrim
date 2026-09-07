@@ -341,11 +341,50 @@ def reverse_constraint_ends(con):
         sub.entities[0], sub.entities[1] = sub.entities[1], sub.entities[0]
 
 
-def _chosen_joints(plan):
+#: A free hinge is a limited hinge whose limits span the full circle.
+_FREE_HINGE_LIMIT = math.pi
+
+
+def promote_plain_hinge(data, con):
+    """Rewrite a bhkHingeConstraint as an equivalent bhkLimitedHingeConstraint.
+
+    A ragdoll joint MUST be type 2 (limited hinge) or 7 (ragdoll): the engine's
+    hkpConstraintUtils::convertToPowered accepts only those two and returns
+    NULL otherwise, and the ragdoll attach dereferences that NULL without a
+    check.  The seven frame vectors are common to both descriptors, so the
+    conversion is a field copy plus full-circle limits.
+    See: docs/commentary/asset_convert_collision.md#plain-hinge-promotion
+    """
+    if con.__class__.__name__ != 'bhkHingeConstraint':
+        return con
+    out = NifFormat.bhkLimitedHingeConstraint()
+    out.num_entities = 2
+    out.entities.update_size()
+    for i, e in enumerate(con.entities):
+        out.entities[i] = e
+    out.priority = con.priority
+
+    src_d, dst = con.hinge, out.limited_hinge
+    for name in ('pivot_a', 'pivot_b', 'axle_a', 'axle_b',
+                 'perp_2_axle_in_a_1', 'perp_2_axle_in_a_2',
+                 'perp_2_axle_in_b_1', 'perp_2_axle_in_b_2'):
+        sv, dv = getattr(src_d, name, None), getattr(dst, name, None)
+        if sv is not None and dv is not None:
+            _copy_field(dst, name, sv, dv)
+    dst.min_angle = -_FREE_HINGE_LIMIT
+    dst.max_angle = _FREE_HINGE_LIMIT
+    dst.max_friction = 0.0
+
+    data.blocks.append(out)
+    return out
+
+
+def _chosen_joints(data, plan):
     """The constraint list each body should end up with, plus the kept set.
 
-    A joint the plan marks reversed is re-expressed here, in place, so the
-    caller only has to write the lists out.
+    A joint the plan marks reversed is re-expressed here, in place, and a
+    plain hinge is promoted to a limited hinge, so the caller only has to
+    write the lists out.
     """
     new_lists, kept = {}, set()
     for n in plan['body_nodes']:
@@ -356,6 +395,7 @@ def _chosen_joints(plan):
         con, reversed_ = pick
         if reversed_:
             reverse_constraint_ends(con)
+        con = promote_plain_hinge(data, con)
         new_lists[id(n)] = [con]
         kept.add(id(con))
     return new_lists, kept
@@ -378,7 +418,7 @@ def enforce_ragdoll_tree(data, root):
     before = {nid: list(getattr(b, 'constraints', []) or [])
               for nid, b in body_of.items()}
 
-    new_lists, kept = _chosen_joints(plan)
+    new_lists, kept = _chosen_joints(data, plan)
 
     changed = 0
     for n in plan['body_nodes']:
