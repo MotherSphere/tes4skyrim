@@ -11,8 +11,8 @@ from tes5_import.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
 from script_convert.constants import (_sanitize_name, _safe_property_name, _record_type_to_papyrus, papyrus_script_name,
-                                     KNOWN_COMMANDS, SERVICE_MENU_CALL,
-                                     UDF_WIDE_TYPES)
+                                     SERVICE_MENU_CALL, UDF_WIDE_TYPES)
+from script_convert.command_rows import KNOWN_COMMANDS
 from script_convert.cross_ref import CrossRefGraph, master_names
 from script_convert.converter import ScriptConverter
 from script_convert.objective_completion import (

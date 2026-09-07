@@ -46,8 +46,10 @@ defaults to the inert `0` (`None` or `""` where the caller needs that type).
 import re
 
 from script_convert.constants import (
-    ACTOR, AV, OBJREF, RAW, COMMAND_ROWS, PAPYRUS_BOOL_FUNCTIONS,
-    _COMPARISON_BOOL_FUNCTIONS, _safe_property_name,
+    PAPYRUS_BOOL_FUNCTIONS, _safe_property_name
+)
+from script_convert.command_rows import (
+    ACTOR, AV, COMMAND_ROWS, COMPARISON_BOOL_FUNCTIONS, OBJREF, RAW
 )
 
 from script_convert.tes4 import lexer as L
@@ -89,7 +91,7 @@ _BRANCH_COMPARISONS = frozenset({'getinworldspace', 'ispcrace'})
 COMPARISON_COMMANDS = frozenset(
     name for name, row in COMMAND_ROWS.items()
     if getattr(row, 'emit', None) and not row.note
-    and _template_compares(row.emit)) | _BRANCH_COMPARISONS     | _COMPARISON_BOOL_FUNCTIONS
+    and _template_compares(row.emit)) | _BRANCH_COMPARISONS     | COMPARISON_BOOL_FUNCTIONS
 
 
 def _ref(conv, row, ref_name, extends):
@@ -159,7 +161,7 @@ class _Args(dict):
         if kind == 'g':
             return self._c.arg_src(n, default).strip().upper()[:1]
         if kind == 's':
-            return self._c.arg_src(n, default)
+            return self._c.arg_src(n, default).strip().strip('"')
         if kind == 'p':
             return _safe_property_name(self._c.arg_src(n, default))
         if kind == 'b':

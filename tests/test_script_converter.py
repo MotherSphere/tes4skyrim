@@ -488,8 +488,10 @@ class TestFunctionConversion:
         assert 'Alchemy' in result
 
     def test_unknown_function_generates_todo(self, converter):
+        """An unknown call is an inert 0 plus a line note, never a mid-line comment."""
         result = emit_function(converter, None, 'SomeObscureFunc', 'arg1', 'ObjectReference')
-        assert 'TODO' in result
+        assert result == '0'
+        assert any('TODO: SomeObscureFunc' in c for c in converter._line_comments)
 
     def test_isactionref(self, converter):
         converter._current_event = 'Event OnActivate(ObjectReference akActionRef)'
@@ -1207,6 +1209,40 @@ class TestBareZeroArgCommands:
             'Quest'))
         assert 'IsPlayersLastRiddenHorse ==' not in out
         assert ';NE:' in out
+
+
+class TestInertOperandInAChain:
+    """See docs/commentary/script_convert.md#comparing-an-inert-operand."""
+
+    def test_unknown_equals_zero_never_becomes_true(self):
+        """`isActor == 0` must DROP, not convert to the always-true `0 == 0`.
+
+        Nehrim's freeze spells guard on it and returned immediately.
+        """
+        conv = ScriptConverter(CrossRefGraph())
+        out = '\n'.join(conv.convert_fragment(
+            'if (Target.isActor == 0) || (Target.getDead == 1)\n'
+            '  return\nendif', 'ActiveMagicEffect'))
+        assert '0 == 0' not in out
+        assert 'IsDead()' in out
+
+    def test_an_or_chain_that_loses_every_term_stays_shut(self):
+        """`||` narrows, so nothing surviving means the guard never fires."""
+        conv = ScriptConverter(CrossRefGraph())
+        out = '\n'.join(conv.convert_fragment(
+            'if ( GetCrimeKnown 0 Player NivanRef == 1 ) || '
+            '( GetCrimeKnown 1 Player HrolRef == 1 )\n'
+            '  set BleakerCrime to 1\nendif', 'ObjectReference'))
+        assert 'If True' not in out
+        assert 'If False' in out
+
+    def test_a_lone_inert_comparison_still_yields_an_expression(self):
+        """Outside a chain the note must stay inert, never comment out the If."""
+        conv = ScriptConverter(CrossRefGraph())
+        out = '\n'.join(conv.convert_fragment(
+            'if HorseRef.IsPlayersLastRiddenHorse == 0\n  return\nendif',
+            'Quest'))
+        assert not any(ln.strip().startswith('If ;') for ln in out.split('\n'))
 
 
 # ===========================================================================
@@ -3055,10 +3091,7 @@ class TestInferExtendsDoesNotBreakBinding:
     """
 
     def test_objectreference_shared_call_does_not_upgrade(self):
-        # `GetDistance` is declared on ObjectReference, not just Actor — it is
-        # in `_OBJREF_SHARED_FUNCTIONS` for exactly this reason.  It upgraded
-        # 101 scripts, `GoblinHeadScript` (on GoblinShamanStaff, a WEAP) among
-        # them.
+        """A shared method must not upgrade the 101 scripts calling it."""
         src = 'scn X\n\nbegin gamemode\n\tif getdistance SomeMarker > 500\n\tendif\nend'
         assert ScriptConverter._infer_extends(src, 'ObjectReference') == 'ObjectReference'
 
@@ -3961,7 +3994,7 @@ class TestObjRefSharedFunctionsNeverCastToActor:
     (crash-2026-08-09-23-34-53, "Cannot call getDistance() on a None object"
     x34 in Papyrus.0.log immediately before the CTD).
 
-    `_ACTOR_ONLY_FUNCTIONS` and `_OBJREF_SHARED_FUNCTIONS` deliberately
+    `ACTOR_ONLY_FUNCTIONS` and `OBJREF_SHARED_FUNCTIONS` deliberately
     overlap; every site that consults the first must subtract the second.
     """
 
@@ -3979,9 +4012,9 @@ class TestObjRefSharedFunctionsNeverCastToActor:
 
     def test_every_objref_shared_function_stays_uncast(self):
         """The invariant across the whole overlap, not just getdistance."""
-        from script_convert.constants import (
-            _ACTOR_ONLY_FUNCTIONS, _OBJREF_SHARED_FUNCTIONS)
-        overlap = sorted(_ACTOR_ONLY_FUNCTIONS & _OBJREF_SHARED_FUNCTIONS)
+        from script_convert.command_rows import (
+            ACTOR_ONLY_FUNCTIONS, OBJREF_SHARED_FUNCTIONS)
+        overlap = sorted(ACTOR_ONLY_FUNCTIONS & OBJREF_SHARED_FUNCTIONS)
         assert overlap, 'fixture expects the two sets to overlap'
         for fn in overlap:
             out = self._convert(f'  {fn}')

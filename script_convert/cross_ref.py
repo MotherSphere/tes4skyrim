@@ -6,8 +6,12 @@ import re
 from pathlib import Path
 
 from script_convert.constants import (
-    papyrus_script_name, PLACED_REF_SIGS, SCHOOL_ENCHANT_SHADER, TYPE_MAP,
-    _ACTOR_ONLY_FUNCTIONS, _OBJREF_SHARED_FUNCTIONS, PLAYER_ALIAS_EXTENDS)
+    PLACED_REF_SIGS, PLAYER_ALIAS_EXTENDS, SCHOOL_ENCHANT_SHADER, TYPE_MAP,
+    papyrus_script_name
+)
+from script_convert.command_rows import (
+    ACTOR_ONLY_FUNCTIONS, OBJREF_SHARED_FUNCTIONS
+)
 from tes5_import.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
@@ -831,14 +835,7 @@ class CrossRefGraph:
         script_all_vars: dict[str, dict[str, str]] = {}
         script_actor_vars: dict[str, set[str]] = {}
         script_sources: dict[str, str] = {}
-        # `<refvar>.<actorOnlyFunc>` anywhere in a script proves that ref var
-        # holds an Actor in that script's own view.  _ACTOR_ONLY_FUNCTIONS is
-        # not sound on its own — it lists several methods that ObjectReference
-        # also declares (PlaceAtMe, GetDistance, Say, ...), collected in
-        # _OBJREF_SHARED_FUNCTIONS for exactly this reason.  Without subtracting
-        # them, a pure marker var like MQ16OblivionGate1Script.mySpawnMarker,
-        # whose only use is `mySpawnMarker.placeatme`, reads as an Actor.
-        _actor_only = sorted(_ACTOR_ONLY_FUNCTIONS - _OBJREF_SHARED_FUNCTIONS)
+        _actor_only = sorted(ACTOR_ONLY_FUNCTIONS - OBJREF_SHARED_FUNCTIONS)
         _actor_call_re = re.compile(
             r'(\w+)\s*\.\s*(?:' +
             '|'.join(re.escape(f) for f in _actor_only) +

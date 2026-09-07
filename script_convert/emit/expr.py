@@ -19,9 +19,10 @@ from __future__ import annotations
 
 
 from script_convert.constants import (
-    BASE_FORM_TYPES, OP_MAP, PAPYRUS_BOOL_FUNCTIONS, EVENT_REF_PARAMS,
-    MISMATCH_TYPES,
-    _PAPYRUS_VALUE_TYPES)
+    BASE_FORM_TYPES, EVENT_REF_PARAMS, MISMATCH_TYPES, OP_MAP,
+    PAPYRUS_BOOL_FUNCTIONS
+)
+from script_convert.command_rows import PAPYRUS_VALUE_TYPES
 from script_convert.emit.commands import (
     BOOL_TEMPLATE_COMMANDS, COMPARISON_COMMANDS, INERT_COMMANDS,
 )
@@ -43,7 +44,7 @@ _ARITH = frozenset({'+', '-', '*', '/', '%'})
 #: of them -- `Form != 0` does not compile.
 REF_TYPES = frozenset({'objectreference', 'actor', 'actorbase'})
 
-_VALUE_TYPES_LOW = frozenset(t.lower() for t in _PAPYRUS_VALUE_TYPES)
+_VALUE_TYPES_LOW = frozenset(t.lower() for t in PAPYRUS_VALUE_TYPES)
 
 #: Calls that RETURN a reference, so `x.GetContainer() == 0` is also a null
 #: test even though the receiver's own type says nothing.
@@ -452,6 +453,47 @@ def _apply_cmp_rules(conv, node: N.BinOp, extends: str):
     return None
 
 
+#: Depth of the `&&`/`||` chain being emitted; only there may a term drop out.
+_CHAIN_DEPTH = [0]
+
+
+def _inert_note(conv, mark: int, value: str):
+    """The operand's own `;` note when it converted to nothing, else None.
+
+    See: docs/commentary/script_convert.md#comparing-an-inert-operand
+    """
+    if len(conv._line_comments) <= mark or value.strip() != '0':
+        return None
+    return ' '.join(conv._line_comments[mark:]).replace(';NE:', ';', 1)
+
+
+def _bool_literal_cmp(conv, left, right, op: str, extends: str,
+                      in_chain: bool = False) -> str:
+    """`<expr> == 0/1` -- TES4's spelling of a bool test and its negation.
+
+    Papyrus rejects Bool-vs-Int outright.  A zero-argument reference function
+    may name its SUBJECT as an argument here (`GetDead KimRef == 1` means
+    `KimRef.IsDead()`), which is true only in this position.  Inside an
+    `&&`/`||` chain an inert operand hands its note back so the term drops.
+    See: docs/commentary/script_convert.md#comparing-an-inert-operand
+    """
+    mark = len(conv._line_comments)
+    value = (conv.emit_call(left, extends, promote_subject=True)
+             if isinstance(left, N.Call) else emit(conv, left, extends))
+    inner = str(value)
+    inert = _inert_note(conv, mark, inner) if in_chain else None
+    if inert:
+        del conv._line_comments[mark:]
+        return inert
+    if not _is_bool_valued(conv, left):
+        return f'{inner} {op} {emit(conv, right, extends)}'
+    if (op == '==') == (right.text.strip() == '1'):
+        return inner
+    if inner.startswith('(') and L.unwrap_parens(inner) == inner[1:-1].strip():
+        return f'!{inner}'
+    return f'!({inner})'
+
+
 def _binop(conv, node: N.BinOp, extends: str) -> str:
     op = OP_MAP.get(node.op, node.op)
     left, right = node.left, node.right
@@ -483,29 +525,9 @@ def _binop(conv, node: N.BinOp, extends: str) -> str:
             return f'{_operand(conv, left, node, extends)} {op} None'
         if _is_zero(left) and is_ref_typed(conv, right):
             return f'None {op} {_operand(conv, right, node, extends, right=True)}'
-        # `<bool> == 1` is TES4's way of spelling `<bool>`, and `== 0` its
-        # negation.  Papyrus rejects Bool-vs-Int outright.
         if isinstance(right, N.Literal) and right.text.strip() in ('0', '1'):
-            # In a `== 0/1` comparison TES4 lets a zero-argument reference
-            # function name its SUBJECT as an argument: `GetDead KimRef == 1`
-            # means `KimRef.IsDead()`, not `Self.IsDead(KimRef)`.  Only here --
-            # a bare call keeps its arguments where they are.
-            value = (conv.emit_call(left, extends, promote_subject=True)
-                     if isinstance(left, N.Call)
-                     else emit(conv, left, extends))
-            is_bool = _is_bool_valued(conv, left)
-            inner = str(value)
-            if not is_bool:
-                return f'{inner} {op} {emit(conv, right, extends)}'
-            truthy = (op == '==') == (right.text.strip() == '1')
-            if truthy:
-                return inner
-            # Parenthesise: `!(x as Actor).IsDead()` would negate the CAST,
-            # not the call.  Skip it only when the text is ALREADY one enclosing
-            # pair, so a converted comparison does not come out `!((a == b))`.
-            if inner.startswith('(') and L.unwrap_parens(inner) == inner[1:-1].strip():
-                return f'!{inner}'
-            return f'!({inner})'
+            return _bool_literal_cmp(conv, left, right, op, extends,
+                                     in_chain=bool(_CHAIN_DEPTH[0]))
 
     # TES4 refs coerce to 0 when unset, so scripts test them with ORDERING
     # operators: `ref > 0` / `ref >= 1` means "is set", `ref <= 0` means "is
@@ -529,27 +551,27 @@ def _binop(conv, node: N.BinOp, extends: str) -> str:
 
 
 def _logical(conv, left, right, op: str, node, extends: str) -> str:
-    """`&&`/`||`, keeping the terms that convert and trailing those that do not.
+    """`&&`/`||`: keep the terms that convert, note the ones that do not.
 
-    A term with no Papyrus equivalent renders as a `;` note, which comments out
-    the REST OF THE LINE -- every later operand is lost and the `If` is left
-    dangling.  TES4 conditions are long chains (`KimMaleScript` ANDs four
-    terms, one of them `GetFriendHit`, a Skyrim CONDITION function with no
-    Papyrus native), so the note is lifted out of the operand and re-attached
-    after the whole expression, where it comments out nothing.
-
-    The surviving terms keep their meaning: dropping a term from an `&&` widens
-    the guard and from an `||` narrows it.  Neutralising the condition to
-    `True` instead would run the guarded body unconditionally -- for that
-    script, healing the player with no distance, stage or combat check at all.
+    A term's `;` note goes onto the LINE's notes, never inline; dropping a
+    term widens an `&&` and narrows an `||`.  With EVERY term gone the whole
+    chain follows that direction -- False for `||`, True for `&&` -- so a
+    guard whose conditions all vanished never fires.
+    See: docs/commentary/script_convert.md#comparing-an-inert-operand
     """
-    a, a_note = _split_note(_operand(conv, left, node, extends))
-    b, b_note = _split_note(_operand(conv, right, node, extends, right=True))
+    _CHAIN_DEPTH[0] += 1
+    try:
+        a, a_note = _split_note(_operand(conv, left, node, extends))
+        b, b_note = _split_note(_operand(conv, right, node, extends, right=True))
+    finally:
+        _CHAIN_DEPTH[0] -= 1
     notes = [n for n in (a_note, b_note) if n]
     if a and b:
-        return f'{a} {op} {b}  ;{" ".join(notes)}' if notes else f'{a} {op} {b}'
-    kept = a or b or 'True'
-    return f'{kept}  ;{op} {" ".join(notes)}'
+        if notes:
+            conv._line_comments.append(f';NE: {" ".join(notes)}')
+        return f'{a} {op} {b}'
+    conv._line_comments.append(f';NE: {op} {" ".join(notes)}')
+    return a or b or ('False' if op == '||' else 'True')
 
 
 def _split_note(text: str) -> tuple:

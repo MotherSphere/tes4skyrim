@@ -7,19 +7,19 @@ from script_convert.emit import script as _script
 from script_convert.tes4 import nodes as _tes4_nodes
 from script_convert.blocks import BLOCK_FILTER_PARAM
 from script_convert.constants import (
-    COMMAND_ROWS, DISPATCH_EVENTS, ENUM_ACTOR_VALUES,
-    LOOSE_OPS,
-    ENUM_AV_LADDERS, GMST_TO_ACTOR_VALUE, KNOWN_COMMANDS, KNOWN_GLOBALS,
-    PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS, PLAYER_ALIAS_EXTENDS,
-    RETURN_TYPES, SAY_SPEAKAS_MIN_TOKENS, SELF_NAMES, TYPE_MAP,
-    _ACTORBASE_ARG_FUNCTIONS, _ACTOR_ONLY_FUNCTIONS, _BASE_OBJECT_PAPYRUS,
-    _BARE_BOOL_FUNCTIONS,
-    _BARE_NO_EQUIV_COMMANDS, _BOOL_VALUED_FUNCTIONS,
-    _BRANCH_ONLY_COMMANDS, _COMPARISON_BOOL_FUNCTIONS,
-    _OBJREF_SHARED_FUNCTIONS, _PAPYRUS_VALUE_TYPES, _REF_TYPES,
-    _ZERO_ARG_REF_FUNCTIONS, _canonical_global, _digit_stripped_formid,
-    _record_type_to_base_papyrus, _record_type_to_papyrus,
-    _safe_property_name, resolve_property_formid, script_type_may_override,
+    KNOWN_GLOBALS, LOOSE_OPS, PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS,
+    PLAYER_ALIAS_EXTENDS, RETURN_TYPES, SELF_NAMES, TYPE_MAP, _REF_TYPES,
+    _canonical_global, _digit_stripped_formid, _record_type_to_base_papyrus,
+    _record_type_to_papyrus, _safe_property_name, resolve_property_formid,
+    script_type_may_override
+)
+from script_convert.command_rows import (
+    COMMAND_ROWS, DISPATCH_EVENTS, ENUM_ACTOR_VALUES, ENUM_AV_LADDERS,
+    GMST_TO_ACTOR_VALUE, KNOWN_COMMANDS, SAY_SPEAKAS_MIN_TOKENS,
+    ACTORBASE_ARG_FUNCTIONS, ACTOR_ONLY_FUNCTIONS, BARE_BOOL_FUNCTIONS,
+    BARE_NO_EQUIV_COMMANDS, BOOL_VALUED_FUNCTIONS, BRANCH_ONLY_COMMANDS,
+    COMPARISON_BOOL_FUNCTIONS, OBJREF_SHARED_FUNCTIONS, PAPYRUS_VALUE_TYPES,
+    ZERO_ARG_REF_FUNCTIONS
 )
 from script_convert import resolve_name as _resolve_name
 from script_convert import assemble as _assemble
@@ -41,12 +41,10 @@ from script_convert import symbols as _symbols
 # is exactly the `_MQ01Tate_` trap described below.
 _QUOTED_NAME_RE = re.compile(r'^"(\w+)"$')
 
-#: Any `_ACTOR_ONLY_FUNCTIONS` name called BARE -- a pre-filter for
-#: `_infer_extends` (see there).  Longest-first so the alternation cannot
-#: match a prefix of a longer name.
+#: Any `ACTOR_ONLY_FUNCTIONS` name called BARE, longest-first.
 _ACTOR_ONLY_ANY_RE = re.compile(
     r'(?<!\.)(?<!\w)(?:'
-    + '|'.join(sorted((re.escape(_f) for _f in _ACTOR_ONLY_FUNCTIONS),
+    + '|'.join(sorted((re.escape(_f) for _f in ACTOR_ONLY_FUNCTIONS),
                       key=len, reverse=True))
     + r')(?:\s|$|\()', re.IGNORECASE)
 
@@ -414,10 +412,10 @@ class ScriptConverter:
     def _infer_extends(source: str, extends: str) -> str:
         """Pre-scan source for bare Actor-only function calls; upgrade extends.
 
-        `_ACTOR_ONLY_FUNCTIONS` is NOT sound for this question — 14 of its
+        `ACTOR_ONLY_FUNCTIONS` is NOT sound for this question — 14 of its
         entries are declared on `ObjectReference` too (`GetDistance`, `AddItem`,
         `GetItemCount`, `Say`, `PlaceAtMe`, `SetScale`, ...), which is exactly
-        why `_OBJREF_SHARED_FUNCTIONS` exists and why the call-site cast at
+        why `OBJREF_SHARED_FUNCTIONS` exists and why the call-site cast at
         `_emit_function` already subtracts it.  Here the set must be subtracted
         as well: an upgrade is not a cosmetic type widening but a hard runtime
         failure.  Papyrus binds a script to a form only when the declared base
@@ -481,9 +479,9 @@ class ScriptConverter:
         # candidate name (81) for every script.
         if not _ACTOR_ONLY_ANY_RE.search(code):
             return extends
-        for func in _ACTOR_ONLY_FUNCTIONS:
-            if (func in _OBJREF_SHARED_FUNCTIONS
-                    or func in _ACTORBASE_ARG_FUNCTIONS
+        for func in ACTOR_ONLY_FUNCTIONS:
+            if (func in OBJREF_SHARED_FUNCTIONS
+                    or func in ACTORBASE_ARG_FUNCTIONS
                     or func in locals_declared):
                 continue
             # Match bare calls (not preceded by '.') anywhere in source
@@ -683,7 +681,7 @@ class ScriptConverter:
 
     def returns_bool(self, name: str) -> bool:
         """Does this TES4 SOURCE name return a boolean, so `X == 1` is `X`?"""
-        return name.lower() in _BOOL_VALUED_FUNCTIONS
+        return name.lower() in BOOL_VALUED_FUNCTIONS
 
     def compares_bool(self, name: str) -> bool:
         """Does this TES4 name collapse `X == 0/1` in a COMPARISON position?
@@ -691,7 +689,7 @@ class ScriptConverter:
         Narrower than `returns_bool`: only the comparison-position list, which
         differs from the bare-read one (docs/commentary/script_convert.md #6).
         """
-        return name.lower() in _COMPARISON_BOOL_FUNCTIONS
+        return name.lower() in COMPARISON_BOOL_FUNCTIONS
 
     def emit_name(self, name: str, extends: str) -> str:
         """A local, a zero-argument command read, or an external property."""
@@ -717,7 +715,7 @@ class ScriptConverter:
             return f'{self._convert_ref(owner, extends)}.{safe}'
         # Not a command anywhere: a cross-script variable read.
         if (prop_low not in KNOWN_COMMANDS
-                and prop_low not in _BARE_BOOL_FUNCTIONS
+                and prop_low not in BARE_BOOL_FUNCTIONS
                 and prop_low not in _MEMBER_COMMANDS):
             return f'{self._convert_ref(owner, extends)}.{safe}'
         return _dispatch.emit_command(self, owner, name, extends)
@@ -729,60 +727,46 @@ class ScriptConverter:
         Rebuilds the argument text and hands it to `_emit_function`, which is
         still the 201-branch chain.  R4 replaces this body with a table lookup
         over the already-parsed `node.args`, deleting the rebuild with it.
+
+        See: docs/commentary/script_convert.md#receiver-and-argument-not-interchangeable
         """
         recv = _expr.emit_bare(self, node.receiver) if node.receiver else None
         args = list(node.args)
-        # TES4 lets a zero-argument reference function name its SUBJECT as an
-        # argument instead of a receiver: `GetDead KimFermaleRef` is
-        # `KimFermaleRef.IsDead()`, not `Self.IsDead(KimFermaleRef)`.  Promote
-        # it, exactly as the string path does before dispatching.
-        # The gate is the BOOL table, not `_ZERO_ARG_REF_FUNCTIONS`: `getlos`
-        # is in the latter but genuinely takes a target, so promoting its
-        # argument made the TARGET the caster -- `GetLOS player == 1` came out
-        # `player.HasLOS()` instead of `(Self as Actor).HasLOS(player)`.
         if (promote_subject and recv is None and len(args) == 1
                 and isinstance(args[0], _tes4_nodes.Ident)
-                and node.name.lower() in _BOOL_VALUED_FUNCTIONS
-                and node.name.lower() in _ZERO_ARG_REF_FUNCTIONS):
+                and node.name.lower() in BOOL_VALUED_FUNCTIONS
+                and node.name.lower() in ZERO_ARG_REF_FUNCTIONS):
             recv, args = args[0].name, []
-        # An UNKNOWN name carrying arguments is not a call.  The string path's
-        # gate requires the name to be in KNOWN_COMMANDS (or one of its extra
-        # lists) before it will treat `name arg` as a command; anything else
-        # falls through and the whole expression becomes a `;TODO:` comment.
-        # Emitting it as a call instead produced `GetFriendHit(Player)` --
-        # `undefined function`, 9 Nehrim scripts that then failed to compile.
         if args and not self._is_known_command(node.name):
             return self._unknown_command_todo(node, extends)
-        # `arg_text` is the argument list as the AUTHOR wrote it, kept only
-        # for the `;NE:` markers that quote the source.  Nothing decides
-        # anything from it any more -- the nodes do.
         self._leading_comma = node.leading_comma
         return _dispatch.emit_command(self, recv, node.name, extends,
                                       args=args)
 
     def _is_known_command(self, name: str) -> bool:
-        """Would the string path treat `name <args>` as a command call?"""
+        """Would the string path treat `name <args>` as a command call?
+
+        A registered HANDLER defines a command just as much as a row does, and
+        a command with no Papyrus equivalent is still a command -- it converts
+        to a `;NE:` marker, never to a `;TODO:` over the whole line.
+        See: docs/commentary/script_convert.md#command-rows
+        """
         low = name.lower()
-        return (low in KNOWN_COMMANDS or low in _BOOL_VALUED_FUNCTIONS
-                # A registered HANDLER is the command's definition just as much
-                # as a row is: without this a handler-only name (setReaction,
-                # modReaction) fell out here as an unknown identifier and its
-                # handler was unreachable dead code.
+        return (low in KNOWN_COMMANDS or low in BOOL_VALUED_FUNCTIONS
                 or low in _commands.REGISTRY
                 or low in _EXTRA_COMMAND_NAMES
-                # Commands with NO Papyrus equivalent are still COMMANDS: they
-                # convert to a `;NE:` marker plus `0`, not to a `;TODO:` on the
-                # whole line.  Omitting this list turned `GetAVModF a b != X`
-                # into `If True ;TODO:` and dropped the comparison entirely.
-                or low in _BARE_NO_EQUIV_COMMANDS
-                or low in _BRANCH_ONLY_COMMANDS
+                or low in BARE_NO_EQUIV_COMMANDS
+                or low in BRANCH_ONLY_COMMANDS
                 or low in COMMAND_ROWS
                 or bool(re.match(r'^(?:get|set)menu\w*$', low))
                 or low.startswith(('con_', 'ar_', 'sv_')))
 
     def _unknown_command_todo(self, node, extends: str) -> str:
-        """What the string path emits for an unrecognised `name <args>`."""
-        return f';TODO: {_expr.emit_source(node)}'
+        """An unrecognised `name <args>`: an inert value plus a LINE note.
+
+        See: docs/commentary/script_convert.md#comparing-an-inert-operand
+        """
+        return self.note(f'TODO: {_expr.emit_source(node)}')
 
     # ---- hooks for emit/stmt.py ------------------------------------------
     # The tree owns which statement KIND a line is; these own what each kind
@@ -796,7 +780,7 @@ class ScriptConverter:
         `array_var`, which has no Papyrus type and lands on String.
         """
         target = self.type_of(_expr.emit_source(stmt.target))
-        if not target or target in _PAPYRUS_VALUE_TYPES:
+        if not target or target in PAPYRUS_VALUE_TYPES:
             return False
         value = _expr.emit_source(stmt.value)
         # A cross-script read resolves on the OWNING script's table, which is
@@ -912,7 +896,7 @@ class ScriptConverter:
             ttype = self.type_of(target)
             if ttype == 'GlobalVariable':
                 return f'{target}.SetValue(0)  {value}'
-            dflt = '0' if not ttype or ttype in _PAPYRUS_VALUE_TYPES else 'None'
+            dflt = '0' if not ttype or ttype in PAPYRUS_VALUE_TYPES else 'None'
             return f'{target} = {dflt}  {value}'
 
         if stmt.op:

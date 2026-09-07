@@ -578,7 +578,11 @@ class Parser:
                     line=value.line)
 
     def _parse_if(self, line: int) -> Stmt:
-        """`if <cond> ... [elseif ...] [else ...] endif`."""
+        """`if <cond> ... [elseif ...] [else ...] endif`.
+
+        `else <cond>` (TES4) and `else if <cond>` (FO3/FNV) are both an
+        elseif; the node keeps the source shape in `else_is_elseif`.
+        """
         self.advance()  # 'if' / 'elseif'
         cond = self.parse_expression()
         comment = self.take_line_end()
@@ -594,9 +598,9 @@ class Parser:
             node.elifs.append((econd, ebody, elif_line))
         if self.cur.is_ident('else'):
             self.advance()
-            # TES4 accepts `else <condition>` as an elseif; keep the source
-            # shape so emission does not have to invent one.
             if self.cur.kind not in (T.NEWLINE, T.EOF, T.COMMENT):
+                if self.cur.is_ident('if'):
+                    self.advance()
                 econd = self.parse_expression()
                 self.take_line_end()
                 node.elifs.append((econd, self._parse_body(_IF_TERMINATORS),

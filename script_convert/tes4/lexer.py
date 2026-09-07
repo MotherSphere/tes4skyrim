@@ -104,6 +104,28 @@ _IDENT_RE = re.compile(r'[^\W\d][\w]*', re.UNICODE)
 _NUMBER_RE = re.compile(r'(?:\d+\.\d*|\.\d+|\d+)')
 
 
+
+def _number_or_ident(out: list, text: str, i: int, n: int,
+                     line: int, col: int) -> int:
+    """Lex a NUMBER, or the digit-leading IDENT a digit run turns into.
+
+    Returns the index to resume at; a preceding `.` is emitted as the member
+    OPERATOR rather than absorbed into the name.
+    See: docs/commentary/script_convert.md#digit-leading-member-names
+    """
+    m = _NUMBER_RE.match(text, i)
+    j = m.end()
+    if j < n and (text[j].isalpha() or text[j] == '_'):
+        word = _IDENT_RE.match(text, j)
+        start = i
+        if text[i] == '.':
+            out.append(Token(T.OP, '.', line, col))
+            start = i + 1
+        out.append(Token(T.IDENT, text[start:word.end()], line, col))
+        return word.end()
+    out.append(Token(T.NUMBER, m.group(), line, col))
+    return j
+
 def tokenize(source: str) -> list[Token]:
     """Tokenise one script body into a flat token list ending in EOF.
 
@@ -165,24 +187,8 @@ def tokenize(source: str) -> list[Token]:
             i = m.end()
             continue
 
-        # A `.` is only the start of a number when a digit follows; otherwise
-        # it is the member operator (`BaurusRef.getdisposition`), which the
-        # corpus uses 8,843 times in Nehrim alone.
         if ch.isdigit() or (ch == '.' and i + 1 < n and text[i + 1].isdigit()):
-            m = _NUMBER_RE.match(text, i)
-            # An EditorID MAY START WITH A DIGIT -- `01FlayerBladeScript`,
-            # `001EffectCreatureGraywar`, `1TrapFireMineWorldRef`.  A digit run
-            # that continues into letters or `_` is one identifier, not a
-            # number followed by a name: splitting it turned a single argument
-            # into two on 709 argument tails in Nehrim alone.
-            j = m.end()
-            if j < n and (text[j].isalpha() or text[j] == '_'):
-                word = _IDENT_RE.match(text, j)
-                out.append(Token(T.IDENT, text[i:word.end()], line, col))
-                i = word.end()
-                continue
-            out.append(Token(T.NUMBER, m.group(), line, col))
-            i = j
+            i = _number_or_ident(out, text, i, n, line, col)
             continue
 
         for op in _OPERATORS:

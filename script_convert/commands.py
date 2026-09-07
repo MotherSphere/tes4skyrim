@@ -19,10 +19,12 @@ argument text -- so those are properties of the CALL and live on it.
 from script_convert import resolve_name as _resolve_name
 from script_convert.constants import (
     ACTOR_VALUE_MAP, ANIM_GROUP_EVENTS, ATTRIBUTE_STUB_VALUE, CASTABLE,
-    GMST_TO_ACTOR_VALUE, param_types,
-    PLACED_REF_SIGS, TES4_ATTRIBUTES, _ACTOR_VALUE_FUNCTIONS,
-    _ACTOR_VALUE_READ_FUNCTIONS, TES4_ASSAULT_BOUNTY, TES4_MURDER_BOUNTY,
-    TES4_STEAL_BOUNTY, _safe_property_name, papyrus_script_name,
+    PLACED_REF_SIGS, TES4_ASSAULT_BOUNTY, TES4_ATTRIBUTES, TES4_MURDER_BOUNTY,
+    TES4_STEAL_BOUNTY, _safe_property_name, papyrus_script_name
+)
+from script_convert.command_rows import (
+    COMMAND_ROWS, GMST_TO_ACTOR_VALUE, ACTOR_VALUE_FUNCTIONS,
+    ACTOR_VALUE_READ_FUNCTIONS, param_types
 )
 
 #: TES4 command name (lowercase) -> handler `(ctx, call) -> str | None`.
@@ -246,8 +248,9 @@ def say(ctx, call) -> str:
     parts = ctx.arg_srcs()
     # SayTo names the TARGET first and the topic second.
     n = 1 if (call.name == 'sayto' and len(parts) >= 2) else 0
-    topic = call.arg(n, 'None')
+    topic = 'None'
     if len(parts) > n:
+        topic = _safe_property_name(parts[n].strip().split()[0])
         ctx._mark_topic_property(parts[n].strip().split()[0])
 
     ref = ctx._resolve_objref_ref(call.ref, call.extends)
@@ -1214,7 +1217,7 @@ _AV_SET = frozenset({'setactorvalue', 'setav', 'forceactorvalue', 'forceav',
 _AV_READ = frozenset({'getactorvalue', 'getav'})
 
 
-@command(*sorted(_ACTOR_VALUE_FUNCTIONS))
+@command(*sorted(ACTOR_VALUE_FUNCTIONS))
 def actor_value(ctx, call) -> str:
     """Get/Set/Mod ActorValue -- the AV NAME is a quoted string in Papyrus.
 
@@ -1240,7 +1243,7 @@ def actor_value(ctx, call) -> str:
         return None
     raw = call.source(0).rstrip(',').strip('"\'')
     if raw.lower() in TES4_ATTRIBUTES:
-        if call.name in _ACTOR_VALUE_READ_FUNCTIONS:
+        if call.name in ACTOR_VALUE_READ_FUNCTIONS:
             return ATTRIBUTE_STUB_VALUE
         return (f';TES4 attribute {raw} has no Skyrim equivalent '
                 f'-- write dropped')
@@ -1261,7 +1264,9 @@ def actor_value(ctx, call) -> str:
                   if call.name in _AV_SET else None)
         args.append(scaled if scaled is not None else call.arg(1))
 
-    papyrus = _AV_PAPYRUS.get(call.name, 'GetActorValue')
+    papyrus = (_AV_PAPYRUS.get(call.name)
+               or getattr(COMMAND_ROWS.get(call.name), 'emit', '')
+               or 'GetActorValue')
     if call.name in _AV_PLAYER_ONLY:
         return f'Game.GetPlayer().{papyrus}({", ".join(args)})'
     ref = ctx._resolve_self_ref(call.ref, call.extends, actor_func=True)

@@ -13,9 +13,11 @@ later phase's state.
 from script_convert.blocks import (BLOCK_MAP, COMBAT_STATE_GUARDS,
                                    block_filter_guard)
 from script_convert.constants import (
-    COMMAND_ROWS, POLL_BLOCKS,
-    REF_SPECIFICITY, _ACTOR_ONLY_FUNCTIONS,
-    _OBJREF_SHARED_FUNCTIONS, TYPE_MAP, _safe_property_name, papyrus_script_name,
+    POLL_BLOCKS, REF_SPECIFICITY, TYPE_MAP, _safe_property_name,
+    papyrus_script_name
+)
+from script_convert.command_rows import (
+    COMMAND_ROWS, ACTOR_ONLY_FUNCTIONS, OBJREF_SHARED_FUNCTIONS
 )
 from script_convert import symbols as _symbols
 from script_convert.emit import script as _script
@@ -118,14 +120,9 @@ def _promote_actor_locals(conv, tree) -> None:
             # `gate01.playgroup` is a command on a DOOR, and declaring
             # `Actor Property gate01` then cannot hold the door it is assigned.
             row = COMMAND_ROWS.get(called)
-            actorish = (called in _ACTOR_ONLY_FUNCTIONS
+            actorish = (called in ACTOR_ONLY_FUNCTIONS
                         or (row is not None and row.subj in ('ACTOR', 'AV')))
-            # ...but a method ObjectReference ALSO declares proves nothing:
-            # 14 of `_ACTOR_ONLY_FUNCTIONS` are shared, and `mySelf.PlaceAtMe`
-            # on a spawner marker is the ObjectReference form.  Promoting on
-            # one declared `Actor Property mySelf`, which cannot hold the
-            # marker the script assigns to it.
-            if not actorish or called in _OBJREF_SHARED_FUNCTIONS:
+            if not actorish or called in OBJREF_SHARED_FUNCTIONS:
                 continue
             low = name.lower()
             if sc.var_types.get(low) == 'ObjectReference':
