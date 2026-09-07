@@ -463,6 +463,9 @@ def _decode_sse_vertex_block(raw, num_vertices, vdesc):
 #: Last version storing NiGeometryData's UV-set count as a ushort.
 _V4_2_2_0 = 0x04020200
 
+#: The one version Bethesda's BSGeometryDataFlags layout applies to.
+_V20_2_0_7 = 0x14020007
+
 
 def _install_morrowind_layouts(NifFormat):
     """Make NiGeometryData.num_uv_sets width-aware so Morrowind NIFs read.
@@ -499,18 +502,24 @@ def _num_uv_sets_type(base):
             return 2 if _is_legacy_uv(data) else 1
 
         def read(self, stream, data):
-            """Consume the count at this version's width."""
+            """Consume the count at this width; keep Havok material out of it."""
             wide = _is_legacy_uv(data)
             self._value, = struct.unpack(
                 data._byte_order + ('H' if wide else 'B'),
                 stream.read(2 if wide else 1))
+            if _is_bs_geom_flags(data):
+                self._havok_material = self._value & 0xC0
+                self._value &= 1
 
         def write(self, stream, data):
-            """Emit the count at this version's width."""
+            """Emit the count at this width, restoring any Havok material."""
             wide = _is_legacy_uv(data)
+            value = int(self._value)
+            if _is_bs_geom_flags(data):
+                value = (value & 1) | getattr(self, '_havok_material', 0)
             stream.write(struct.pack(
                 data._byte_order + ('H' if wide else 'B'),
-                int(self._value) & (0xFFFF if wide else 0xFF)))
+                value & (0xFFFF if wide else 0xFF)))
 
     NumUVSets.__name__ = 'NumUVSets'
     return NumUVSets
@@ -520,6 +529,17 @@ def _is_legacy_uv(data) -> bool:
     """Whether this file stores the UV-set count as a ushort."""
     version = getattr(data, 'version', -1) if data is not None else -1
     return 0 < version <= _V4_2_2_0
+
+
+def _is_bs_geom_flags(data) -> bool:
+    """Whether this byte is BSGeometryDataFlags, whose bit 0 alone is the count.
+
+    See: docs/commentary/asset_convert_nif.md#bethesda-geometry-data-flags
+    """
+    if data is None:
+        return False
+    return (getattr(data, 'version', -1) == _V20_2_0_7
+            and getattr(data, 'user_version_2', 0) > 0)
 
 
 def _install_sse_layouts(NifFormat):

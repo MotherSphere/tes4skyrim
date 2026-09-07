@@ -28,7 +28,6 @@ sys.path.insert(0, r"{root}")
 from pathlib import Path
 from asset_convert.nif import nif_converter as nc
 src = Path(r"{src}")
-nc._pyffi_capture_init()
 out = {{}}
 import tempfile
 tmp = Path(tempfile.mkdtemp())
@@ -62,11 +61,11 @@ def main():
         print(f"no mesh tree at {src}", file=sys.stderr)
         return 2
 
-    from asset_convert.nif import nif_converter as nc
+    from asset_convert.nif.nif_batch import SKIP_PATHS
     nifs = []
     for p in src.rglob('*.nif'):
         rel = [x.lower() for x in p.relative_to(src).parts]
-        if any(s in rel for s in nc.SKIP_PATHS):
+        if any(s in rel for s in SKIP_PATHS):
             continue
         nifs.append(str(p.relative_to(src)).replace('\\', '/'))
     nifs.sort()

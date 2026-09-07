@@ -48,13 +48,14 @@ if os.environ.get('PYTHONHASHSEED') != '0':
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 from asset_convert.nif import nif_converter as nc
+from asset_convert.nif.nif_batch import SKIP_PATHS
 
 
 def collect(src_root: Path, count: int, seed: int, include_lod: bool):
     nifs = []
     for p in src_root.rglob('*.nif'):
         rel = [x.lower() for x in p.relative_to(src_root).parts]
-        if any(s in rel for s in nc.SKIP_PATHS):
+        if any(s in rel for s in SKIP_PATHS):
             continue
         if not include_lod and p.stem.lower().endswith('_far'):
             continue
@@ -107,7 +108,6 @@ def main():
     print(f"{len(sample)} NIFs, {total_kb:,.0f} KB "
           f"(plugin={a.plugin} seed={a.seed})")
 
-    nc._pyffi_capture_init()
     out_dir = Path(tempfile.mkdtemp(prefix='nifperf_'))
 
     # Warm-up: the first conversion pays one-time import/XML costs.

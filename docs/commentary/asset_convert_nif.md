@@ -1820,6 +1820,53 @@ Measured after the patch: **60/60** sampled Morrowind meshes read (5798/5798
 over the full corpus), 29,852 `NiTriShapeData` blocks structurally consistent,
 and Oblivion/Skyrim round-trips byte-identical to before.
 
+<a id="bethesda-geometry-data-flags"></a>
+
+## Bethesda 20.2: `num_uv_sets` is a FLAG BIT, not a 6-bit count
+
+**Code:** `_is_bs_geom_flags` / `_num_uv_sets_type` in
+`asset_convert/nif/pyffi_monkey_patch.py`.
+
+pyffi's bundled `nif.xml` sizes `UV Sets` as `(Num UV Sets & 63)`. For Bethesda
+20.2 files that mask is **wrong**, and `references/nifxml/nif.xml` says why: the
+u16 splits into two mutually exclusive types, selected by the `#BS202#`
+predicate (`version == 20.2.0.7 && BSVER > 0`, so FO3/FNV/Skyrim/SSE):
+
+| | `NiGeometryDataFlags` (non-Bethesda) | `BSGeometryDataFlags` (`#BS202#`) |
+|---|---|---|
+| bits 0-5 | Num UV Sets (0x003F) | **bit 0 only** = Has UV (bool) |
+| bits 6-11 | Havok Material | Havok Material |
+| bit 12 | NBT Method | Has Tangents |
+
+The authoritative length expression is
+`((Data Flags & 63) | (BS Data Flags & 1))` — one bit on the Bethesda side.
+pyffi masks the low byte with `& 63` unconditionally, so **Havok Material's low
+two bits (6 and 7) fold into the count**.
+
+That is silent whenever those bits are clear, which is why it went unnoticed:
+Havok material 5 gives `0x41 & 63 == 1`, the correct answer by accident. It
+breaks the moment a mesh uses a material whose low bits are set. Measured on
+FalloutNV: **Havok material 63** (`flags = 0x1FE1`) yields `0xE1 & 63 == 33`,
+so pyffi demanded 33 UV arrays where the file has 1 and read past EOF —
+`struct.error: unpack requires a buffer of 4 bytes` inside `NiTriStripsData`,
+surfacing as the `RD` skip code.
+
+Census over `export/FalloutNV.esm/meshes/clutter/hiddenvalley` (34 files):
+**25 fail, 9 read** — exactly the 25 whose Havok material has a low bit set.
+The 9 that read all carry `0x1141` (material 5). Tree-wide this was **32**
+unconvertible FalloutNV meshes: the 25 `nv_hv_graffiti*` plus 7 under
+`architecture/helios_one`.
+
+The fix masks the value to bit 0 on read for `#BS202#` files and stashes the
+Havok-material bits, restoring them on write so a round-trip is byte-identical.
+Non-Bethesda and Morrowind files keep pyffi's own semantics.
+
+**Note the correction:** the `_clamp_uv_sets` notes above (and
+[one UV set](#one-uv-set)) describe the low 6 bits as the UV count. That is
+true of `NiGeometryDataFlags` only. For every Bethesda file we read or write it
+is a single bool, so a count of 2 was never representable there in the first
+place; the clamp is still correct, its stated reason is not.
+
 <a id="morrowind-collision"></a>
 
 ## Morrowind collision: `RootCollisionNode` (2026-09-01)
