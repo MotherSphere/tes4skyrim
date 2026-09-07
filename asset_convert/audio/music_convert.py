@@ -32,8 +32,8 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
-from worker_budget import worker_count
+from core.subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
+from core.worker_budget import worker_count
 from output_layout import asset_root as _asset_root, plugin_out_root
 
 from asset_convert.audio.audio_converter import find_ffmpeg, find_xwmaencode

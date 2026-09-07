@@ -11,7 +11,7 @@ See: docs/commentary/asset_convert_collision.md#inverted-collision-winding-i-fal
 import math
 from collections import deque
 
-from collision_options import winding_fix_enabled
+from core.collision_options import winding_fix_enabled
 from asset_convert.collision.collision_falloutnv import is_fallout_source
 
 #: An authored normal must oppose the face normal by this much to count.

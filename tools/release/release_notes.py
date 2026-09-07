@@ -5,11 +5,16 @@ pipeline steps those commits require the user to re-run.
 Used by .github/workflows/tag-on-push.yml to annotate each auto-tag, but it
 runs standalone against any two revisions:
 
-    python tools/release/release_notes.py                     # last tag -> HEAD
-    python tools/release/release_notes.py --from 1.07 --to HEAD
-    python tools/release/release_notes.py --tag 1.08          # title the notes
+    python -m tools.release.release_notes                  # last tag -> HEAD
+    python -m tools.release.release_notes --from 1.07 --to HEAD
+    python -m tools.release.release_notes --tag 1.08       # title the notes
 
-The step mapping mirrors gui.py's STEPS table (the numbered checkboxes) and
+Run it with `-m` from the repo root: it imports version.STEP_KEYS, which a
+by-path invocation cannot resolve.
+
+STEP_ORDER is DERIVED from core/gui/config.py's STEPS and GLOBAL_ACTIONS (via
+version.STEP_KEYS), so the GUI's order is the only place it is written.
+The step mapping mirrors that table (the numbered checkboxes) and
 the phase_* functions in convert.py that each one invokes.  Anything that
 changes the plugin body (tes5_import) implies Import; mesh/creature/sound/LOD
 work implies its own asset step; and because Pack BSAs / Pack Mod Zip consume
@@ -40,6 +45,21 @@ vanilla-asset provider that mesh conversion, creature skeletons
 The asset_convert patterns allow any folder depth: the package is organised
 into subpackages, and a rule that matched only one level would drop a nested
 module through to the mesh catch-all and silently mis-scope its rebuild.
+
+Four tools under tools/ ARE global actions rather than debug utilities, and
+their rules precede the blanket tools/ rule (first match wins): a change to one
+alters the artefact the user installs, so it stales that action exactly as a
+stage module does.  convert_ui.py is joined by asset_convert/ui/'s ui_menus,
+ui_cursor and swf, which are the reskin's source; book_inam.py is deliberately
+excluded, being the per-plugin book-icon step.
+
+The core/ rules run narrow-to-broad.  worker_budget/subprocess_flags/
+process_job are process-pool plumbing every worker-based stage runs through, so
+they imply ALL; run_log and plugin_masters only report, producing no conversion
+output, so they stale nothing.  The bare `^core/` tail of the GUI rule is the
+safety net: a new module added there reads as a GUI change (which costs the
+user no re-runs) instead of falling through to the unmatched bucket, which asks
+for every step.
 """
 from __future__ import annotations
 
@@ -49,38 +69,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from version import STEP_KEYS
+
 SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent
 
-# Ordered exactly as the GUI lists them, so output reads as a run order.
-STEP_ORDER = [
-    "1. Export",
-    "2. Extract",
-    "3. Meshes",
-    "4. SpeedTrees",
-    "5. Creatures",
-    "6. Import",
-    "7. Sounds",
-    "8. Scripts",
-    "9. Pack BSAs",
-    "10. Pack Mod Zip",
-    # Global actions: not numbered, because they are not positions in the
-    # per-plugin pipeline. Each runs once for the whole load order and the GUI
-    # offers them as buttons rather than step checkboxes.
-    #
-    # Their ORDER here mirrors the GUI's button grid and version.STEP_KEYS --
-    # test_version_upgrade.py asserts all three agree -- so rearranging the
-    # buttons moves these too.
-    #
-    # LOD is here, not in the numbered list: tiles live on a grid every plugin
-    # in a worldspace shares, so it is generated once for the whole load order
-    # rather than once per plugin. Packing it follows immediately, the way
-    # "10. Pack Mod Zip" follows the per-plugin steps.
-    "Create LOD",
-    "Pack LOD",
-    "Convert to Master",
-    "Package Start Mod",
-    "Patch Skyrim",
-]
+#: Every step label in GUI run order. See: docs/commentary/version_upgrade_planning.md#one-table-not-four
+STEP_ORDER = [label for _key, label in STEP_KEYS]
 
 # Steps that only repackage what earlier steps produced.  Added automatically
 # whenever any producing step fires, never a reason to run on their own.
@@ -121,6 +115,7 @@ RULES: list[tuple[str, list[str]]] = [
     (r"^asset_convert/(?:\w+/)*skyrim_assets\.py",
                                                ["3. Meshes", "5. Creatures",
                                                 "Patch Skyrim"]),
+    (r"^asset_convert/ui/(?:ui_menus|ui_cursor|swf)\.py$", ["Convert UI"]),
     (r"^asset_convert/(?:\w+/)*",                       ["3. Meshes"]),
 
     # ── Native / shared code: conservatively wide ─────────────────────────
@@ -133,21 +128,18 @@ RULES: list[tuple[str, list[str]]] = [
     # convert.py is resolved per-phase-function instead (see PHASE_STEPS);
     # "ALL" here is only the fallback when the hunks can't be attributed.
     (r"^convert\.py$",            ["CONVERT"]),
-    (r"^gui\.py$|^gui\.pyw$",     ["GUI"]),
-    (r"^collision_options\.py$",  ["3. Meshes"]),
-    # Process-pool plumbing: every worker-based stage runs through these.
-    (r"^worker_budget\.py$|^subprocess_flags\.py$|^process_job\.py$", ["ALL"]),
+    (r"^core/collision_options\.py$",  ["3. Meshes"]),
+    (r"^core/(?:worker_budget|subprocess_flags|process_job)\.py$", ["ALL"]),
+    (r"^core/(?:run_log|plugin_masters)\.py$", []),
+    (r"^gui\.py$|^gui\.pyw$|^core/gui/|^core/", ["GUI"]),
 
     # ── Non-pipeline: never a reason to re-run anything ───────────────────
     (r"^docs/",                   []),
     (r"^tests/",                  []),
-    # ...except the three tools that ARE global actions, not debug utilities.
-    # Listed BEFORE the blanket tools/ rule (first match wins): a change to one
-    # of these changes the artefact the user installs, so it makes that action's
-    # output stale exactly as a stage module does.
     (r"^tools/release/create_lod\.py$",       ["Create LOD"]),
     (r"^tools/release/pack_lod\.py$",         ["Pack LOD"]),
     (r"^tools/release/package_start_mod\.py$", ["Package Start Mod"]),
+    (r"^tools/misc/convert_ui\.py$",          ["Convert UI"]),
     (r"^tools/",                  []),
     (r"^references/",             []),
     (r"^external/",               []),

@@ -36,7 +36,7 @@ from pathlib import Path
 
 import numpy as np
 
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 from asset_convert.speedtree.spt_parser import parse_spt, SptTree

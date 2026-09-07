@@ -78,9 +78,25 @@ def test_non_pipeline_paths_need_no_rerun(path):
     assert steps(path) == []
 
 
-def test_gui_change_is_reported_as_gui_only():
-    ordered, unmatched, gui_only = rn.steps_for_paths(["gui.py"])
+@pytest.mark.parametrize("path", [
+    "gui.py", "gui.pyw", "core/gui/app.py", "core/gui/panels.py",
+])
+def test_gui_change_is_reported_as_gui_only(path):
+    """The GUI lives in core/gui/; a change there re-runs no pipeline step."""
+    ordered, unmatched, gui_only = rn.steps_for_paths([path])
     assert not unmatched and ordered == [] and gui_only
+
+
+@pytest.mark.parametrize("path", ["core/run_log.py", "core/plugin_masters.py"])
+def test_core_reporting_plumbing_reruns_nothing(path):
+    """These only report -- they produce no conversion output to stale."""
+    assert steps(path) == []
+
+
+def test_new_core_module_is_never_unmatched():
+    """The bare `^core/` tail catches anything added there later."""
+    _ordered, unmatched, _gui = rn.steps_for_paths(["core/some_new_module.py"])
+    assert not unmatched
 
 
 # ── Packaging is a consequence, never a standalone reason ─────────────────
@@ -108,7 +124,7 @@ def test_starter_mod_repackages_itself_only(path):
 # ── Shared plumbing legitimately means everything ─────────────────────────
 
 @pytest.mark.parametrize("path", [
-    "process_job.py", "worker_budget.py", "subprocess_flags.py",
+    "core/process_job.py", "core/worker_budget.py", "core/subprocess_flags.py",
 ])
 def test_pool_plumbing_implies_all_steps(path):
     assert steps(path) == rn.STEP_ORDER

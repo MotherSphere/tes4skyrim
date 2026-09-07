@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import gui
+from core.gui import app as gui_app
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ def without_tkinterdnd2(monkeypatch):
     fails for a reason that has nothing to do with drag-and-drop.
     """
     monkeypatch.setitem(sys.modules, "tkinterdnd2", None)
-    monkeypatch.setattr(gui, "DND_AVAILABLE", False)
+    monkeypatch.setattr(gui_app, "DND_AVAILABLE", False)
 
 
 @pytest.fixture
@@ -67,7 +68,7 @@ def test_module_defines_no_global_tk():
 
 def test_root_is_created_without_the_optional_dnd_package(display, without_tkinterdnd2):
     """The whole point: no tkinterdnd2 still yields a real, usable window."""
-    root = gui._make_root()
+    root = gui_app.make_root()
     try:
         assert root.winfo_exists()
     finally:
@@ -76,9 +77,9 @@ def test_root_is_created_without_the_optional_dnd_package(display, without_tkint
 
 def test_missing_dnd_package_is_reported_not_fatal(display, without_tkinterdnd2):
     """Drag-and-drop turns itself off rather than taking the app down with it."""
-    root = gui._make_root()
+    root = gui_app.make_root()
     try:
-        assert gui.DND_AVAILABLE is False
+        assert gui_app.DND_AVAILABLE is False
     finally:
         root.destroy()
 
@@ -97,12 +98,12 @@ def test_a_broken_tkdnd_runtime_also_falls_back(display, monkeypatch):
             raise RuntimeError("can't find package tkdnd")
 
     monkeypatch.setattr(tkinterdnd2, "TkinterDnD", _Exploding, raising=False)
-    monkeypatch.setattr(gui, "DND_AVAILABLE", False)
+    monkeypatch.setattr(gui_app, "DND_AVAILABLE", False)
 
-    root = gui._make_root()
+    root = gui_app.make_root()
     try:
         assert root.winfo_exists()
-        assert gui.DND_AVAILABLE is False
+        assert gui_app.DND_AVAILABLE is False
     finally:
         root.destroy()
 
@@ -145,7 +146,7 @@ class TestCollisionWindingSetting:
 
     def test_auto_agrees_with_collision_options(self):
         """The GUI must not carry its own copy of the plugin list."""
-        from collision_options import default_for_plugin
+        from core.collision_options import default_for_plugin
         for plugin in ("Nehrim.esm", "Morrowind_ob.esp", "Oblivion.esm",
                        "Anything.esp"):
             assert (gui.winding_enabled_for(gui.WINDING_AUTO, plugin)
@@ -184,12 +185,13 @@ def test_only_a_real_switch_resets_the_step_selection(previous, name, expect):
 
 
 def test_commit_still_resets_on_switch():
-    """Guards the rule above against gui._commit being changed out from under it."""
+    """Guards the rule above: the switch test and the reset must both remain."""
     import inspect
-    src = inspect.getsource(gui)
-    commit = src[src.index("    def _commit(name: str):"):]
-    commit = commit[:commit.index(chr(10) + "    def ", 10)]
-    # The switch test and the reset must both still be there.
-    assert "_set_default()" in commit
+    from core.gui import widgets
+
+    src = inspect.getsource(widgets)
+    commit = src[src.index("def _commit(combo, name: str)"):]
+    commit = commit[:commit.index(chr(10) + "def ", 10)]
+    assert "set_default()" in commit
     assert ".strip().lower() != " in commit
-    assert "_plan_applied.discard(name)" in commit
+    assert "plan_applied.discard(name)" in commit

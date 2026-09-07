@@ -40,8 +40,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from subprocess_flags import configure_multiprocessing
-from process_job import create_pool_job
+from core.subprocess_flags import configure_multiprocessing
+from core.process_job import create_pool_job
 from output_layout import assets_for  # noqa: E402
 
 configure_multiprocessing()

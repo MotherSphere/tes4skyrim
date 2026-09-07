@@ -9,7 +9,7 @@ from script_convert.constants import (
     papyrus_script_name, PLACED_REF_SIGS, SCHOOL_ENCHANT_SHADER, TYPE_MAP,
     _ACTOR_ONLY_FUNCTIONS, _OBJREF_SHARED_FUNCTIONS, PLAYER_ALIAS_EXTENDS)
 from tes5_import.text_reader import parse_export_file
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 # ===========================================================================
 # Cross-reference graph builder

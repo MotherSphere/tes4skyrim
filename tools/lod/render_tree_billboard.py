@@ -20,8 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from subprocess_flags import configure_multiprocessing
-from worker_budget import worker_count
+from core.subprocess_flags import configure_multiprocessing
+from core.worker_budget import worker_count
 from asset_convert.game_paths import win_join
 from asset_convert.lod.tree_billboard import (BILLBOARD_DIR, BS, render_billboard,
                                           write_dds_rgba)

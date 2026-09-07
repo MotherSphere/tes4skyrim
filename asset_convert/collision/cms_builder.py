@@ -43,7 +43,7 @@ from pathlib import Path
 from asset_convert.collision.cms import decode_cms
 from asset_convert.collision.mopp import walk_mopp
 
-from subprocess_flags import POPEN_FLAGS, windows_cmd
+from core.subprocess_flags import POPEN_FLAGS, windows_cmd
 from asset_convert import paths
 
 _MOPP_BRIDGE = str(paths.MOPP_BRIDGE)

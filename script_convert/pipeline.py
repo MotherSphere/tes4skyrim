@@ -8,7 +8,7 @@ import re
 import struct
 
 from tes5_import.text_reader import parse_export_file
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 from script_convert.constants import (_sanitize_name, _safe_property_name, _record_type_to_papyrus, papyrus_script_name,
                                      KNOWN_COMMANDS, SERVICE_MENU_CALL,

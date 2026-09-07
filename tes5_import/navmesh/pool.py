@@ -17,7 +17,7 @@ import time
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 from .. import navm_verify, navm_worker
 from ..record_types.navm_falloutnv import precompute_fallout_navmeshes
 from ..text_reader import (get_float, get_formid, get_formid_index_offset,

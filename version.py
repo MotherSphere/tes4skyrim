@@ -75,6 +75,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from core.gui.config import GLOBAL_ACTIONS, STEPS
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 VERSION_FILE = SCRIPT_DIR / "VERSION"
@@ -660,68 +662,16 @@ def steps_table(timeout: int = 8, refresh: bool = False
 
 
 
-# The GUI's step keys, in run order, paired with the labels release_notes.py
-# emits.  Kept here rather than imported from gui.py so convert.py and the CLI
-# can use the same mapping without pulling in tkinter.
-STEP_KEYS: list[tuple[str, str]] = [
-    ("export",             "1. Export"),
-    ("extract",            "2. Extract"),
-    ("meshes",             "3. Meshes"),
-    ("speedtrees",         "4. SpeedTrees"),
-    ("creatures",          "5. Creatures"),
-    ("import_",            "6. Import"),
-    ("sounds",             "7. Sounds"),
-    ("scripts",            "8. Scripts"),
-    ("pack",               "9. Pack BSAs"),
-    ("pack_zip",           "10. Pack Mod Zip"),
-    # Global actions. Numberless on purpose: they are not positions in the
-    # per-plugin pipeline, they are one-off jobs covering the whole load order,
-    # and the GUI presents them as buttons rather than numbered checkboxes.
-    #
-    # ORDER MATTERS and is not free to tidy: it must match gui.GLOBAL_ACTIONS
-    # (which reads left-to-right, top-to-bottom off the sidebar buttons) and
-    # release_notes.STEP_ORDER, both asserted in test_version_upgrade.py. So
-    # rearranging the buttons moves these too.
-    ("create_lod",         "Create LOD"),
-    ("pack_lod",           "Pack LOD"),
-    ("make_master",        "Convert to Master"),
-    ("package_start_mod",  "Package Start Mod"),
-    ("modify_body_meshes", "Patch Skyrim"),
-]
+#: (key, label) per-plugin then global. See: docs/commentary/version_upgrade_planning.md#one-table-not-four
+STEP_KEYS: list[tuple[str, str]] = (
+    [(k, label) for k, _flag, label, *_rest in STEPS]
+    + [(k, label) for k, label, *_rest in GLOBAL_ACTIONS])
 
 _LABEL_TO_KEY = {label: key for key, label in STEP_KEYS}
 _LABEL_OF     = {key: label for key, label in STEP_KEYS}
 
-# Steps that belong to NO single plugin.
-#
-# "10. Patch Skyrim" takes no `-f`: it patches the vanilla Skyrim body records
-# for the user's whole load order and writes ONE shared `Slot44 Patch.esp` at
-# the root of output/, not into any per-plugin folder.  Running it once covers
-# every plugin, so it is recorded against a single plugin-independent key
-# instead of being stamped onto whichever plugins happened to be in that run.
-#
-# Recording it per-plugin made it re-tick forever: patching while converting
-# Oblivion left Nehrim with no record of it, so the planner saw a step that had
-# never run for Nehrim and selected it again -- for every plugin the user had
-# not happened to run it alongside, despite the one shared patch already
-# existing on disk.
-#
-# "Create LOD" is global for the same reason, and it is why LOD is no longer a
-# numbered per-plugin step at all. LOD tiles are files on a fixed grid shared by
-# every plugin that edits a worldspace, so baking them per plugin generates the
-# contested tiles once per sibling and then discards all but one. It reconciles
-# SEVERAL plugins against each other, so it belongs to none of them.
-#
-# "Pack LOD" inherits it: it zips that one shared folder into one shared
-# archive, so it is no more per-plugin than the bake it packages.
-#
-# "Convert to Master" is global for the same reason: the ESM flag has to be
-# applied to a whole dependency CHAIN at once (an ESM may not master a plain
-# ESP), so it belongs to no single plugin. It was absent from this set while
-# being listed in gui.GLOBAL_ACTIONS, which two tests already asserted against.
-GLOBAL_STEPS: frozenset[str] = frozenset({"modify_body_meshes", "create_lod",
-                                          "package_start_mod", "pack_lod",
-                                          "make_master"})
+#: One artifact for the load order. See: docs/commentary/version_upgrade_planning.md#steps-that-belong-to-no-plugin
+GLOBAL_STEPS: frozenset[str] = frozenset(k for k, *_rest in GLOBAL_ACTIONS)
 
 # The state-file key those steps are recorded under.  `_plugin_key(None)`
 # already collapses to "*", which is exactly "belongs to no plugin".

@@ -29,7 +29,7 @@ from asset_convert.lod.esm_scan import (FLAG_DISTANT_LOD, parse_esm,
 from asset_convert import paths
 
 sys.path.insert(0, str(paths.REPO))
-from subprocess_flags import run_streamed, windows_cmd
+from core.subprocess_flags import run_streamed, windows_cmd
 
 #: LODGen 3.0.36.0; 2.2.0.0 let one bad model kill the process. See run_lodgen().
 LODGEN_EXE = paths.LODGEN

@@ -9,8 +9,6 @@ apply_patches()
 
 from pyffi.formats.nif import NifFormat
 
-from collision_options import winding_fix_enabled
-
 from asset_convert.collision.cms_builder import build_cms_collision
 from asset_convert.collision.collision_falloutnv import fo3_layer, is_fallout_source
 from asset_convert.collision.collision_hulls import decompose_clutter_hull

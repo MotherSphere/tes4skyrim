@@ -72,7 +72,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 # --- Constants ----------------------------------------------------------------
 

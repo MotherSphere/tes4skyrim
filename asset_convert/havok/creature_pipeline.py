@@ -29,7 +29,7 @@ import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 from output_layout import assets_for
 
 _WORKERS = worker_count()

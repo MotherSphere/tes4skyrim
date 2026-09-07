@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 
-from subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
+from core.subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
 from asset_convert import paths
 
 HKXCMD = str(paths.HKXCMD)

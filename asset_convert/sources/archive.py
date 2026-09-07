@@ -25,7 +25,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
-from subprocess_flags import POPEN_FLAGS, windows_cmd
+from core.subprocess_flags import POPEN_FLAGS, windows_cmd
 from asset_convert import paths
 
 SCRIPT_DIR = paths.REPO

@@ -14,12 +14,8 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from tes4_export.export_morrowind import (MORROWIND_SOURCE_KEY,
-                                          SOURCE_MORROBLIVION, SOURCE_VANILLA,
-                                          morroblivion_exports)
-from tes4_export.morrowind_patch import (PATCH_NAME, PATCH_SOURCES,
-                                         build_patch, patch_exists,
-                                         source_paths)
+from tes4_export.export_morrowind import MORROWIND_SOURCE_KEY, SOURCE_MORROBLIVION, SOURCE_VANILLA, morroblivion_exports
+from tes4_export.morrowind_patch import PATCH_NAME, PATCH_SOURCES, build_patch, patch_exists, source_paths
 
 #: Source set -> its menu label, in menu order.
 _LABELS = (

@@ -20,8 +20,8 @@ from tkinter import filedialog, ttk
 
 from asset_convert.sources import archive as _archive
 from asset_convert.sources import mod_ingest, source_registry
+from core.plugin_masters import get_masters_from_binary
 from output_layout import record_dir
-from plugin_masters import get_masters_from_binary
 
 #: Plugins shown before the picker gets its own scrolling viewport.
 PICKER_MAX_ROWS = 8

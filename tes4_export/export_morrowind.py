@@ -19,7 +19,7 @@ import time
 from collections import Counter
 
 from output_layout import record_dir
-from plugin_masters import masters_from_export_header
+from core.plugin_masters import masters_from_export_header
 
 from .morrowind_cell import parse_cell
 from .morrowind_ids import (IdIndex, exterior_key, interior_key, land_key,

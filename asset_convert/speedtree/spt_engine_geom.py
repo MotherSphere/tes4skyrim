@@ -45,7 +45,7 @@ from pathlib import Path
 
 import numpy as np
 
-from subprocess_flags import POPEN_FLAGS, windows_cmd
+from core.subprocess_flags import POPEN_FLAGS, windows_cmd
 
 from asset_convert.speedtree.spt_generator import (TreeGeometry, WORLD_SCALE, COLLISION_MIN_RADIUS,
                             build_tree)

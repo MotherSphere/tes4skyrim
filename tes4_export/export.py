@@ -108,7 +108,7 @@ from .tes4_reader import (
 )
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 EXPORT_DISPATCH = {
     # Items / Objects

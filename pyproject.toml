@@ -12,13 +12,12 @@ requires-python = ">=3.14"
 dev = ["pytest", "ruff", "vulture"]
 
 [tool.setuptools]
-py-modules = ["collision_options", "convert", "gui", "output_layout",
-              "preflight", "process_job", "run_log", "subprocess_flags",
-              "version", "worker_budget"]
+py-modules = ["convert", "gui", "output_layout", "preflight",
+              "source_paths", "version"]
 
 [tool.setuptools.packages.find]
 include = ["tes4_export*", "tes5_import*", "asset_convert*",
-           "script_convert*", "tools*"]
+           "script_convert*", "tools*", "core*"]
 
 [tool.ruff]
 line-length = 120
@@ -47,7 +46,7 @@ ignore = [
 "tes5_import/record_types/common.py" = ["F401"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tes4_export", "tes5_import", "asset_convert", "run"]
+known-first-party = ["tes4_export", "tes5_import", "asset_convert", "core"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

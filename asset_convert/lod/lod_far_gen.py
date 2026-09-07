@@ -42,7 +42,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 from asset_convert.game_paths import win_join
 from asset_convert.nif.pyffi_monkey_patch import apply_patches

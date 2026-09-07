@@ -24,7 +24,7 @@ from asset_convert.sources.bsa_extract_morrowind import (
 from asset_convert.audio.audio_converter import (
     organize_voice_files,
 )
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 # Worker count used by all parallel operations in this module.
 _WORKER_COUNT = worker_count()

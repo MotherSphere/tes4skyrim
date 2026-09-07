@@ -25,7 +25,7 @@ import time
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 
-from plugin_masters import masters_from_export_header
+from core.plugin_masters import masters_from_export_header
 from .constants import IMPORT_DISPATCH, SKIP_TYPES, TYPE_MAP
 from .master_manifest import write_manifest
 from .overrides import (DELETED_FLAG as OVERRIDE_DELETED_FLAG,

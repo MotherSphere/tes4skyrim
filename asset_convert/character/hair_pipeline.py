@@ -50,7 +50,7 @@ from concurrent.futures import ProcessPoolExecutor
 from asset_convert.character.facegen_tri import TriFile, TriError, build_skyrim_hair_tri
 
 
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 from output_layout import assets_for
 
 _WORKERS = worker_count()

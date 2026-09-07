@@ -37,8 +37,8 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
-from worker_budget import worker_count
+from core.subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
+from core.worker_budget import worker_count
 
 
 # Shared-folder resolution lives in output_layout -- see asset_pipeline. An

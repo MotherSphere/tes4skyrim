@@ -71,8 +71,8 @@ SCRIPT_DIR = Path(__file__).parent.resolve()  # TESConversion root
 # point every package imports from.
 from output_layout import record_dir, plugin_out_root
 from tes4_export.tes3_reader import is_tes3
-from plugin_masters import get_masters_from_binary, topological_order
-import run_log
+from core.plugin_masters import get_masters_from_binary, topological_order
+import core.run_log as run_log
 
 
 # Papyrus batch compilation (see phase_compile).  An error line from
@@ -82,12 +82,11 @@ import run_log
 _PSC_ERR_RE = re.compile(r'^.*?([^\\/:]+\.psc):\d+:\d+:\s*(.*)$')
 _MAX_BATCH_RETRIES = 25
 
-# Suppress console windows when spawned from a console-less parent (pythonw/.pyw)
-from subprocess_flags import (POPEN_FLAGS as _POPEN_FLAGS,
+from core.subprocess_flags import (POPEN_FLAGS as _POPEN_FLAGS,
                               configure_multiprocessing, windows_cmd)
-from process_job import create_pool_job, describe_limit
-from worker_budget import worker_count
-from collision_options import (
+from core.process_job import create_pool_job, describe_limit
+from core.worker_budget import worker_count
+from core.collision_options import (
     WINDING_FIX_DEFAULT_PLUGINS,
     WINDING_FIX_ENV_VAR,
     default_for_plugin,

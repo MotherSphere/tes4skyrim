@@ -17,7 +17,7 @@ import sys
 
 import numpy as np
 
-from subprocess_flags import POPEN_FLAGS, windows_cmd
+from core.subprocess_flags import POPEN_FLAGS, windows_cmd
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 apply_patches()
 from asset_convert.havok.hkx_xml import HKXCMD, to_hkxcmd_path

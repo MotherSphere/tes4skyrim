@@ -31,7 +31,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from asset_convert.havok.hkx_xml import to_hkxcmd_path
-from subprocess_flags import windows_cmd
+from core.subprocess_flags import windows_cmd
 
 HKXCMD = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'external', 'hkxcmd',
                       'hkxcmd.exe')

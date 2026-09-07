@@ -40,7 +40,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from subprocess_flags import windows_cmd
+from core.subprocess_flags import windows_cmd
 
 from tes5_import.writer import (pack_record, pack_subrecord, pack_tes4_header,
                                 pack_top_group, pack_string_subrecord,

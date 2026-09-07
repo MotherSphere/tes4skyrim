@@ -23,7 +23,7 @@ def init_worker(formid_offset: int, cell_loc: dict, grid_loc: dict,
     """Pool initializer: replay parent-process module state into this child."""
     # Join the parent's containment job so this worker cannot outlive a parent
     # that dies without cleanup (crash / external kill). No-op off Windows.
-    from process_job import join_pool_job
+    from core.process_job import join_pool_job
     join_pool_job()
 
     set_formid_index_offset(formid_offset)

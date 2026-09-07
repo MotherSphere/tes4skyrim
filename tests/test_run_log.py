@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import run_log
+import core.run_log as run_log
 
 
 def _write(logs, index, text):

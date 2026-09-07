@@ -29,7 +29,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
-from subprocess_flags import POPEN_FLAGS
+from core.subprocess_flags import POPEN_FLAGS
 
 #: Windows SDK debugger; the x64 build, matching the game.
 _CDB = r'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'

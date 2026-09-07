@@ -414,9 +414,27 @@ Model.MODL=Creatures\\Deer\\Skeleton.NIF
 ```
 TESConversion/
   convert.py              # pipeline orchestrator (all stages)
-  gui.py / gui.pyw        # GUI front-end
+  gui.py / gui.pyw        # GUI launcher only -- the window is core/gui/
   conversion_config.json  # file list and settings
-  run_log.py              # rotating per-run logs (see Run logs)
+
+  core/                   # shared plumbing every stage imports
+    run_log.py            # rotating per-run logs (see Run logs)
+    worker_budget.py      # parallel worker count
+    subprocess_flags.py   # POPEN_FLAGS, windows_cmd, run_streamed
+    process_job.py        # Win32 Job Object containment
+    collision_options.py  # collision winding-repair toggle
+    plugin_masters.py     # master lists from binary headers
+
+    gui/                  # the converter window
+      app.py              # GuiApp carrier, palette, OS chrome, assembly order
+      config.py           # step tables, settings, scanners, run_process
+      widgets.py          # dialogs, scroller, tooltips, plugin combobox
+      menus.py            # the dark menu bar
+      selection.py        # sources, step checkboxes, Upgrade, drop zone
+      panels.py           # the five modal panels
+      runner.py           # log, run state, commands, stamps, execution
+      mods.py             # Mods menu
+      morrowind.py        # Settings > Morrowind source
 
   logs/                   # run-1/2/3.log, newest first (gitignored)
 

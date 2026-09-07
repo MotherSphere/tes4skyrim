@@ -19,8 +19,8 @@ from asset_convert.nif.nif_converter import convert_nif
 from asset_convert.nif.shaders import (DEFAULT_NORMAL_TEXTURE, GLOW_SLOT,
                                        SHADER_TYPE_GLOWMAP, SPEC_STRENGTH,
                                        master_texture_roots)
-from process_job import join_pool_job
-from worker_budget import worker_count
+from core.process_job import join_pool_job
+from core.worker_budget import worker_count
 
 #: Path segments (case-insensitive) whose NIFs batch conversion never touches.
 SKIP_PATHS = frozenset({

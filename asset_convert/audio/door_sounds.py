@@ -146,7 +146,7 @@ def scan_door_models(meshes_dir, model_keys):
         results = map(door_sounds_job, jobs)
     else:
         from concurrent.futures import ProcessPoolExecutor
-        from worker_budget import worker_count
+        from core.worker_budget import worker_count
         workers = min(worker_count(), len(jobs))
         ex = ProcessPoolExecutor(max_workers=workers)
         try:

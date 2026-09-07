@@ -48,7 +48,7 @@ def init_worker(base_model_by_fid: dict, door_fids: set, collision_cache: str,
     # Join the parent's containment job so this worker cannot outlive a parent
     # that dies without cleanup (crash / external kill). Cheap; no-op off
     # Windows, and skipped harmlessly on the inline single-job path below.
-    from process_job import join_pool_job
+    from core.process_job import join_pool_job
     join_pool_job()
 
     global _BASE_MODEL_BY_FID, _DOOR_FIDS, _GEOM_CACHE

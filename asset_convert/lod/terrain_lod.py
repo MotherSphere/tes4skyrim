@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-from worker_budget import worker_count
+from core.worker_budget import worker_count
 
 # Apply all PyFFI patches (time.clock fix, nif.xml condition fixes) before import
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
