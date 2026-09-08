@@ -23,6 +23,7 @@ from ..skyrim_overrides import (
     map_hair_color,
     resolve_creature_race,
 )
+from .race_falloutnv import fallout_race_edid
 from .common import (
     _prefix_path,
     get_float,
@@ -936,11 +937,8 @@ def reset_origin_faction() -> None:
 
 def _keywords_for_services(services: int) -> list[int]:
     """Return unique sorted Skyrim KYWD FormIDs for a TES4 services bitmask."""
-    kw_set = set()
-    for bit, kwds in _TES4_SERVICE_BIT_TO_SKYRIM_KEYWORDS.items():
-        if services & (1 << bit):
-            kw_set.update(kwds)
-    return sorted(kw_set)
+    return sorted({k for bit, kwds in _TES4_SERVICE_BIT_TO_SKYRIM_KEYWORDS.items()
+                   if services & (1 << bit) for k in kwds})
 
 
 def _vendor_bits(services: int) -> int:
@@ -1214,11 +1212,16 @@ def set_npc_voice_map(m: dict):
     _npc_voice_map = m or {}
 
 
+def _actor_race_edid(rec: dict) -> str:
+    """Oblivion race EditorID for an actor, FNV races included."""
+    fid = get_formid(rec, 'RNAM.Race')
+    return (fallout_race_edid(fid)
+            or TES4_RACE_FID_TO_EDID.get(fid & 0x00FFFFFF, 'Imperial'))
+
+
 def _resolve_npc_race(rec: dict):
     """Resolve TES4 race FormID to (race_edid, skyrim_race_fid, gender_str)."""
-    tes4_race_fid = get_formid(rec, 'RNAM.Race')
-    # Mask off load-order high byte — TES4_RACE_FID_TO_EDID uses base FormIDs
-    race_edid = TES4_RACE_FID_TO_EDID.get(tes4_race_fid & 0x00FFFFFF, 'Imperial')
+    race_edid = _actor_race_edid(rec)
     skyrim_race = RACE_MAP.get(race_edid, DEFAULT_RACE)
     tes4_flags = get_int(rec, 'ACBS.Flags')
     gender = 'Female' if (tes4_flags & 1) else 'Male'
@@ -1233,8 +1236,7 @@ def resolve_actor_voice(rec: dict, gender: str) -> int:
     races always fill both (DogRace: CrDogVoice x2), and a null slot makes the
     CK log "Could not find male/female voice type" per race.
     """
-    tes4_race_fid = get_formid(rec, 'RNAM.Race')
-    race_edid = TES4_RACE_FID_TO_EDID.get(tes4_race_fid & 0x00FFFFFF, 'Imperial')
+    race_edid = _actor_race_edid(rec)
     return (_npc_voice_map.get(get_formid(rec, 'FormID'))
             or VOICE_TYPE_MAP.get((race_edid, gender))
             or VOICE_TYPE_MAP.get(('Imperial', gender), 0))

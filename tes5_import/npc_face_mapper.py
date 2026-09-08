@@ -95,14 +95,14 @@ from .writer import pack_formid_subrecord, pack_subrecord
 # ---------------------------------------------------------------------------
 # Head texture set (FTST) — race + gender → TXST FormID (Skyrim.esm)
 _RACE_HEAD_TXST: dict[str, dict[str, int]] = {
-    'DarkElfRace':  {'Male': 0x000FDFE6, 'Female': 0x000FDFE7},
-    'BretonRace':   {'Male': 0x000FDFE8, 'Female': 0x000FDFE9},
-    'HighElfRace':  {'Male': 0x000FDFEA, 'Female': 0x000FDFEB},
-    'ImperialRace': {'Male': 0x000FDFEC, 'Female': 0x000FDFED},
-    'NordRace':     {'Male': 0x000FDFEE, 'Female': 0x000FDFEF},
-    'WoodElfRace':  {'Male': 0x000FDFF0, 'Female': 0x000FDFF1},
-    'OrcRace':      {'Male': 0x000FDFF2, 'Female': 0x000FDFF3},
-    'RedguardRace': {'Male': 0x000FDFF4, 'Female': 0x000FDFF5},
+    'DarkElf':     {'Male': 0x000FDFE6, 'Female': 0x000FDFE7},
+    'Breton':      {'Male': 0x000FDFE8, 'Female': 0x000FDFE9},
+    'HighElf':     {'Male': 0x000FDFEA, 'Female': 0x000FDFEB},
+    'Imperial':    {'Male': 0x000FDFEC, 'Female': 0x000FDFED},
+    'Nord':        {'Male': 0x000FDFEE, 'Female': 0x000FDFEF},
+    'WoodElf':     {'Male': 0x000FDFF0, 'Female': 0x000FDFF1},
+    'Orc':         {'Male': 0x000FDFF2, 'Female': 0x000FDFF3},
+    'Redguard':    {'Male': 0x000FDFF4, 'Female': 0x000FDFF5},
     # Argonian and Khajiit have distinct scales/fur — different TXST block.
     # Omitting them here causes the engine to fall back to the race default.
 }

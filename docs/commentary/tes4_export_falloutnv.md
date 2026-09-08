@@ -454,3 +454,110 @@ Oblivion's own children were affected the same way (ICMarketDistrict rendered
 Tamriel's island terrain under its own); they now get `0x0004`, and see
 [asset_convert_terrain.md](asset_convert_terrain.md#child-worldspaces-with-their-own-lod)
 for the LOD consequence.
+
+
+## <a id="humanoid-races"></a>Humanoid races map onto Skyrim playable races
+
+**Code:** `tes5_import/record_types/race_falloutnv.py`
+
+FNV ships 22 RACE records and shares no FormID with Oblivion, so
+`TES4_RACE_FID_TO_EDID` missed on every one and all 3,816 FalloutNV.esm NPCs
+resolved to a single race. Two paths produced that: FNV `Caucasian` is
+`0x00000019`, which Oblivion's table already spends on `VampireRace -> Imperial`,
+so 1,815 actors hit it by collision; the other 2,001 fell to `DEFAULT_RACE`
+(Nord). The collision is why FNV needs its own dict rather than extra entries
+in the Oblivion one.
+
+The miss also silently emptied every downstream race-keyed table: `FTST` was
+written 0 times, and `_resolve_eyes_hdpt` returned 2 head parts for all 3,816
+actors. Hair was unaffected -- `convert_HAIR` keys on the source FormID, so
+2,767 converted FNV hairstyles resolved correctly throughout.
+
+Measured population (`export/FalloutNV.esm/NPC_.txt`, 3,816 NPCs):
+
+| Race | NPCs | Race | NPCs |
+|---|---:|---|---:|
+| Caucasian | 1,815 | Ghoul | 55 |
+| AfricanAmerican | 509 | Old (4 races) | 145 |
+| Hispanic | 412 | OldAged (4 races) | 31 |
+| Asian | 274 | Child (4 races) | 37 |
+| Raider (4 races) | 538 | | |
+
+The four ethnicities plus their Raider variants are 3,548 of 3,816 (93%).
+
+Ethnicity choice is by skin tone, the only axis Skyrim races vary on that FNV
+also authors (`_SKIN_FALLBACK_RGB` in `npc_face_mapper.py`): Nord (234,162,145)
+is the lightest human race, Redguard (118,60,35) by far the darkest, Imperial
+(186,120,80) the mid-brown between. Skyrim has no Asian race; Breton
+(224,164,120) is chosen to keep four ethnicities on four distinct tints rather
+than collapsing Asian and Hispanic onto Imperial together (686 actors).
+
+Skyrim's human races differ in tint and head texture, not bone geometry, so this
+restores variety and tone, not facial structure. Only converted FNV head meshes
+would do that, and FNV `HDPT` does not decode yet (exported as
+`# Unknown record type: HDPT`, 61 records, sizes only).
+
+Raider/Old/OldAged resolve to their base ethnicity: they differ from it by
+texture paths and FaceGen coefficients, not skeleton or head structure, and the
+per-actor face already rides on `NPC_.FGGS` -> `NAM9`, which needs no race table
+(3,027 FNV actors already carried non-neutral morphs before this change).
+
+Ghoul is deliberately left unmapped -- it falls through to the Oblivion default.
+Aliasing it to a human race makes ghouls look human, which is worse than a wrong
+ethnicity; it needs `HeadGhoul.NIF` registered as a `head_fit.py` race pack.
+Child likewise: FNV children are a 0.8-scale variant with `DATA.Flags` bit 2 and
+child head/body meshes, and Skyrim's child races carry their own skeleton and
+armor-race handling.
+
+## <a id="humanoid-races"></a>Humanoid races map onto Skyrim playable races
+
+**Code:** 
+
+FNV ships 22 RACE records and shares no FormID with Oblivion, so
+ missed on every one and all 3,816 FalloutNV.esm NPCs
+resolved to a single race. Two paths produced that: FNV  is
+, which Oblivion's table already spends on ,
+so 1,815 actors hit it by collision; the other 2,001 fell to
+ (Nord). The collision is why FNV needs its own dict rather than
+extra entries in the Oblivion one.
+
+The miss also silently emptied every downstream race-keyed table:  was
+written 0 times, and  returned 2 head parts for all 3,816
+actors. Hair was unaffected --  keys on the source FormID, so
+2,767 converted FNV hairstyles resolved correctly throughout.
+
+Measured population (, 3,816 NPCs):
+
+| Race | NPCs | Race | NPCs |
+|---|---:|---|---:|
+| Caucasian | 1,815 | Ghoul | 55 |
+| AfricanAmerican | 509 | Old (4 races) | 145 |
+| Hispanic | 412 | OldAged (4 races) | 31 |
+| Asian | 274 | Child (4 races) | 37 |
+| Raider (4 races) | 538 | | |
+
+The four ethnicities plus their Raider variants are 3,548 of 3,816 (93%).
+
+Ethnicity choice is by skin tone, the only axis Skyrim races vary on that FNV
+also authors ( in ): Nord (234,162,145)
+is the lightest human race, Redguard (118,60,35) by far the darkest, Imperial
+(186,120,80) the mid-brown between. Skyrim has no Asian race; Breton
+(224,164,120) is chosen to keep four ethnicities on four distinct tints rather
+than collapsing Asian and Hispanic onto Imperial together (686 actors).
+
+Skyrim's human races differ in tint and head texture, not bone geometry, so
+this restores variety and tone, not facial structure. Only converted FNV head
+meshes would do that, and FNV  does not decode yet (exported as
+, 61 records, sizes only).
+
+Raider/Old/OldAged resolve to their base ethnicity: they differ from it by
+texture paths and FaceGen coefficients, not skeleton or head structure, and the
+per-actor face already rides on  -> , which needs no race
+table (3,027 FNV actors already carried non-neutral morphs before this change).
+
+Ghoul is deliberately left unmapped -- it falls through to the Oblivion default.
+Aliasing it to a human race makes ghouls look human, which is worse than a wrong
+ethnicity; it needs  registered as a  race pack.
+Child likewise: FNV children are a 0.8-scale variant with  bit 2 and
+child head/body meshes, and Skyrim's child races carry their own skeleton and
+armor-race handling.
