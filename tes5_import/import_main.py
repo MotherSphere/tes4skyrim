@@ -1040,39 +1040,8 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     load_objective_text()
     _step_done('objective text')
 
-    # --- Phase 0e2: Door open/close sounds authored in the MESH -----------
-    # Oblivion accepts a door's sound on the record OR as `sound:` text keys
-    # in the model; Skyrim only has the record, so the mesh-authored names get
-    # lifted onto SNAM/ANAM here (asset_convert/audio/door_sounds.py).
-    from .record_types.items import load_door_model_sounds
-    load_door_model_sounds(str(assets_for(export_dir) / 'meshes'), by_type)
-    _step_done('door mesh sounds')
-
-    from .record_types.sound import reset_sound_descriptors
-    reset_sound_descriptors()
-
-    from .record_types.sound import reset_soun_identity, load_soun_identity
-    reset_soun_identity()
-    if ctx and getattr(ctx, 'master_export', None):
-        load_soun_identity([r for r in ctx.master_export.values()
-                            if r.get('Signature') == 'SOUN'])
-    load_soun_identity(by_type.get('SOUN', []))
-
-    from .record_types.common import reset_emitted_regions
-    reset_emitted_regions()
-
-    from .record_types.world_falloutnv import register_fallout_source
-    register_fallout_source(by_type)
-
-    from .creature_races import (build_creature_races,
-                                 build_creature_death_piles)
-    build_creature_races(by_type, writer, export_dir,
-                         ctx.master_export if ctx else None)
-    n_piles = build_creature_death_piles(writer)
-    if n_piles:
-        print(f'  Creature death piles: {n_piles} ACTI '
-              f'(authored ectoplasm, replaces the vanilla ash pile)')
-    _step_done('creature races')
+    from .actor_setup import build_actor_indexes
+    build_actor_indexes(by_type, writer, export_dir, ctx, _step_done)
 
     # --- Phase 0g: plan AI packages -------------------------------------
     # TES4 PACK records convert to TES5 template instances (pack_converter).

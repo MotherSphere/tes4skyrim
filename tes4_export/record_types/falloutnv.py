@@ -171,6 +171,87 @@ def _emit_navi_deltas(lines: list, rec: Record):
     lines.append(f"NVMI.Count={index}")
 
 
+#: TES4-layout actor keys the FO3/FNV ACBS/DATA emitters below supersede.
+SUPERSEDED_ACTOR_KEYS = (
+    "ACBS.SpellPoints=", "ACBS.Fatigue=", "ACBS.BarterGold=", "ACBS.Level=",
+    "ACBS.CalcMin=", "ACBS.CalcMax=",
+    "DATA.Soul=", "DATA.Health=", "DATA.AttackDamage=",
+)
+
+#: FO3/FNV ACBS is 24 bytes and drops TES4's SpellPoints; TES4's is 16.
+_FALLOUT_ACBS_SIZE = 24
+
+#: Template Flags bit 6, 'Model/Animation' (wbDefinitionsCommon.pas:7715).
+TEMPLATE_USE_MODEL = 1 << 6
+
+#: FO3/FNV creature DATA attribute order; TES4's CREA DATA has none of these.
+_CREA_ATTRIBUTES = ("Strength", "Perception", "Endurance", "Charisma",
+                    "Intelligence", "Agility", "Luck")
+
+
+def _emit_actor_acbs(lines: list, rec: Record):
+    """FO3/FNV ACBS, whose fields sit two bytes earlier than TES4's.
+
+    TES4 spends bytes 4-5 on SpellPoints; FO3/FNV has no such field and puts
+    Fatigue there, shifting everything after it. Reading the TES4 layout
+    yields a plausible-looking record made entirely of neighbouring fields.
+    Template Flags at 22 has no TES4 counterpart at all.
+
+    See: docs/commentary/tes4_export_falloutnv.md#acbs-lost-its-spellpoints
+    """
+    acbs = get_subrecord(rec, "ACBS")
+    if not acbs or len(acbs.data) < _FALLOUT_ACBS_SIZE:
+        return
+    d = acbs.data
+    fatigue, gold, level, calc_min, calc_max, speed = struct.unpack_from(
+        "<6H", d, 4)
+    disposition, template_flags = struct.unpack_from("<hH", d, 20)
+    lines.append(f"ACBS.Fatigue={fatigue}")
+    lines.append(f"ACBS.BarterGold={gold}")
+    lines.append(f"ACBS.Level={level}")
+    lines.append(f"ACBS.CalcMin={calc_min}")
+    lines.append(f"ACBS.CalcMax={calc_max}")
+    lines.append(f"ACBS.SpeedMultiplier={speed}")
+    lines.append(f"ACBS.Karma={struct.unpack_from('<f', d, 16)[0]}")
+    lines.append(f"ACBS.Disposition={disposition}")
+    lines.append(f"ACBS.TemplateFlags={template_flags}")
+
+
+def _emit_actor_template(lines: list, rec: Record):
+    """TPLT, the actor this record inherits its unowned categories from.
+
+    See: docs/commentary/tes4_export_falloutnv.md#tplt-carries-the-whole-actor
+    """
+    tplt = get_subrecord(rec, "TPLT")
+    if tplt and len(tplt.data) >= 4:
+        fid = struct.unpack_from("<I", tplt.data, 0)[0]
+        lines.append(f"TPLT.Template={get_formid_str(fid)}")
+
+
+def _emit_crea_deltas(lines: list, rec: Record):
+    """FO3/FNV CREA: the shifted ACBS, its template, and a 17-byte DATA.
+
+    TES4's CREA DATA is 20 bytes with Soul and 8 attributes; FO3/FNV's is 17
+    with neither, so the shared exporter's >= 20 guard silently emits nothing.
+    """
+    _emit_actor_acbs(lines, rec)
+    _emit_actor_template(lines, rec)
+    data = get_subrecord(rec, "DATA")
+    if not data or len(data.data) < 17:
+        return
+    d = data.data
+    lines.append(f"DATA.Health={struct.unpack_from('<h', d, 4)[0]}")
+    lines.append(f"DATA.AttackDamage={struct.unpack_from('<h', d, 8)[0]}")
+    for i, name in enumerate(_CREA_ATTRIBUTES):
+        lines.append(f"DATA.{name}={d[10 + i]}")
+
+
+def _emit_npc_deltas(lines: list, rec: Record):
+    """FO3/FNV NPC_: the same shifted ACBS and template pointer as CREA."""
+    _emit_actor_acbs(lines, rec)
+    _emit_actor_template(lines, rec)
+
+
 #: Per-type delta emitters, consulted by format_record only for FO3/FNV sources.
 _DELTA_DISPATCH = {
     "CELL": _emit_cell_deltas,
@@ -179,6 +260,8 @@ _DELTA_DISPATCH = {
     "NAVM": _emit_navm_deltas,
     "NAVI": _emit_navi_deltas,
     "WRLD": _emit_wrld_deltas,
+    "CREA": _emit_crea_deltas,
+    "NPC_": _emit_npc_deltas,
 }
 
 #: Types carrying an OBND that TES4 has no field for; Skyrim reads it natively.

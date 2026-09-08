@@ -613,3 +613,60 @@ class TestACRE(unittest.TestCase):
 if __name__ == "__main__":
     # Allow running standalone
     unittest.main(verbosity=2)
+
+
+class TestFalloutActorAcbs:
+    """FO3/FNV ACBS drops TES4's SpellPoints, shifting every later field.
+
+    See docs/commentary/tes4_export_falloutnv.md#acbs-lost-its-spellpoints.
+    """
+
+    #: VSpawnTier3GiantRadscorpionMed (FalloutNV.esm CREA 00156782), verbatim.
+    RAW = bytes.fromhex('40020000320000000100000000006400000000002300df01')
+
+    def _rec(self, *subs):
+        """A CREA Record carrying the given (signature, bytes) subrecords."""
+        from tes4_export.tes4_reader import Record, Subrecord
+        return Record(type='CREA', data_size=0, flags=0, form_id=0x00156782,
+                      subrecords=[Subrecord(t, d) for t, d in subs])
+
+    def _lines(self, *subs):
+        """The FO3/FNV delta lines for that record, as a key -> value dict."""
+        from tes4_export.record_types.falloutnv import export_deltas
+        out = {}
+        for line in export_deltas(self._rec(*subs)):
+            key, _, value = line.partition('=')
+            out[key] = value
+        return out
+
+    def test_fields_read_two_bytes_earlier_than_tes4(self):
+        """Every field past byte 4 sits where TES4 puts the one after it."""
+        got = self._lines(('ACBS', self.RAW))
+        assert got['ACBS.Fatigue'] == '50'
+        assert got['ACBS.BarterGold'] == '0'
+        assert got['ACBS.Level'] == '1'
+        assert got['ACBS.CalcMin'] == '0'
+        assert got['ACBS.CalcMax'] == '0'
+        assert got['ACBS.SpeedMultiplier'] == '100'
+        assert got['ACBS.Disposition'] == '35'
+        assert 'ACBS.SpellPoints' not in got
+
+    def test_template_flags_and_tplt_survive(self):
+        """Bit 6 (Model/Animation) is what tells the importer to follow TPLT."""
+        got = self._lines(('ACBS', self.RAW),
+                          ('TPLT', (0x001567A0).to_bytes(4, 'little')))
+        assert int(got['ACBS.TemplateFlags']) == 0x01DF
+        assert int(got['ACBS.TemplateFlags']) & (1 << 6)
+        assert got['TPLT.Template'] == '001567A0'
+
+    def test_a_seventeen_byte_data_still_yields_stats(self):
+        """TES4's CREA DATA is 20 bytes, so the shared exporter emitted none."""
+        raw = bytes.fromhex('0032323232000000000005050505050505')
+        got = self._lines(('ACBS', self.RAW), ('DATA', raw))
+        assert got['DATA.Health'] == '50'
+        assert got['DATA.Luck'] == '5'
+        assert 'DATA.Soul' not in got
+
+    def test_a_tes4_sized_acbs_is_left_to_the_shared_exporter(self):
+        """A 16-byte ACBS is TES4's, so this emitter must not touch it."""
+        assert self._lines(('ACBS', self.RAW[:16])) == {}

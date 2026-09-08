@@ -12,7 +12,9 @@ See: docs/commentary/tes4_export_falloutnv.md#ltex-moved-its-texture-to-a-txst
 import struct
 
 from .record_types.common import escape_value
-from .record_types.falloutnv import FALLOUT_BASE_EXPORTERS, export_deltas
+from .record_types.falloutnv import (FALLOUT_BASE_EXPORTERS,
+                                     SUPERSEDED_ACTOR_KEYS,
+                                     export_deltas)
 from .tes4_reader import Record, get_string, get_subrecord, read_group_records
 
 #: TXST FormID -> its TX00 diffuse path, rebuilt per source file.
@@ -28,6 +30,13 @@ _LANDSCAPE_PREFIX = 'landscape' + chr(92)
 def base_exporter(sig: str):
     """The exporter for a FO3/FNV-only base-object type, or None."""
     return FALLOUT_BASE_EXPORTERS.get(sig)
+
+
+def superseded_keys(rec: Record) -> tuple:
+    """KEY= prefixes format_record drops, this game re-emitting them itself."""
+    if rec.type in ("CREA", "NPC_"):
+        return SUPERSEDED_ACTOR_KEYS
+    return ()
 
 
 def export_lines(rec: Record) -> list:

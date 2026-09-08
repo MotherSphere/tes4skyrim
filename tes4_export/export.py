@@ -181,8 +181,10 @@ def format_record(rec: Record, hdr_size: int = RECORD_HEADER_SIZE) -> str:
         export_fn = export_falloutnv.base_exporter(rec.type)
     if export_fn:
         type_lines = export_fn(rec)
-        # Remove duplicate EditorID if present
-        type_lines = [l for l in type_lines if not l.startswith("EditorID=")]
+        drop = ("EditorID=",)
+        if hdr_size != RECORD_HEADER_SIZE:
+            drop += export_falloutnv.superseded_keys(rec)
+        type_lines = [l for l in type_lines if not l.startswith(drop)]
         lines.extend(type_lines)
         if hdr_size != RECORD_HEADER_SIZE:
             lines.extend(export_falloutnv.export_lines(rec))

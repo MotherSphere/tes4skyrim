@@ -6783,3 +6783,66 @@ class TestWorldspaceParentFlags:
         from tes5_import.record_types.world import convert_WRLD
         out = convert_WRLD(self._rec(**{'DATA.Flags': '147'}))
         assert _find_subrecord(out, b'DATA')[0] == 0x0B
+
+
+class TestFalloutActorTemplates:
+    """FO3/FNV spawn stubs inherit their model through TPLT.
+
+    See docs/commentary/tes5_import_falloutnv_actors.md.
+    """
+
+    USE_MODEL = 1 << 6
+
+    def _chain(self):
+        """The radscorpion chain: stub -> LVLC -> CREA -> CREA with the model."""
+        stub = {'Signature': 'CREA', 'FormID': '00156782',
+                'EditorID': 'VSpawnTier3GiantRadscorpionMed',
+                'ACBS.TemplateFlags': str(0x01DF),
+                'TPLT.Template': '001567A0'}
+        lvlc = {'Signature': 'LVLC', 'FormID': '001567A0',
+                'EntryCount': '1', 'Entry[0].FormID': '0014F401'}
+        mid = {'Signature': 'CREA', 'FormID': '0014F401',
+               'ACBS.TemplateFlags': str(self.USE_MODEL),
+               'TPLT.Template': '0001CF9E'}
+        root = {'Signature': 'CREA', 'FormID': '0001CF9E',
+                'Model.MODL': r'Creatures\Radscorpion\Skeleton.nif',
+                'NIFZCount': '1', 'NIFZ[0]': 'Radscorpion.NIF'}
+        return stub, {'CREA': [stub, mid, root], 'LVLC': [lvlc]}
+
+    def test_stub_inherits_model_through_a_leveled_list(self):
+        """The chain passes through an LVLC, so entries resolve like a TPLT."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        stub, by_type = self._chain()
+        assert flatten_actor_templates(by_type) == 2
+        assert stub['Model.MODL'] == r'Creatures\Radscorpion\Skeleton.nif'
+        assert stub['NIFZ[0]'] == 'Radscorpion.NIF'
+
+    def test_an_owned_model_is_never_overwritten(self):
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        stub, by_type = self._chain()
+        stub['Model.MODL'] = r'Creatures\Own\Skeleton.nif'
+        flatten_actor_templates(by_type)
+        assert stub['Model.MODL'] == r'Creatures\Own\Skeleton.nif'
+
+    def test_model_flag_clear_means_no_inheritance(self):
+        """Only the categories Template Flags claims are copied down."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        stub, by_type = self._chain()
+        stub['ACBS.TemplateFlags'] = str(0x01DF & ~self.USE_MODEL)
+        flatten_actor_templates(by_type)
+        assert 'Model.MODL' not in stub
+
+    def test_a_template_cycle_terminates(self):
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        a = {'Signature': 'CREA', 'FormID': '00000003',
+             'ACBS.TemplateFlags': str(self.USE_MODEL),
+             'TPLT.Template': '00000004'}
+        b = {'Signature': 'CREA', 'FormID': '00000004',
+             'ACBS.TemplateFlags': str(self.USE_MODEL),
+             'TPLT.Template': '00000003'}
+        assert flatten_actor_templates({'CREA': [a, b]}) == 0
+        assert 'Model.MODL' not in a

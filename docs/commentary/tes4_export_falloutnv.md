@@ -592,3 +592,54 @@ link between an actor and its recordings.
 Gender is read off the folder prefix only for callers that still want it.
 Robot and creature voices (`robotvictor`, `creatureferalghoul`) match neither
 prefix and stay male, which is what they are.
+
+## <a id="acbs-lost-its-spellpoints"></a>ACBS lost its SpellPoints
+
+**Code:** `tes4_export/record_types/falloutnv.py` `_emit_actor_acbs`
+
+TES4's ACBS is 16 bytes and spends bytes 4-5 on `SpellPoints`. FO3/FNV's is 24
+and has no such field: `Fatigue` moves up into 4, and everything after it sits
+two bytes earlier than the shared exporter in `record_types/actors.py` expects.
+The tail — `SpeedMultiplier` (14), `Karma` (16), `Disposition` (20) and
+`TemplateFlags` (22) — has no TES4 counterpart at all.
+
+Nothing about the mis-read is obvious downstream, because every field lands on
+a real neighbour rather than on garbage. `FalloutNV.esm` CREA `00156782`
+(`VSpawnTier3GiantRadscorpionMed`, raw ACBS
+`40020000 3200 0000 0100 0000 0000 6400 00000000 2300 df01`) genuinely holds
+Fatigue=50, BarterGold=0, Level=1, CalcMin=0, CalcMax=100, TemplateFlags=0x01DF.
+Read as TES4 it exported SpellPoints=50, Fatigue=0, BarterGold=1, Level=0,
+CalcMin=100, CalcMax=0 — a plausible record made entirely of shifted fields.
+
+The size is the discriminator: 24 bytes means FO3/FNV, 16 means TES4. The
+delta emitter re-emits the six shared keys with the right offsets and
+`format_record` drops the TES4-layout lines (`SUPERSEDED_ACTOR_KEYS`) so the
+text parser never sees a duplicate key, which it would turn into a list.
+
+CREA `DATA` is mis-sized the same way: 17 bytes in FO3/FNV against TES4's 20,
+with no `Soul` and seven attributes instead of eight. The shared exporter
+guards on `len >= 20`, so it silently emitted no creature stats whatsoever.
+
+## <a id="tplt-carries-the-whole-actor"></a>TPLT carries the whole actor
+
+**Code:** `tes4_export/record_types/falloutnv.py` `_emit_actor_template`
+
+FO3/FNV actors inherit by category. A `TPLT` names another actor (CREA/LVLC for
+CREA, NPC_/LVLN for NPC_) and ACBS `TemplateFlags` says which categories come
+from it — bit 6 is Model/Animation. A spawn stub therefore carries no MODL, no
+race, and no stats: `00156782` is EDID/OBND/EAMT/NIFT/ACBS/TPLT/AIDT/PKID/DATA
+plus a few tail subrecords, and its mesh lives two links away
+(LVLC `001567A0` → CREA `0014F401` → `0001CF9E`, `Creatures\Radscorpion\Skeleton.nif`).
+
+TES4 has no equivalent, so the exporter never emitted TPLT and every such stub
+arrived modelless. `convert_CREA` then failed `get_creature_race` (no model, no
+generated race) and fell through to `resolve_creature_race(edid, full)`, whose
+keyword list matches the substring `giant` in `VSpawnTier3GiantRadscorpionMed`
+and returns Skyrim's `GiantRace` (0x000131F9). The radscorpion's own converted
+mesh and animations were built and sitting unused; only the pointer was missing.
+
+Skyrim expresses the same idea with the same subrecord, and the importer
+already builds that shape for Oblivion's placed-LVLC case in
+`tes5_import/leveled_actors.py` — an actor whose TPLT and Template Flags make
+it a pure indirection. An FNV stub is that record already, so carrying TPLT and
+`TemplateFlags` through is the whole conversion.
