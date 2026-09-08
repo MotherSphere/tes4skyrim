@@ -8,6 +8,9 @@
 - [Terrain/LOD/LAND-adjacent asset notes](#terrainlodland-adjacent-asset-notes)
 - [Lava surfaces — Oblivion realm water rendered as actual lava (2026-08-23)](#lava-surfaces-oblivion-realm-water)
 - [QEM decimation: the budget and its tuning constants](#qem-decimation-tuning)
+- [Object LOD: `_lod` in FO3/FNV, `_far` in Oblivion](#object-lod-suffix-differs-by-game)
+- [Prescreening the LODGen input](#prescreening-the-lodgen-input)
+- [`write_lodgen_input`: master modes and `only_cells`](#write-lodgen-input-master-modes)
 
 ## Grass (GRAS) conversion — record invariants + shader profile (2026-07-09)
 <a id="grass-conversion-record-invariants-shader"></a>
@@ -312,6 +315,112 @@ one of them.
 Both layouts are now scanned. The tile count is only a relative weight used to
 rank worldspaces, so every file under a worldspace's directory counts,
 `blocks` and `normals` subfolders included.
+
+
+## <a id="write-lodgen-input-master-modes"></a>`write_lodgen_input`: master modes and `only_cells`
+
+**Code:** `asset_convert/lod/lod_gen.py` (`write_lodgen_input`)
+
+`master_dirs` lists the converted output dirs of this plugin's MASTERS. An
+override plugin re-uses its masters' records wholesale, so every ref whose LOD
+mesh the master already ships is DROPPED: the master's own LOD run baked it,
+and re-baking would ship a duplicate copy of the master's entire object LOD to
+gain the handful of objects this plugin actually introduces.
+
+`replace_tiles` turns that off. When a plugin REPLACES whole tiles (it changed
+cells the master also covers), the tile it writes is the only one the engine
+loads for those cells, so it must contain the master's objects as well --
+otherwise every tree, rock and building in the rebuilt tiles disappears. The two
+modes are mutually exclusive: skip the master's objects only when shipping tiles
+ALONGSIDE the master's.
+
+`master_mesh_dirs` is where MESHES are sourced from, and unlike `master_dirs` it
+is set even when THIS plugin owns the worldspace. LODGen resolves every listed
+mesh under the one PathData root it is given, so a master-owned model must be
+copied into this tree to be listable at all.
+
+`only_cells` restricts the listed references to those that can land in a tile
+the run actually KEEPS. Without it an override plugin lists the master's entire
+worldspace, LODGen bakes every tile, and `_prune_unaffected_tiles` deletes
+almost all of them -- **ElsweyrAnequina fed 189,702 references to bake 997 tiles
+and kept 127; DLCBattlehornCastle kept 8.** The refs are still needed
+(`replace_tiles` means rebuilt tiles must carry the master's objects), just only
+within the surviving tiles' footprint.
+
+
+## <a id="prescreening-the-lodgen-input"></a>Prescreening the LODGen input
+
+**Code:** `asset_convert/lod/lod_gen.py` (`_prescreen_meshes`,
+`_screenable_mesh_paths`)
+
+The LODGen-input loop screens each unique base's meshes with a NIF header read,
+and those reads are latency-bound rather than CPU-bound: **11.5 s of Tamriel's
+13.5 s** in this function was `_io.open` alone, serialised one mesh at a time.
+Warming the safety cache concurrently first removes that.
+
+Only paths certain to be screened are prefetched -- the model plus its LOD
+tiers, derived with the same helpers the loop uses -- so the prefetch can only
+remove work, never change which meshes are judged safe.
+
+`master_meshes` must be among the searched roots. The loop STAGES meshes from
+there into the bake tree and screens immediately afterwards, so a warm-up that
+looked only at the destination cached "missing" for every mesh not yet staged.
+That is exactly how the shared LOD mod lost object LOD in all 18 worldspaces.
+
+The same reasoning applies to LOD-suffix resolution: see
+[Object LOD](#object-lod-suffix-differs-by-game) -- the bake tree starts EMPTY,
+so resolving a suffix against it alone always answers `_far`.
+
+
+## <a id="object-lod-suffix-differs-by-game"></a>Object LOD: `_lod` in FO3/FNV, `_far` in Oblivion
+
+**Code:** `asset_convert/lod/lod_gen.py` (`far_nif_path`, `LOD_SUFFIXES`)
+
+The two games name the per-object LOD mesh differently:
+
+| Game | full model | object LOD mesh |
+|---|---|---|
+| Oblivion / Nehrim | `foo.nif` | `foo_far.nif` |
+| Fallout 3 / New Vegas | `foo.nif` | `foo_lod.nif` |
+
+`far_nif_path` knew only the Oblivion form, so for FO3/FNV the existence test
+in `generate_missing_far_nifs` was never true and EVERY Visible-When-Distant
+object was treated as missing LOD and QEM-decimated from its full-res mesh.
+
+Measured on FalloutNV.esm's export against `STAT.txt`:
+
+| | count |
+|---|---|
+| STAT records with a model | 6,790 |
+| flagged Visible When Distant (`0x8000`) | 469 |
+| of those shipping a hand-authored `_lod.nif` | **469 (100%)** |
+| of those shipping a `_far.nif` | **0** |
+| non-VWD statics that also ship a `_lod.nif` | 85 |
+
+Scanning the game's own BSAs confirms the convention is not an export artifact:
+`Fallout - Meshes.bsa` holds 0 `_far.nif` against 343 `_lod.nif`;
+`Fallout3 - Meshes.bsa` holds 2 against 246 (the two are `washmonumentlod_far`
+and `ravecity_far`, one-offs rather than a convention).
+
+The loss was real, not merely wasted CPU: these are hand-authored silhouettes
+with merged geometry and dedicated low-res LOD textures. A decimation of the
+full-res mesh keeps the interior detail the artist deleted and keeps full-size
+diffuse/normal maps, so distant Vegas came out both uglier and heavier than the
+meshes already sitting on disk.
+
+`far_nif_path` now takes an optional `meshes_root` and returns the first of
+`_LOD_SUFFIXES` present there. The split matters:
+
+- **Resolution** sites pass the root, so an authored `_lod.nif` wins.
+- **Generation** sites pass nothing and still get `_far.nif`. We must never
+  write over Bethesda's authored mesh, and the `.nif.generated` marker that
+  protects hand-crafted files from `force_regen_generated` keys off that path.
+
+Oblivion cannot regress: it ships no `_lod.nif` at all, so the first candidate
+never matches and every lookup falls through to the same `_far.nif` as before.
+
+`_tier_path` takes the suffix it is stripping for the same reason -- assuming
+`_far` against a `_lod` path yields `foo_lodfar8.nif`.
 
 
 ## <a id="lod-suppliers-vs-contributors"></a>Overlay scoping must not scope ASSETS

@@ -117,13 +117,26 @@ def write_lod_settings(worldspace_edid: str, sw_x: int, sw_y: int,
 _win_join = win_join
 
 
-def far_nif_path(model_path: str) -> str:
-    """Return the expected _far.nif path for a given model path."""
+#: Object-LOD mesh suffixes in resolution order; `_far` is also what we generate.
+LOD_SUFFIXES = ('_lod', '_far')
+
+
+def far_nif_path(model_path: str, *search_roots) -> str:
+    """First suffix in `LOD_SUFFIXES` found in `search_roots`, else `_far.nif`.
+
+    Pass every tree the mesh could be SOURCED from, never the bake tree alone --
+    it starts empty. With no roots the answer is the `_far.nif` we generate into.
+    See: docs/commentary/asset_convert_terrain.md#object-lod-suffix-differs-by-game
+    """
     if not model_path:
         return ''
     base = model_path
     if base.lower().endswith('.nif'):
         base = base[:-4]
+    for suffix in LOD_SUFFIXES:
+        candidate = base + suffix + '.nif'
+        if any(_mesh_exists(candidate, r) for r in search_roots if r is not None):
+            return candidate
     return base + '_far.nif'
 
 
@@ -203,7 +216,8 @@ def _lod_mesh_is_safe(path: str, output_meshes_dir: Path) -> bool:
     return safe
 
 
-def _screenable_mesh_paths(refs, stats, cell_wrld, wrld_fid, keep_cells):
+def _screenable_mesh_paths(refs, stats, cell_wrld, wrld_fid, keep_cells,
+                           search_roots=()):
     """Unique mesh paths the LODGen-input loop will screen, for prefetching.
 
     Mirrors that loop's filters (worldspace, kept-tile footprint, LOD flags) so
@@ -241,7 +255,7 @@ def _screenable_mesh_paths(refs, stats, cell_wrld, wrld_fid, keep_cells):
             if stat.get(explicit):
                 out.append(stat[explicit])
         if not (stat.get('lod4') or stat.get('lod8') or stat.get('lod16')):
-            far = far_nif_path(model)
+            far = far_nif_path(model, *search_roots)
             out.append(far)
             out.append(str(_tier_path(Path(far), TIER8['suffix'])))
             out.append(str(_tier_path(Path(far), TIER16['suffix'])))
@@ -617,7 +631,7 @@ def _lod_meshes_for(stat: dict, output_meshes_dir: Path, master_meshes=None):
     if not model:
         return '', '', ''
 
-    far = far_nif_path(model)
+    far = far_nif_path(model, output_meshes_dir, *(master_meshes or ()))
     if not _import_master_mesh(far, output_meshes_dir, master_meshes):
         return '', '', ''
 
@@ -715,33 +729,20 @@ def write_lodgen_input(esm_path: Path, output_dir: Path,
     """
     Parse the converted ESM and write the LODGen input text file.
 
-    `master_dirs` lists the converted output dirs of this plugin's MASTERS.
-    An override plugin re-uses its masters' records wholesale, so every ref
-    whose LOD mesh the master already ships is DROPPED here: the master's own
-    LOD run already baked it, and re-baking it would have this plugin ship a
-    duplicate copy of the master's entire object LOD to gain the handful of
-    objects it actually introduces.
+    `master_dirs` lists the converted output dirs of this plugin's MASTERS; a
+    ref whose LOD mesh the master already ships is DROPPED here. `replace_tiles`
+    turns that off, because a tile this plugin REPLACES must carry the master's
+    objects too. The two are mutually exclusive.
 
-    `master_mesh_dirs` is where MESHES are sourced from, and unlike
-    `master_dirs` it is set even when THIS plugin owns the worldspace. LODGen
-    resolves every listed mesh under the one PathData root it is given, so a
-    master-owned model must be copied into this tree to be listable at all.
+    `master_mesh_dirs` is where MESHES are sourced from, set even when THIS
+    plugin owns the worldspace: LODGen resolves every listed mesh under one
+    PathData root, so a master-owned model must be copied in to be listable.
 
-    `replace_tiles` turns that off. When this plugin REPLACES whole tiles
-    (because it changed cells the master also covers), the tile it writes is
-    the only one the engine loads for those cells, so it must contain the
-    master's objects as well — otherwise every tree, rock and building in the
-    rebuilt tiles disappears. The two modes are mutually exclusive: skip the
-    master's objects only when shipping tiles ALONGSIDE the master's.
-
-    `only_cells` restricts the listed references to those that can land in a
-    tile this run actually KEEPS (see `_kept_tile_cells`). Without it an
-    override plugin lists the master's entire worldspace, LODGen bakes every
-    tile, and `_prune_unaffected_tiles` then deletes almost all of them —
-    ElsweyrAnequina fed 189,702 references to bake 997 tiles and kept 127;
-    DLCBattlehornCastle kept 8. The refs are still needed (replace_tiles means
-    the rebuilt tiles must carry the master's objects too), just only within
-    the surviving tiles' footprint.
+    `only_cells` restricts refs to those landing in a tile this run KEEPS (see
+    `_kept_tile_cells`). The mesh-safety cache is warmed concurrently first, and
+    must search `master_mesh_dirs` as well as this tree.
+    See: docs/commentary/asset_convert_terrain.md#write-lodgen-input-master-modes
+    See: docs/commentary/asset_convert_terrain.md#prescreening-the-lodgen-input
 
     Returns path to the written file, or None if no LOD refs found.
     """
@@ -805,21 +806,9 @@ def write_lodgen_input(esm_path: Path, output_dir: Path,
     # of per base is what made this loop appear to hang.
     base_cache = {}
 
-    # Warm the mesh-safety cache concurrently before the serial loop below.
-    # The loop screens each unique base's meshes with a header read, and those
-    # reads are latency-bound: 11.5 s of Tamriel's 13.5 s here was `_io.open`
-    # alone, serialised one mesh at a time. Only the paths that are certain to
-    # be screened are prefetched (the model plus its _far.nif tiers, derived
-    # with the same helpers the loop uses); anything else still resolves
-    # on demand, so this can only remove work, never change which meshes are
-    # judged safe.
-    #
-    # `master_meshes` has to come along: the loop STAGES from there into this
-    # tree and screens right afterwards, so a warm-up that only looked here
-    # would cache "missing" for every mesh not yet staged — which is precisely
-    # how the shared LOD mod lost object LOD in all 18 worldspaces.
-    _prescreen_meshes(_screenable_mesh_paths(refs, stats, cell_wrld, wrld_fid,
-                                             keep_cells),
+    _prescreen_meshes(_screenable_mesh_paths(
+                          refs, stats, cell_wrld, wrld_fid, keep_cells,
+                          (output_meshes_dir, *master_meshes)),
                       output_meshes_dir, source_meshes=master_meshes)
 
     for ref in refs:
@@ -866,7 +855,7 @@ def write_lodgen_input(esm_path: Path, output_dir: Path,
         if base_entry is _MISSING:
             base_entry = None
             skip = (not replace_tiles
-                    and any(_mesh_exists(far_nif_path(model), m)
+                    and any(_mesh_exists(far_nif_path(model, m), m)
                             for m in owned_meshes))
             if not skip:
                 lod4, lod8, lod16 = _lod_meshes_for(
@@ -1316,7 +1305,7 @@ def generate_lod(esm_path: Path, output_dir: Path,
         referenced_models = {
             m for m in referenced_models
             if _overrides_master_model(m, own_meshes_root, master_meshes)
-            or not any(_mesh_exists(far_nif_path(m), mm) for mm in master_meshes)
+            or not any(_mesh_exists(far_nif_path(m, mm), mm) for mm in master_meshes)
         }
         skipped = before - len(referenced_models)
         if skipped:
@@ -1353,7 +1342,7 @@ def generate_lod(esm_path: Path, output_dir: Path,
             # copies, so _drop_staged_master_meshes removes these afterwards
             # and the LOD mod ships only tiles, never meshes.
             for model in models:
-                _import_master_mesh(far_nif_path(model),
+                _import_master_mesh(far_nif_path(model, d / 'meshes'),
                                     output_dir / 'meshes', [d / 'meshes'])
         if made:
             print(f"  Derived {made} _far.nif mesh(es) into "

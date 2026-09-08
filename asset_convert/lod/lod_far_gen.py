@@ -795,11 +795,11 @@ def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
             rel = rel[len('meshes\\'):]
         src = win_join(output_meshes_dir, rel)
 
-        far_rel = far_nif_path(rel.replace('\\', '/')).replace('/', '\\')
+        far_rel = far_nif_path(rel.replace('\\', '/'),
+                               output_meshes_dir).replace('/', '\\')
         dst = win_join(output_meshes_dir, far_rel)
 
-        far_exists = dst.exists()
-        if far_exists:
+        if dst.exists():
             if not force_regen_generated:
                 continue  # skip — we have a _far.nif and aren't forcing regen
             if not _is_generated(dst):
@@ -841,10 +841,20 @@ def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
 
 
 def _tier_path(far_path: Path, suffix: str) -> Path:
-    """foo_far.nif → foo<suffix>.nif (e.g. foo_far8.nif)."""
+    """foo_far.nif → foo<suffix>.nif (e.g. foo_far8.nif).
+
+    Strips whichever LOD suffix the base carries: FO3/FNV resolve to `_lod`,
+    and assuming `_far` there would yield `foo_lodfar8.nif`.
+
+    The `lod_gen` import is function-local to break that module's cycle
+    with this one.
+    """
+    from asset_convert.lod.lod_gen import LOD_SUFFIXES
     stem = far_path.stem
-    if stem.endswith('_far'):
-        stem = stem[:-len('_far')]
+    for base_suffix in LOD_SUFFIXES:
+        if stem.endswith(base_suffix):
+            stem = stem[:-len(base_suffix)]
+            break
     return far_path.with_name(stem + suffix + '.nif')
 
 
