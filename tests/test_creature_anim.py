@@ -273,8 +273,8 @@ class TestPerPluginProjectNamespace:
             'morrowind_ob_chargen_and_transport_mod'
 
     def test_sibling_union_keeps_both_plugins_projects(self, tmp_path):
-        """The shared singlefile registers every plugin's block; same folder
-        name in two plugins = two distinct projects, no winner picked."""
+        """Same folder name in two plugins = two distinct projects, so each
+        plugin's fragment is built from its own tree alone."""
         import json
         from asset_convert.havok.creature_pipeline import manifests_under
         for plug, ns in (('Oblivion.esm', 'oblivion'),
@@ -299,6 +299,118 @@ class TestPerPluginProjectNamespace:
         idx = anim_file_index(m)
         n_files = len(dict.fromkeys(c['anim'] for c in m['clips']))
         assert all(0 <= i < n_files for i in idx.values())
+
+
+def _manifest(ns, folder, n_clips=2):
+    """A minimal project manifest the block emitters accept."""
+    return {'name': folder, 'namespace': ns,
+            'project_txt': f'tes4{ns}_{folder}project.txt',
+            'project_files': ['Behaviors\\x.hkx', 'Characters\\x.hkx',
+                              'Character Assets\\skeleton.HKX'],
+            'anim_dir': f'meshes\\actors\\tes4\\{ns}\\{folder}\\animations',
+            'clips': [{'name': f'Clip{i}', 'stem': f'clip{i}',
+                       'anim': f'Animations\\clip{i}.hkx', 'duration': 1.0,
+                       'looping': True, 'end_event': None, 'sounds': [],
+                       'feet': [], 'hits': []} for i in range(n_clips)],
+            'motions': {}, 'attacks': []}
+
+
+def _base_ad():
+    """A one-project vanilla animationdata file (wolf: one clip, motion)."""
+    return ['1', 'wolfproject.txt', '11', '1', '1', 'Behaviors\\w.hkx',
+            '1', 'Idle', '0', '1', '0', '0', '0', '', '7', '0', '1', '1',
+            '1 0 0 0', '1', '1 0 0 0 1', '']
+
+
+def _base_asd():
+    """The matching one-project animationsetdata file."""
+    return ['1', 'WolfProjectData\\WolfProject.txt', '1',
+            'FullCharacter.txt', 'V3', '0', '0', '0', '0']
+
+
+class TestAnimCacheFragments:
+    """The converter writes fragments; TESRuntime.dll composes them onto
+    the vanilla singlefiles at load. compose_* here is the DLL's reference:
+    the same rule (append, dedupe by name) the old build-time merge used.
+    See docs/reference/tes_runtime_fragments.md."""
+
+    def test_fragment_holds_only_own_projects(self, tmp_path):
+        """A plugin's fragment lists its own projects, sorted, and no
+        singlefile is written beside it."""
+        import json
+        from asset_convert.havok.animation_data import write_fragment
+        path = write_fragment([_manifest('oblivion', 'scamp'),
+                               _manifest('oblivion', 'dog')],
+                              str(tmp_path / 'meshes'), 'Oblivion.esm')
+        assert path == str(tmp_path / 'SKSE' / 'Plugins' / 'TESRuntime'
+                           / 'animation' / 'Oblivion.json')
+        frag = json.load(open(path, encoding='utf-8'))
+        assert frag['version'] == 1 and frag['source'] == 'Oblivion.esm'
+        assert [e['project'] for e in frag['animdata']] == \
+            ['tes4oblivion_dogproject.txt', 'tes4oblivion_scampproject.txt']
+        assert frag['animsetdata'][0]['entry'] == \
+            'tes4oblivion_dogprojectData\\tes4oblivion_dogproject.txt'
+        assert (tmp_path / 'meshes' / 'animationdata'
+                / 'tes4oblivion_dogproject.txt').is_file()
+        assert not (tmp_path / 'meshes'
+                    / 'animationdatasinglefile.txt').exists()
+
+    def test_compose_registers_every_fragment_once(self):
+        """Distinct project names all register; a duplicate is skipped and
+        every registered block is wrapped by its own line count."""
+        from asset_convert.havok.animation_data import (
+            compose_animationdata, compose_animationsetdata,
+            manifest_fragment)
+        base_ad = _base_ad()
+        frags = []
+        for ns in ('oblivion', 'morrowind_ob', 'oblivion'):
+            ad, asd = manifest_fragment(_manifest(ns, 'scamp'))
+            frags.append({'animdata': [ad], 'animsetdata': [asd]})
+        ad = compose_animationdata(base_ad, frags)
+        asd = compose_animationsetdata(_base_asd(), frags)
+        assert ad[0] == '3' and ad[1:4] == [
+            'wolfproject.txt', 'tes4oblivion_scampproject.txt',
+            'tes4morrowind_ob_scampproject.txt']
+        assert asd[0] == '3'
+        body = ad[4:]
+        assert body[:len(base_ad) - 2] == base_ad[2:]
+        n = int(body[len(base_ad) - 2])
+        assert n == len(frags[0]['animdata'][0]['clip_block'])
+
+    def test_compose_is_a_no_op_without_fragments(self):
+        """No fragments: the base comes back untouched."""
+        from asset_convert.havok.animation_data import compose_animationdata
+        assert compose_animationdata(_base_ad(), []) == _base_ad()
+
+    def test_cpp_composer_matches_python(self, tmp_path):
+        """tes_runtime/compose_test.exe (the DLL's composer, built by
+        tes_runtime/build.bat) must produce byte-identical files to the
+        Python reference over the same base and fragments."""
+        import subprocess
+        from asset_convert.havok.animation_data import (
+            compose_singlefiles, read_fragments, write_composed,
+            write_fragment)
+        exe = os.path.join(REPO, 'tes_runtime', 'compose_test.exe')
+        if not os.path.isfile(exe):
+            pytest.skip('tes_runtime/compose_test.exe not built')
+        base_dir = tmp_path / 'base'
+        base_dir.mkdir()
+        base = {'animationdatasinglefile.txt': _base_ad(),
+                'animationsetdatasinglefile.txt': _base_asd()}
+        write_composed(base, str(base_dir))
+        frag_dir = tmp_path / 'SKSE' / 'Plugins' / 'TESRuntime' / 'animation'
+        write_fragment([_manifest('oblivion', 'scamp', 3),
+                        _manifest('oblivion', 'dog')],
+                       str(tmp_path / 'meshes'), 'Oblivion.esm')
+        py_dir, cpp_dir = tmp_path / 'py', tmp_path / 'cpp'
+        py_dir.mkdir()
+        cpp_dir.mkdir()
+        write_composed(compose_singlefiles(base, read_fragments(str(frag_dir))),
+                       str(py_dir))
+        assert subprocess.run([exe, str(base_dir), str(frag_dir),
+                               str(cpp_dir)]).returncode == 0
+        for fn in base:
+            assert (py_dir / fn).read_bytes() == (cpp_dir / fn).read_bytes()
 
 
 # ---------------------------------------------------------------------------

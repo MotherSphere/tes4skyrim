@@ -473,6 +473,7 @@ TESConversion/
     spt_parser.py spt_generator.py spt_converter.py   # SpeedTree
 
   native/                 # C++ extensions (grow.cpp -> _navgrow_native)
+  tes_runtime/            # TESRuntime.dll, the shipped SKSE plugin (runtime animation cache)
   external/               # third-party binaries (see README license table)
   tests/ tools/ docs/ references/ temp/
   export/                 # cached exports (gitignored)
@@ -480,6 +481,7 @@ TESConversion/
     <Mod Label>/          #   an IMPORTED mod: one folder for the whole archive
   output/                 # WORKING area (gitignored)
     <plugin>/             #   one folder per converted plugin...
+      SKSE/Plugins/TESRuntime/animation/ # the plugin's animation cache fragment, loose (never in a BSA)
     <Mod Label>/          #   ...or one per imported mod (mirrors export/)
     AutoConvertLOD/       #   the baked LOD mod (tools/release/create_lod.py)
     Finished Mods/        #   everything the user INSTALLS -- see below

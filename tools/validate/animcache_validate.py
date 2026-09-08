@@ -1,9 +1,17 @@
-"""Validate merged animationdatasinglefile.txt / animationsetdatasinglefile.txt
+"""Validate animationdatasinglefile.txt / animationsetdatasinglefile.txt
 against the EXACT grammar from ck-cmd (references/ck-cmd-master/include/bs/*.h,
 the Arcane University reference implementation of the Skyrim animation cache).
 
+The converter no longer writes the singlefiles: each plugin ships a fragment
+under SKSE/Plugins/TESRuntime/animation that TESRuntime.dll composes onto the
+vanilla base at load.  `--plugin` reproduces that composition offline (the same
+`compose_*` the DLL mirrors) and validates the RESULT, which is the file the
+engine will actually parse.
+
 Usage:
   python tools/validate/animcache_validate.py <meshes_dir> [--project NAME] [--dump]
+  python tools/validate/animcache_validate.py --plugin Oblivion.esm [--plugin Nehrim.esm ...]
+      [--base <dir with the vanilla singlefiles>] [--write <dir>]
 
 Checks:
   - full-file consumption (no trailing/missing lines)
@@ -16,6 +24,9 @@ Exit code 1 on any structural error.
 import argparse
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
 
 
 class Scanner:
@@ -171,61 +182,117 @@ def parse_animationsetdata(path):
     return names, blocks, errors
 
 
+def compose_for_plugins(plugins, base_dir=None, write_dir=None,
+                        out_root=None):
+    """Compose the vanilla base + each plugin's fragment; return the dir
+    holding the two composed files (write_dir or a scratch dir).
+
+    `out_root` overrides output/ as the tree fragments are read from, so a
+    build written elsewhere validates without touching the real one.
+    """
+    import tempfile
+    from asset_convert.havok.animation_data import (
+        FRAGMENT_DIR, VANILLA_SINGLEFILES, compose_singlefiles,
+        get_vanilla_singlefiles, read_fragments, write_composed)
+    from asset_convert import paths
+    if base_dir:
+        base = {fn: open(os.path.join(base_dir, fn), encoding='latin-1')
+                .read().splitlines() for fn in VANILLA_SINGLEFILES}
+    else:
+        from asset_convert.sources.skyrim_assets import find_skyrim_data
+        base = get_vanilla_singlefiles(
+            find_skyrim_data(),
+            os.path.join(str(paths.EXPORT), plugins[0], 'animdata_base'))
+    root = out_root or str(paths.OUTPUT)
+    fragments = []
+    for plug in plugins:
+        fragments += read_fragments(os.path.join(root, plug, FRAGMENT_DIR))
+    out_dir = write_dir or tempfile.mkdtemp(prefix='animcache_')
+    write_composed(compose_singlefiles(base, fragments), out_dir)
+    print(f'composed {len(fragments)} fragment(s) from {plugins} -> {out_dir}')
+    return out_dir
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('meshes_dir')
+    ap.add_argument('meshes_dir', nargs='?',
+                    help='dir holding the two singlefiles to validate')
+    ap.add_argument('--plugin', action='append',
+                    help='compose output/<plugin>/SKSE/Plugins/TESRuntime/'
+                         'animation/*.json onto the vanilla base and '
+                         'validate the result')
+    ap.add_argument('--base', help='dir with the vanilla singlefiles '
+                    '(default: the cached animdata_base)')
+    ap.add_argument('--write', help='keep the composed files here')
+    ap.add_argument('--out-root',
+                    help='read fragments from this tree instead of output/')
     ap.add_argument('--project', help='dump this project (substring match)')
     ap.add_argument('--dump', action='store_true')
     args = ap.parse_args()
 
-    ad_path = os.path.join(args.meshes_dir, 'animationdatasinglefile.txt')
-    asd_path = os.path.join(args.meshes_dir, 'animationsetdatasinglefile.txt')
+    meshes_dir = args.meshes_dir
+    if args.plugin:
+        meshes_dir = compose_for_plugins(args.plugin, args.base, args.write,
+                                         args.out_root)
+    if not meshes_dir:
+        ap.error('give a meshes dir or --plugin')
+    ad_path = os.path.join(meshes_dir, 'animationdatasinglefile.txt')
+    asd_path = os.path.join(meshes_dir, 'animationsetdatasinglefile.txt')
 
     names, projects, errors = parse_animationdata(ad_path)
     print(f'animationdata: {len(names)} projects, '
           f'{sum(1 for p in projects.values() if p["has_cache"])} with cache')
     snames, sblocks, serrors = parse_animationsetdata(asd_path)
     print(f'animationsetdata: {len(snames)} creature projects')
+    errors += pairing_errors(names, projects, snames)
+    for e in errors + serrors:
+        print('ERROR:', e)
+    if args.project:
+        dump_project(args.project, args.dump, projects, sblocks)
+    ok = not errors and not serrors
+    print('OK' if ok else 'STRUCTURAL ERRORS FOUND')
+    sys.exit(0 if ok else 1)
 
-    # pairing check (AnimationCache::build)
+
+def pairing_errors(names, projects, snames):
+    """AnimationCache::build's pairing rule: a project in setdata must carry
+    clip data, and every setdata entry needs its animationdata project."""
+    out = []
     set_lower = {n.lower() for n in snames}
     for n in names:
         stem = os.path.splitext(os.path.basename(n))[0]
         key = f'{stem}data\\{stem}.txt'
         if key in set_lower and not projects.get(n, {}).get('has_cache'):
-            errors.append(f'{n}: creature (in setdata) but hasAnimationCache=0')
+            out.append(f'{n}: creature (in setdata) but hasAnimationCache=0')
+    name_lower = {x.lower() for x in names}
     for n in snames:
         stem = n.split('\\')[0]
         if stem.lower().endswith('data'):
             stem = stem[:-4]
-        if f'{stem.lower()}.txt' not in {x.lower() for x in names}:
-            serrors.append(f'setdata {n}: no animationdata project '
-                           f'{stem}.txt')
+        if f'{stem.lower()}.txt' not in name_lower:
+            out.append(f'setdata {n}: no animationdata project {stem}.txt')
+    return out
 
-    for e in errors + serrors:
-        print('ERROR:', e)
 
-    if args.project:
-        for n, p in projects.items():
-            if args.project.lower() in n.lower():
-                print(f'--- {n}: files={p["files"]} cache={p["has_cache"]} '
-                      f'clips={len(p["clips"])}')
-                if args.dump:
-                    for c in p['clips']:
-                        print('   clip', c)
-        for n, sets in sblocks.items():
-            if args.project.lower() in n.lower():
-                for s in sets:
-                    print(f'--- setdata {n}/{s["file"]}: '
-                          f'swap={s["swap"]} attacks={len(s["attacks"])} '
-                          f'crc_files={s["ncrc"]}')
-                    if args.dump:
-                        for a in s['attacks']:
-                            print('   attack', a)
-
-    ok = not errors and not serrors
-    print('OK' if ok else 'STRUCTURAL ERRORS FOUND')
-    sys.exit(0 if ok else 1)
+def dump_project(needle, dump_clips, projects, sblocks):
+    """Print every project whose name contains `needle`."""
+    want = needle.lower()
+    for n, p in projects.items():
+        if want not in n.lower():
+            continue
+        print(f'--- {n}: files={p["files"]} cache={p["has_cache"]} '
+              f'clips={len(p["clips"])}')
+        for c in p['clips'] if dump_clips else []:
+            print('   clip', c)
+    for n, sets in sblocks.items():
+        if want not in n.lower():
+            continue
+        for s in sets:
+            print(f'--- setdata {n}/{s["file"]}: '
+                  f'swap={s["swap"]} attacks={len(s["attacks"])} '
+                  f'crc_files={s["ncrc"]}')
+            for a in s['attacks'] if dump_clips else []:
+                print('   attack', a)
 
 
 if __name__ == '__main__':

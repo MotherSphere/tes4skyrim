@@ -177,18 +177,18 @@ The whole chain is implemented and wired as pipeline **Phase 4b: Creatures**
 
 - `asset_convert/havok/creature_pipeline.py` — orchestrator: per creature folder →
   behavior project (`hkx_behavior.generate_creature_project`) + skeleton.nif/
-  body-NIF conversion (`nif_converter creature=True`) + animation singlefile
-  registration (`animation_data.write_singlefiles`) + the
-  `export/<plugin>/creature_projects.json` contract for the importer.
+  body-NIF conversion (`nif_converter creature=True`) + animation cache
+  registration (`animation_data.write_fragment`, composed at runtime by
+  `TESRuntime.dll` — see [runtime composition](#runtime-animation-cache-composition))
+  + the `export/<plugin>/creature_projects.json` contract for the importer.
   32/32 real Oblivion.esm creatures convert (boxtest/endgame excluded: test
   asset / KFM cinematic).
 - `asset_convert/havok/animation_data.py` — animationdata + boundanims +
-  animationsetdata emission and the **singlefile merge** (vanilla base
-  auto-extracted from the user's `Skyrim - Animations.bsa`, LE v104 zlib or
-  SSE v105 LZ4, cached in `export/animdata_base/`). Grammar + the
-  Bethesda hash (crc32 init=0/xorout=0 of lowercase; ≤4-char strings stored
-  as packed ASCII — `hkx` = 7891816; dirs hashed WITH `meshes\` prefix)
-  byte-validated against the vanilla files.
+  animationsetdata emission as a per-plugin **fragment**, plus the reference
+  composition (`compose_*`) the DLL mirrors. Grammar + the Bethesda hash
+  (crc32 init=0/xorout=0 of lowercase; ≤4-char strings stored as packed
+  ASCII — `hkx` = 7891816; dirs hashed WITH `meshes\` prefix) byte-validated
+  against the vanilla files.
 - `asset_convert/havok/hkx_ragdoll.py` — the ragdoll stage inside skeleton.hkx:
   Oblivion `bhkBlendCollisionObject` bodies + ragdoll/hinge constraints →
   ragdoll hkaSkeleton + 2 hkaSkeletonMappers + hkpPhysicsData +
@@ -745,32 +745,74 @@ cannot have been the ragdoll gate; the animationdata index corruption was
 present under every experiment of that period.
 
 <a id="animdata-plugin-collision"></a>
-### The SAME out-of-range symptom from PLUGIN COLLISION (2026-08-10)
+<a id="runtime-animation-cache-composition"></a>
+### Runtime animation-cache composition (TESRuntime.dll)
 
-`animdata_index_check` can report out-of-range indices even when
-`anim_file_index()` is perfectly correct, because the block and the character
-hkx are chosen by **different** mechanisms:
+**Code:** `tes_runtime/plugin/`, `asset_convert/havok/animation_data.py`
+(`write_fragment`, `compose_animationdata`, `compose_animationsetdata`).
+Fragment schema: [tes_runtime_fragments.md](../reference/tes_runtime_fragments.md).
 
-- Every plugin deploys its creatures LOOSE to the same
-  `meshes\actors\tes4\<folder>\` path, so exactly one
-  `tes4<folder>character.hkx` survives in Data — the one from whichever
-  plugin the user actually installs.
-- The clip block describing it comes from whichever plugin merged the shared
-  `animationdatasinglefile.txt` LAST (children write through to their
-  master's copy, `_shared_singlefile_dir`).
+`animationdatasinglefile.txt` and `animationsetdatasinglefile.txt` are ONE
+global file each, so a converter that adds projects used to rewrite the whole
+file. That single-owner design failed in three measured ways:
 
-The same creature converts to a different clip/file count per plugin, because
-each plugin's CREA records reference a different subset of animations.
-Morrowind_ob's clannfear is 27 clips / 21 files; Oblivion's is 23 / 17.
-Building Morrowind_ob last put its 21-file block on top of Oblivion's
-17-file hkx, so `Equip_H2H`, `Unequip_H2H`, the `MoveForwardRun*` gaits and
-`FullyRagdollPose` were all out of range and never bound. Measured on the
-2026-08-10 output: 6 projects mismatched (clannfear, daedroth, flameatronach,
-mehrunesdagon, scamp, slaughterfish); `animdata_index_check` flagged 13
-out-of-range indices across clannfear + flameatronach.
+- Two top-level plugins (Oblivion.esm and Nehrim.esm) each shipped a rival
+  copy; whichever the mod manager installed last de-registered the other's
+  creatures, which then froze in their idles (confirmed in game 2026-08-07).
+- A child plugin built before its master had nothing to write through to,
+  and a master installed before the child was converted kept a stale copy.
+- `animdata_index_check` reported out-of-range indices with a perfectly
+  correct `anim_file_index()`, because the block and the character hkx came
+  from different plugins: Morrowind_ob's clannfear is 27 clips / 21 files,
+  Oblivion's 23 / 17, so building Morrowind_ob last put a 21-file block on a
+  17-file hkx (6 projects mismatched, 13 out-of-range indices, 2026-08-10).
+- Nemesis and Pandora regenerate both files wholesale; a build-time patch
+  over Nemesis output broke the moment the user re-ran Nemesis. Pandora's own
+  README states custom projects are "Not yet implemented", so neither can
+  register a brand-new project.
 
-The 2026-08-10 fix picked a "winner" block per folder (`_block_outranks`).
-That was the wrong model and is **gone** — see the next section.
+The converter now writes **only its own** projects to one fragment per
+plugin (`SKSE\Plugins\TESRuntime\animation\<plugin>.json`), and `TESRuntime.dll`
+composes `vanilla base + every fragment in Data` in memory at the moment the
+engine parses each file. Load order and install order stop mattering, and a
+Nemesis/Pandora-generated loose singlefile becomes the base the fragments are
+appended to instead of a competitor for the path.
+
+The engine facts this rests on (GOG/AE 1.6.659, translated through the
+Address Library so the DLL never hardcodes an RVA):
+
+| Fact | Evidence |
+|---|---|
+| The two path strings live in one global each (`0x2fb8828`, `0x2fb8840`), read exactly once: `0x4f7347` in the AnimData parser (`0x4f7280`, id 32571) and `0x4fb43d` in the AnimSetData parser (`0x4fb3c0`, id 32624) | rip-relative xref scan |
+| Both parsers are called back to back from `0x501f40` (id 32719), each guarded by a null check on a cached global: a one-shot, once-per-process init | disassembly |
+| Each parser opens its file through the shared resource-open helper `0xc7e2d0` (id 69839): `rcx` = path, `rdx` = out `BSResource::Stream*`, `r8b`/`r9` = 0, returns 0 on success | disassembly of both parsers |
+| The stream is refcounted in one state word (count in bits 12+, `lock cmpxchg` ±0x1000; released with `vtable[0](this, 1)` at zero) and carries `totalSize` at `+8`. **That word is at `+0xc` on 1.6.659 and Skyrim VR but `+0x10` on 1.6.1170** — a memory stream that kept text at +0x10 had its data pointer AddRef'd, the parser read 14 bytes of garbage and every project (DefaultMale included) went unregistered: all actors froze. `DetectStreamLayout` now reads the offset off the parser's own `lock cmpxchg [rcx+disp8], edx` | wrapper ctor `0xcb0a10` (id 71015; `0xd3c8a0` on 1.6.1170, `0xcbc5a0` VR), parser teardown `0x4f7700`; live 1.6.1170 disassembly |
+| Skyrim VR 1.4.15 has the same parsers (`0x4ec580` / `0x4f0860`), open helper (`0xc89d60`), vtable slots and the 659 stream layout; its prologues differ, so `ids.h` carries VR signatures as `|` alternates and `VersionDb::Load` refuses AE-space ids on any pre-AE runtime. `SKSEPlugin_Query` is exported for SKSEVR / SKSE 2.0.x discovery. Unpacked with a third-party unpacker (`SkyrimVR.exe.unpacked.exe`): .text entropy 6.37 vs 8.00 packed | static disassembly of the unpacked VR exe |
+| The parser wraps it in a `BSResourceNiBinaryStream` (`0xcb0a10`), sets flag bits `0xe`, calls `vtable[1]` (DoOpen), then reads lines with `0xcb0e40` (id 71022; buffer 0x104, delimiter `\n`) which pulls ONE byte per `vtable[6]` (DoRead) call and stops when `read == 0`; teardown clears `0xe`, calls `vtable[2]` (DoClose), `0xcb0be0` (id 71016) and releases | disassembly |
+
+So the DLL patches the single `call` to the helper inside each parser (found
+by scanning the resolved parser body for the `E8` whose target is the resolved
+helper — self-validating on any build). Its replacement calls the ORIGINAL
+helper for the vanilla path, reads the base through the engine's own wrapper
+and line reader, appends every fragment with the same dedupe-by-name rule
+`compose_animationdata` uses, and hands back a memory-backed stream whose
+vtable implements exactly the slots measured above. When no fragment exists
+it returns the original stream untouched.
+
+**The composition is safe to do at runtime** because the old merge was
+already pure append, order-independent and dedupe-by-name; the Python
+`compose_*` is the DLL's spec and `test_cpp_composer_matches_python` runs
+`tes_runtime/compose_test.exe` (the DLL's own composer) against it byte for
+byte. Measured against the last build-time merge
+(256 projects across every output plugin, composed in the old sorted-union
+order): the animationdata file is byte-identical through line 174,278 of
+327,590, where the first divergence is a project whose manifest on disk had
+been regenerated since that merge (block 1,411 vs 1,474 lines) — a stale
+input, not a composition difference. The same run exposed an FNV clip
+(libertyprime `mtforward`) whose NiTextKey holds two `Sound:` keys joined by
+CRLF; emitted verbatim it split the trigger line on the wrong colon and
+desynced every project after it. `parse_kf_events` now splits multi-line
+keys.
 
 ### ★★★ THE ROOT CAUSE OF "SCAMPS NEVER CAST / CAN'T MELEE": plugin path collision (2026-08-23)
 
@@ -1408,10 +1450,11 @@ stack (simplest quadruped) with the draugr/troll stacks as bipedal references:
 - animationsetdata V3 block = attacks (event, "0", clip count, clip names)
   + CRC triples (dir/file/ext) using crc32(init=0,xorout=0) over lowercase,
   ≤4-char strings packed as ASCII, dir = `meshes\actors\tes4\<name>\animations`.
-- The merge base MUST be the user's own game version (SSE has 429 projects
-  vs LE's 327 — merging over the wrong base kills DLC creatures); extracted
-  from `Skyrim - Animations.bsa` via `bsa_extract.read_bsa_files`
-  (v103/104/105, embedded names, zlib/LZ4-frame) and cached.
+- The base MUST be the user's own game version (SSE has 429 projects vs
+  LE's 327 — composing over the wrong base kills DLC creatures). That is why
+  the DLL reads the base from the running game itself; the validators
+  extract it from `Skyrim - Animations.bsa` via `bsa_extract.read_bsa_files`
+  (v103/104/105, embedded names, zlib/LZ4-frame) and cache it.
 
 ### Step 7 — IDLE records / special idles
 Oblivion `idleanims/specialidle_*.kf` are chosen by IDLE records with conditions

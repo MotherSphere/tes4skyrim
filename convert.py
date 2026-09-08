@@ -676,20 +676,8 @@ def phase_creatures(file_name: str, tes5_data: str, config: dict,
     out_meshes = str(plugin_out_root(out_root, file_name, export_root)
                      / "meshes")
 
-    # The animation singlefiles are ONE shared file in Data. A child plugin
-    # registers its creatures in its MASTER's copy rather than shipping a
-    # rival copy of its own (see _shared_singlefile_dir).
-    from asset_convert.lod.terrain_lod import master_names
-    # A master's OUTPUT folder is its mod's folder for an imported mod, so
-    # resolve it the same way the export side does.
-    master_dirs = [plugin_out_root(out_root, m, export_root)
-                   for m in master_names(Path(export_subdir))
-                   if plugin_out_root(out_root, m, export_root).is_dir()]
-
     print(f"[{file_name}] Converting creatures (behavior projects + meshes)...")
-    res = convert_creatures(export_subdir, out_meshes,
-                            skyrim_data_path=tes5_data,
-                            master_dirs=master_dirs)
+    res = convert_creatures(export_subdir, out_meshes)
     print(f"[{file_name}] Creatures complete "
           f"({len(res['projects'])} projects, {len(res['errors'])} errors)")
     return not res['errors']

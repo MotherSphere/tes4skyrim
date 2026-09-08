@@ -25,7 +25,6 @@ import json
 import os
 import re
 import shutil
-import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
@@ -475,27 +474,6 @@ def _crea_model_dirs(export_dir: str) -> set:
     return out
 
 
-def _shared_singlefile_dir(out_meshes_dir: str, master_dirs) -> str:
-    """Where the two SHARED animation singlefiles belong, or None for 'here'.
-
-    Data holds exactly ONE animationdatasinglefile.txt. A child that ships its
-    own copy does not add a file — it races its master for the same path, and
-    whichever deploys last de-registers the other's creatures (they then freeze
-    in their idles; confirmed in game 2026-08-07). So a child writes through to
-    its master's copy, which already carries the union of every project.
-
-    Picks the FIRST master that has a meshes dir; masters are passed in load
-    order, so that is the base everything else overrides.
-    """
-    for d in (master_dirs or []):
-        cand = os.path.join(str(d), 'meshes')
-        if os.path.normpath(cand) == os.path.normpath(out_meshes_dir):
-            continue
-        if os.path.isdir(cand):
-            return cand
-    return None
-
-
 def _remove_unnamespaced_projects(meshes_dir: str, log=print) -> None:
     """Delete project trees from the pre-namespace layout
     (actors/tes4/<folder>/project_manifest.json directly under tes4).
@@ -541,23 +519,20 @@ def manifests_under(meshes_dir: str) -> dict:
 
 
 def convert_creatures(export_dir: str, out_meshes_dir: str,
-                      skyrim_data_path: str = None,
                       names: list = None, workers: int = None,
-                      master_dirs=None,
                       log=print) -> dict:
     """Convert every creature folder under <export_dir>/meshes/creatures.
 
-    Writes the actor projects + converted meshes, merges the animation
-    singlefiles (vanilla base from the user's Skyrim install, cached in
-    <export_dir>/animdata_base), and saves <export_dir>/creature_projects.json.
-
-    `master_dirs` lists this plugin's MASTERS' converted output dirs. When set,
-    the two shared singlefiles are written into the FIRST master's meshes dir
-    instead of this one's, and this plugin ships only the projects it owns.
+    Writes the actor projects + converted meshes, this plugin's animation
+    cache fragment (SKSE/Plugins/TESRuntime/animation/<plugin>.json) and
+    <export_dir>/creature_projects.json. The fragment is built from ALL of
+    this plugin's projects on disk, so a subset run (`names`) keeps every
+    other creature registered.
 
     Returns {'projects': {name: manifest}, 'errors': {name: str}}.
+    See: docs/reference/tes_runtime_fragments.md#the-runtime-composer
     """
-    from asset_convert.havok.animation_data import write_singlefiles
+    from asset_convert.havok.animation_data import write_fragment
 
     meshes_root = str(assets_for(export_dir) / 'meshes')
     if not os.path.isdir(meshes_root):
@@ -664,53 +639,12 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
         if m.get('namespace') == namespace:
             all_manifests.setdefault(m['name'], m)
 
-    # UNION across EVERY built plugin (masters and siblings): the game's Data
-    # folder holds exactly ONE animationdatasinglefile.txt, so the single
-    # deployed copy must register every plugin's creatures — deploying
-    # Morrowind_ob's file over Oblivion's de-registered all of Oblivion's
-    # projects and its creatures froze in their idles (confirmed in game
-    # 2026-08-07). A child writes through to its master's copy
-    # (_shared_singlefile_dir), but whichever plugin is built LAST rewrites
-    # that one shared file from the vanilla base and must put every sibling's
-    # projects back, so every plugin's project_manifest.json is read here.
-    #
-    # Projects are keyed on their project file name, which carries the owning
-    # plugin's namespace (hkx_behavior.project_layout), so two plugins can
-    # never contribute rival blocks for one name and no winner has to be
-    # picked: each block describes exactly the character hkx its own plugin
-    # ships at its own path.
-    union = {m['project_txt'].lower(): m for m in all_manifests.values()}
-    plugins_root = os.path.dirname(os.path.dirname(out_meshes_dir))
-    try:
-        siblings = sorted(os.listdir(plugins_root))
-    except OSError:
-        siblings = []
-    for plug in siblings:
-        sib_meshes = os.path.join(plugins_root, plug, 'meshes')
-        if os.path.normpath(sib_meshes) == os.path.normpath(out_meshes_dir):
-            continue
-        for key, cand in manifests_under(sib_meshes).items():
-            union.setdefault(key, cand)
-
-    if union:
-        cache_dir = os.path.join(export_dir, 'animdata_base')
-        manifests = [union[n] for n in sorted(union)]
-        own = [all_manifests[n] for n in sorted(all_manifests)]
-        # The two singlefiles are ONE shared file in the game's Data folder.
-        # A child plugin must not ship its own copy racing the master's for
-        # that path — it writes THROUGH to the master's instead. Only the
-        # per-project sources (written from `own`) land in this plugin's tree.
-        sf_dir = _shared_singlefile_dir(out_meshes_dir, master_dirs)
-        counts = write_singlefiles(manifests, out_meshes_dir,
-                                   skyrim_data_path, cache_dir,
-                                   singlefile_dir=sf_dir,
-                                   own_manifests=own)
-        where = ('the master\'s shared file' if sf_dir else 'this plugin')
-        log(f'  Registered {len(manifests)} projects in {where} '
-            f'({len(all_manifests)} own, '
-            f'{len(union) - len(all_manifests)} from sibling plugins; '
-            f'animationdatasinglefile: {counts["animationdatasinglefile.txt"]}'
-            f' total)')
+    if all_manifests:
+        plugin_out = os.path.dirname(os.path.normpath(out_meshes_dir))
+        path = write_fragment(list(all_manifests.values()), out_meshes_dir,
+                              os.path.basename(plugin_out), plugin_out)
+        log(f'  Registered {len(all_manifests)} projects in '
+            f'{os.path.relpath(path, plugin_out)}')
 
     # Contract for tes5_import (RACE/ARMA/ARMO generation).
     # .get defaults: an interrupted run can leave a manifest without the
@@ -771,14 +705,11 @@ if __name__ == '__main__':
         description='Convert Oblivion creatures to Skyrim actor projects')
     ap.add_argument('export_dir', help='export/<plugin> directory')
     ap.add_argument('out_meshes_dir', help='output meshes/ directory')
-    ap.add_argument('--skyrim-data', help='Skyrim Data folder (for the '
-                    'vanilla animation singlefile merge base)')
     ap.add_argument('--names', nargs='+', help='only these creature folders')
     ap.add_argument('--workers', type=int)
     args = ap.parse_args()
 
     out = convert_creatures(args.export_dir, args.out_meshes_dir,
-                            skyrim_data_path=args.skyrim_data,
                             names=args.names, workers=args.workers)
     print(f"{len(out['projects'])} projects, {len(out['errors'])} errors")
     for name, err in out['errors'].items():

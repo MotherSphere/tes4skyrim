@@ -286,11 +286,11 @@ class LiveBinary(Binary):
         import subprocess
         out = subprocess.run(
             ['powershell', '-NoProfile', '-Command',
-             "(Get-Process -Name SkyrimSE -ErrorAction SilentlyContinue |"
+             "(Get-Process -Name SkyrimSE,SkyrimVR -ErrorAction SilentlyContinue |"
              " Select-Object -First 1).Id"],
             capture_output=True, text=True).stdout.strip()
         if not out.isdigit():
-            raise SystemExit('SkyrimSE is not running (needed for --live)')
+            raise SystemExit('neither SkyrimSE nor SkyrimVR is running (needed for --live)')
         return int(out)
 
     def _module_range(self):
@@ -362,6 +362,31 @@ class LiveBinary(Binary):
     def off_to_rva(self, off: int):
         return off if 0 <= off < len(self.data) else None
 
+    def save_image(self, path: str):
+        """Writes the decrypted virtual image for `--image` (offset == RVA)."""
+        with open(path, 'wb') as f:
+            f.write(self.data)
+
+
+class ImageBinary(LiveBinary):
+    """`Binary` over a virtual image saved by `--save-image`: the PE headers
+    at offset 0 still describe the sections and the .pdata table, and every
+    offset equals its RVA. `base` is the header's ImageBase, so printed
+    addresses match a GOG-style static listing rather than one ASLR run."""
+
+    def __init__(self, path: str):
+        self.path = path
+        with open(path, 'rb') as f:
+            self.data = f.read()
+        self.pe = pefile.PE(data=self.data[:0x1000], fast_load=True)
+        self.base = self.pe.OPTIONAL_HEADER.ImageBase
+        self._sections = [(0, len(self.data), 0, '.image')]
+        self.md = Cs(CS_ARCH_X86, CS_MODE_64)
+        self.md.detail = True
+
+    def __del__(self):
+        pass
+
 
 _PRINTABLE = set(range(0x20, 0x7f)) | {9}
 
@@ -419,7 +444,8 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding='utf-8', errors='replace')
 
 
-def main():
+def _parse_args():
+    """The command line as an argparse namespace."""
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--exe', default=DEFAULT_EXE)
@@ -440,82 +466,106 @@ def main():
                          '.text is DRM-encrypted; also gives RVAs that match '
                          'the running build exactly)')
     ap.add_argument('--pid', type=int, default=0,
-                    help='with --live: target pid (default: find SkyrimSE)')
+                    help='with --live: target pid (default: find SkyrimSE or SkyrimVR)')
+    ap.add_argument('--save-image',
+                    help='with --live: write the decrypted virtual image here '
+                         'for later --image analysis with the game closed')
+    ap.add_argument('--image',
+                    help='analyse an image saved by --save-image instead of an exe')
     ap.add_argument('--show-targets', action='store_true',
                     help='list call/jmp targets found')
-    args = ap.parse_args()
+    return ap.parse_args()
 
+
+def _load(args) -> Binary:
+    """The Binary the flags select: live process, saved image, or exe."""
     if args.live:
         b = LiveBinary(args.pid)
         print(f'LIVE pid={b.pid}  imagebase={b.base:#x}  '
               f'image={len(b.data) / (1 << 20):.1f} MB')
-    else:
-        if not os.path.exists(args.exe):
-            sys.exit(f'not found: {args.exe}')
-        b = Binary(args.exe)
-        print(f'{os.path.basename(args.exe)}  imagebase={b.base:#x}')
+        if args.save_image:
+            b.save_image(args.save_image)
+            print(f'saved image -> {args.save_image}')
+        return b
+    if args.image:
+        b = ImageBinary(args.image)
+        print(f'{os.path.basename(args.image)} (saved image)  imagebase={b.base:#x}')
+        return b
+    if not os.path.exists(args.exe):
+        sys.exit(f'not found: {args.exe}')
+    b = Binary(args.exe)
+    print(f'{os.path.basename(args.exe)}  imagebase={b.base:#x}')
+    return b
 
+
+def _rva(b: Binary, text: str) -> int:
+    """`text` (hex) as an RVA; a full VA is rebased first."""
+    rva = int(text, 16)
+    return rva - b.base if rva > b.base else rva
+
+
+def _print_listing(b: Binary, insns, show_targets: bool):
+    """Prints a formatted listing plus its call/jmp targets."""
+    lines, tg = _fmt(b, insns, show_targets)
+    print('\n'.join(lines))
+    if tg:
+        print('  targets: ' + ', '.join(hex(t) for t in sorted(set(tg))))
+
+
+def _report_rtti(b: Binary, args):
+    """Prints the --find and --vtable reports."""
     if args.find:
         names = b.find_rtti_names(args.find)
         print(f'\n{len(names)} RTTI names matching {args.find!r}:')
         for nm, rva in names:
             print(f'  {rva:#010x}  {nm}')
+    if not args.vtable:
+        return
+    vts = b.vtables_for(args.vtable)
+    print(f'\nvtables for {args.vtable}: '
+          f'{", ".join(hex(v) for v in vts) or "none"}')
+    for vt in vts:
+        print(f'\n  vtable {vt:#x}:')
+        for slot, frva in b.vtable_slots(vt):
+            print(f'    [{slot:2d}] {frva:#010x}')
+    if args.slot is not None and vts:
+        slots = dict(b.vtable_slots(vts[0]))
+        if args.slot in slots:
+            rva = slots[args.slot]
+            print(f'\n  disasm slot {args.slot} @ {rva:#x}:')
+            _print_listing(b, b.disasm(rva, args.count), args.show_targets)
 
-    if args.vtable:
-        vts = b.vtables_for(args.vtable)
-        print(f'\nvtables for {args.vtable}: '
-              f'{", ".join(hex(v) for v in vts) or "none"}')
-        for vt in vts:
-            print(f'\n  vtable {vt:#x}:')
-            for slot, frva in b.vtable_slots(vt):
-                print(f'    [{slot:2d}] {frva:#010x}')
-        if args.slot is not None and vts:
-            slots = dict(b.vtable_slots(vts[0]))
-            if args.slot in slots:
-                rva = slots[args.slot]
-                print(f'\n  disasm slot {args.slot} @ {rva:#x}:')
-                lines, tg = _fmt(b, b.disasm(rva, args.count), args.show_targets)
-                print('\n'.join(lines))
-                if tg:
-                    print('  targets: ' + ', '.join(hex(t) for t in sorted(set(tg))))
 
+def _report_code(b: Binary, args):
+    """Prints the --strings, --func and --disasm reports."""
     if args.strings:
-        rva = int(args.strings, 16)
-        if rva > b.base:
-            rva -= b.base
+        rva = _rva(b, args.strings)
         print(f'\nstrings @ {rva:#x}:')
         for srva, text in b.strings_at(rva, args.count):
             print(f'  {srva:#010x}  {text!r}')
-
     if args.func:
-        rva = int(args.func, 16)
-        if rva > b.base:
-            rva -= b.base
+        rva = _rva(b, args.func)
         bounds = b.func_bounds(rva)
         if not bounds:
             print(f'\nno .pdata entry covers {rva:#x}')
         else:
             start, end = bounds
-            n = (end - start)
-            print(f'\nfunction {start:#x}..{end:#x} ({n} bytes) contains '
+            print(f'\nfunction {start:#x}..{end:#x} ({end - start} bytes) contains '
                   f'{rva:#x}:')
-            insns = [i for i in b.disasm(start, n)
+            insns = [i for i in b.disasm(start, end - start)
                      if i.address - b.base < end]
-            lines, tg = _fmt(b, insns, args.show_targets)
-            print('\n'.join(lines))
-            if tg:
-                print('  targets: ' + ', '.join(hex(t) for t in sorted(set(tg))))
-
+            _print_listing(b, insns, args.show_targets)
     if args.disasm:
-        rva = int(args.disasm, 16) if args.disasm.startswith('0x') \
-            else int(args.disasm, 16)
-        if rva > b.base:
-            rva -= b.base
+        rva = _rva(b, args.disasm)
         print(f'\ndisasm @ {rva:#x}:')
-        lines, tg = _fmt(b, b.disasm(rva, args.count), args.show_targets)
-        print('\n'.join(lines))
-        if tg:
-            print('  targets: ' + ', '.join(hex(t) for t in sorted(set(tg))))
+        _print_listing(b, b.disasm(rva, args.count), args.show_targets)
+
+
+def main():
+    args = _parse_args()
+    b = _load(args)
+    _report_rtti(b, args)
+    _report_code(b, args)
 
 
 if __name__ == '__main__':

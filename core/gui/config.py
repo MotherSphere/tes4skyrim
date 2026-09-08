@@ -144,6 +144,11 @@ GLOBAL_ACTIONS = [
     ("modify_body_meshes", "Patch Skyrim",
      "Build the ARMA slot-44 body patch for your Skyrim load order",
      "Patch Skyrim", 2),
+    ("package_runtime_dll", "Package SKSE Mod",
+     "Zip the built TESRuntime.dll (the SKSE plugin that registers every "
+     "converted plugin's creature animations at load) into "
+     "output/Finished Mods, ready to install like any converted plugin",
+     "Pack SKSE Mod", 2),
     ("convert_ui", "Convert UI",
      "Build the standalone Oblivion UI mod: Skyrim's message boxes and menu "
      "cursor reskinned with Oblivion's own art, read from your Oblivion "
