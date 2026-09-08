@@ -280,6 +280,7 @@ def _init_dispatch():
         convert_WEAP,
     )
     from .record_types.magic import convert_MGEF
+    from .record_types.message_falloutnv import convert_MESG
     from .record_types.items import (
         convert_ACTI,
         convert_ANIO,
@@ -313,6 +314,7 @@ def _init_dispatch():
 
     IMPORT_DISPATCH.update({sig: (convert_STAT if kind == 'STAT' else convert_ACTI)
                             for sig, kind in FALLOUT_BASE_TYPES.items()})
+    IMPORT_DISPATCH['MESG'] = convert_MESG
     IMPORT_DISPATCH.update({
         # Simple objects
         'STAT': convert_STAT,

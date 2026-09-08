@@ -13,6 +13,7 @@ walk), and dispatch falls through to the row exactly as if it had not existed.
 
 import re
 
+from script_convert.stage_latch import guard_stage_timer
 from script_convert import commands as _commands
 from script_convert.commands import Call
 from script_convert.constants import PLAYER_ALIAS_EXTENDS
@@ -249,7 +250,7 @@ def as_statement(conv, result: str) -> str:
     position that bare `0` is not a statement at all, so it is REPLACED by the
     note.  That is why the two positions cannot share a return value.
     """
-    result = conv._guard_stage_timer(result)
+    result = guard_stage_timer(conv, result)
     if not conv._line_comments:
         return result
     comments = '  '.join(conv._line_comments)

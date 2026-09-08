@@ -1008,7 +1008,7 @@ def menu_blocks(conv, tree, extends: str) -> list:
 
 
 def stage_latches(conv) -> list:
-    """Declare the stage-arrival latches `_guard_stage_timer` reads.
+    """Declare the stage-arrival latches `stage_latch.guard_stage_timer` reads.
 
     Initialised to -1 so the FIRST pass at a stage never satisfies
     `latch == N`: the guard then waits one pass, which is what lets that

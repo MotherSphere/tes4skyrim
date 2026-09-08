@@ -271,6 +271,48 @@ occurrences). parse_triangles normalizes an out-of-range edge to -1, because
 navm_split._components indexes comp[e] directly and only guards against -1;
 an unchecked value raises IndexError and kills the whole import.
 
+## Fallout-only base objects
+<a id="fallout-only-base-objects"></a>
+
+**Code:** `tes4_export/record_types/falloutnv.py`
+
+FO3/FNV carry base-object signatures Oblivion never defines, so the generic
+exporter falls through to its unknown-type path — which dumps each subrecord's
+NAME and SIZE but no VALUE. Downstream that is indistinguishable from the record
+not existing.
+
+Two reductions cover the model-shaped ones. `export_STATIC_BASE` (MSTT, SCOL,
+PWAT, IDLM, ASPC) keeps model plus bounds; without it the 10,000+ REFRs those
+base is null and the engine faults promoting them into their location.
+`export_ACTIVATOR_BASE` (TERM, NOTE, TACT) adds a display name and the script.
+
+### MESG — the record a converted `ShowMessage` binds to
+<a id="mesg-export"></a>
+
+`ShowMessage <msg>` is FNV's ordinary way to put text on screen (562 authored
+MESG records, named by scripts at 562 sites). Skyrim has the SAME record type,
+so this is a straight carry-over, not an approximation — the layout was checked
+against `wbRecord(MESG, ...)` in `references/xEdit/Core/wbDefinitionsTES5.pas`
+and against `references/Skyrim.esm/MESG.txt`:
+
+| Subrecord | Skyrim | Notes |
+|---|---|---|
+| `EDID` | required | |
+| `DESC` | **required** | the body text |
+| `FULL` | optional | title; absent on a plain notification |
+| `INAM` | **required** | vestigial icon, always `00000000` in vanilla |
+| `DNAM` | **required** | flags: bit0 Message Box, bit1 Auto Display |
+| `ITXT` | array | one per button (612 across FNV) |
+
+`TNAM` (display time) is FNV-only in practice and Skyrim defaults it, so it is
+not written. Vanilla writes `DNAM=1` on every help message.
+
+Before this, the property a converted `ShowMessage` declared had nothing to
+bind to, and the record-type table typed the EditorID through its
+`ObjectReference` default — so the call emitted
+`SomeMessage.Show(0.0, 0.0)` against an `ObjectReference Property`, which the
+compiler rejects with "undefined function `Show`" (6 FNV scripts).
+
 ## Marker base objects
 <a id="marker-base-objects"></a>
 

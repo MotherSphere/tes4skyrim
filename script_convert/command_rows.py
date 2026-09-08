@@ -124,9 +124,9 @@ COMMAND_ROWS = {
     #: Unlock takes no argument in TES4; Skyrim's Lock(false) is the unlock.
     'unlock': Cmd('{ref}.Lock(false)', OBJREF),
 
-    #: GetIsReference / GetIsRef: identity comparison against the argument.
-    'getisreference': Cmd('{ref} == {a0}', AV, defaults={0: 'None'}),
-    'getisref': Cmd('{ref} == {a0}', AV, defaults={0: 'None'}, flags='cmp_bool'),
+    #: Identity, not an actor read. See: docs/commentary/script_convert.md#getisreference-not-an-actor-test
+    'getisreference': Cmd('{ref} == {a0}', OBJREF, defaults={0: 'None'}),
+    'getisref': Cmd('{ref} == {a0}', OBJREF, defaults={0: 'None'}, flags='cmp_bool'),
 
     #: Places a fresh instance of the BASE, the copy callers want.
     'createfullactorcopy': Cmd(
@@ -330,6 +330,19 @@ COMMAND_ROWS = {
     #: IgnoreFriendlyHits is a SETTER only; Papyrus cannot read it back.
     'getignorefriendlyhits': Cmd(note='GetIgnoreFriendlyHits — Skyrim exposes only the setter', flags='bare_bool zero_arg'),
     'getisalerted': Cmd(note='{f}', flags='zero_arg'),
+    #: The CK wiki names IsAlarmed as GetAlarmed's own Papyrus version.
+    'getalarmed': Cmd('{ref}.IsAlarmed()', ACTOR,
+                      flags='actor_only zero_arg cmp_bool'),
+    'getdisease': Cmd(note='{f} has no Papyrus equivalent (read as 0)',
+                      flags='zero_arg'),
+    'getfriendhit': Cmd(note='{f} has no Papyrus equivalent (read as 0)',
+                        flags='zero_arg'),
+    'getwantblocking': Cmd(note='{f} has no Papyrus equivalent (read as 0)',
+                           flags='zero_arg'),
+    'ismoving': Cmd(note='{f} has no Papyrus equivalent (read as 0)',
+                    flags='zero_arg'),
+    'isturning': Cmd(note='{f} has no Papyrus equivalent (read as 0)',
+                     flags='zero_arg'),
     'getisplayerbirthsign': Cmd(note='{f}'),
     'getitems': Cmd(note='{f} has no Papyrus equivalent (read as 0)'),
     'getmousecontrol': Cmd(note='{f} has no Papyrus equivalent (read as 0)'),
@@ -535,7 +548,7 @@ COMMAND_ROWS = {
     #: --- Actor State ---
 
     #: See: docs/commentary/script_convert.md#kill-takes-only-the-killer
-    'kill': Cmd('Kill', MAP, max_args=1, flags='actor_only'),
+    'kill': Cmd('Kill', MAP, max_args=1, flags='actor_only actor_arg'),
     'killandresurrect': Cmd('Kill', MAP), # then Resurrect manually
     'resurrect': Cmd('Resurrect', MAP, flags='actor_only drop_args'),
     'getdead': Cmd('IsDead', MAP, flags='actor_only bare_bool cmp_bool zero_arg'),
@@ -855,9 +868,10 @@ COMMAND_ROWS = {
 
     #: Not promoted. See: docs/commentary/script_convert.md#commands-that-must-not-promote
     'getinsamecell': Cmd('({ref}.GetParentCell() == {a0}.GetParentCell())',
-                         defaults={0: 'Game.GetPlayer()'}, flags='cmp_bool'),
+                         OBJREF, defaults={0: 'Game.GetPlayer()'},
+                         flags='cmp_bool'),
     'getinsamecellas': Cmd('({ref}.GetParentCell() == {a0}.GetParentCell())',
-                           defaults={0: 'Game.GetPlayer()'}),
+                           OBJREF, defaults={0: 'Game.GetPlayer()'}),
 
     # --------------------------------------------------------------------------
     # No Papyrus equivalent
@@ -1215,10 +1229,7 @@ OBJREF_SHARED_FUNCTIONS = _flagged('objref_shared') | frozenset({
 })
 
 #: Comma-written receivers. See: docs/commentary/script_convert.md#commands-that-must-not-promote
-ZERO_ARG_REF_FUNCTIONS = _flagged('zero_arg') | frozenset({
-    'getalarmed', 'getdisease', 'getwantblocking', 'isactor',
-    'ismoving', 'isturning',
-})
+ZERO_ARG_REF_FUNCTIONS = _flagged('zero_arg') | frozenset({'isactor'})
 
 #: What `emit/expr.py` reads: every name either list above calls boolean.
 BOOL_VALUED_FUNCTIONS = BARE_BOOL_FUNCTIONS | COMPARISON_BOOL_FUNCTIONS

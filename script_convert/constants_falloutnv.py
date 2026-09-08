@@ -58,6 +58,16 @@ FALLOUT_COMMAND_ROWS = {
         flags='actor_only zero_arg'),
     'getdestructionstage': dict(emit='{ref}.GetCurrentDestructionStage()',
                                 subj='OBJREF', flags='zero_arg'),
+    'getcontainerinventorycount': dict(
+        emit='0', note='{f} - GetNumItems is SKSE-only, not vanilla (read as 0)',
+        flags='zero_arg'),
+    'hasbeeneaten': dict(
+        emit='0', note='{f} - Skyrim has no cannibalism flag (read as 0)',
+        flags='bare_bool cmp_bool zero_arg'),
+    #: FNV's abbreviation for GetIgnoreFriendlyHits; the shared row is a note.
+    'gifh': dict(
+        note='GetIgnoreFriendlyHits - Skyrim exposes only the setter',
+        flags='bare_bool zero_arg'),
     'getfurnituremarkerid': dict(
         emit='0', note='{f} - Skyrim has no furniture marker id (read as 0)',
         flags='zero_arg'),

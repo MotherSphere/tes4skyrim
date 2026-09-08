@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from script_convert.constants import (
     BASE_FORM_TYPES, EVENT_REF_PARAMS, MISMATCH_TYPES, OP_MAP,
-    PAPYRUS_BOOL_FUNCTIONS
+    PAPYRUS_BOOL_FUNCTIONS, SELF_NAMES
 )
 from script_convert.command_rows import PAPYRUS_VALUE_TYPES
 from script_convert.emit.commands import (
@@ -85,16 +85,38 @@ def is_ref_typed(conv, node: N.Expr) -> bool:
     if isinstance(node, N.Call):
         return node.name.lower() in _REF_RETURNING
     if isinstance(node, N.Member):
-        # `Owner.var` on another converted script.  BOTH routes are needed:
-        # `remote_type_of` resolves through the owner's declared `TES4_<script>`
-        # property type, but a quest named bare (`SE09.rebuiltGatekeeperRef`)
-        # has no such property yet -- `_is_ref_typed_access` reaches it via
-        # EditorID -> SCRI.  Missing that emitted `!= 0` on a reference, which
-        # does not compile.
-        dotted = f'{emit_bare(conv, node.owner)}.{node.name}'
-        return (conv.remote_type_of(dotted).lower() in REF_TYPES
-                or conv._is_ref_typed_access(dotted))
+        return _member_is_ref(conv, node)
     return False
+
+
+def _member_is_ref(conv, node: N.Member) -> bool:
+    """Does `Owner.name` evaluate to a reference?
+
+    A ref-RETURNING command written bare on a receiver parses as a Member, not
+    a Call.  Otherwise it is `Owner.var` on another converted script, where
+    BOTH lookups are needed.
+    See: docs/commentary/script_convert.md#a-bare-ref-command-parses-as-member
+    """
+    if node.name.lower() in _REF_RETURNING:
+        return True
+    dotted = f'{emit_bare(conv, node.owner)}.{node.name}'
+    return (conv.remote_type_of(dotted).lower() in REF_TYPES
+            or conv._is_ref_typed_access(dotted))
+
+
+def _is_ref_variable(conv, node: N.Expr) -> bool:
+    """A DECLARED ref variable, not a ref-returning read that may go inert.
+
+    See: docs/commentary/script_convert.md#ref-compared-to-one
+    """
+    if isinstance(node, N.Member):
+        return node.name.lower() in _REF_RETURNING
+    if isinstance(node, N.Call) and node.receiver is not None:
+        return node.name.lower() in _REF_RETURNING
+    if not isinstance(node, N.Ident):
+        return False
+    return (node.name.lower() not in _REF_RETURNING
+            and is_ref_typed(conv, node))
 
 
 def emit_bare(conv, node: N.Expr) -> str:
@@ -363,20 +385,30 @@ def _base_object(conv, ref, base, node, extends):
             emit(conv, base, extends))
 
 
+#: Every TES4 spelling of "this object"; `SELF_NAMES` omits `this`.
+_SELF_SPELLINGS = frozenset(SELF_NAMES) | {'this'}
+
+
 def _self_cast(conv, a, b, node, extends):
-    """`Self == <Actor-typed thing>` inside an ObjectReference script.
+    """`Self == <Actor- or script-typed thing>` in an ObjectReference script.
 
     `Self` is the script's own type, and Papyrus refuses to compare it with an
-    Actor.  TES4 had one reference type and compared them freely; the object
-    behind Self really is the reference being tested, so cast it rather than
-    dropping the comparison, which would change which branch runs.
+    Actor or with a DIFFERENT script class.  TES4 had one reference type and
+    compared them freely; the object behind each side really is the reference
+    being tested, so cast rather than dropping the comparison, which would
+    change which branch runs.
+    See: docs/commentary/script_convert.md#self-compared-to-a-script-typed-ref
     """
-    if not (isinstance(a, N.Ident) and a.name.lower() in ('self', 'this')):
+    if not (isinstance(a, N.Ident) and a.name.lower() in _SELF_SPELLINGS):
         return None
     base = b.owner if isinstance(b, N.Member) else b
     if not isinstance(base, N.Ident):
         return None
     otype = conv.type_of(base.name, locals_first=False)
+    if otype.startswith('TES4_') and not isinstance(b, N.Member) \
+            and conv._self_reference(extends) == 'Self':
+        return ('(Self as ObjectReference)',
+                f'({emit(conv, b, extends)} as ObjectReference)')
     if otype != 'Actor' and not (isinstance(b, N.Member)
                                  and otype.startswith('TES4_')):
         return None
@@ -469,23 +501,26 @@ def _inert_note(conv, mark: int, value: str):
 
 def _bool_literal_cmp(conv, left, right, op: str, extends: str,
                       in_chain: bool = False) -> str:
-    """`<expr> == 0/1` -- TES4's spelling of a bool test and its negation.
+    """`<expr> == <number>` -- TES4's bool test, its negation, and the rest.
 
-    Papyrus rejects Bool-vs-Int outright.  A zero-argument reference function
-    may name its SUBJECT as an argument here (`GetDead KimRef == 1` means
-    `KimRef.IsDead()`), which is true only in this position.  Inside an
-    `&&`/`||` chain an inert operand hands its note back so the term drops.
+    Only a 0/1 comparand carries the bool reading; every other number takes the
+    plain path, but ALL route here so an inert operand folds to `false`
+    whatever it was compared against.  A zero-argument reference function may
+    name its SUBJECT as an argument here, true only in this position.
     See: docs/commentary/script_convert.md#comparing-an-inert-operand
+    See: docs/commentary/script_convert.md#an-inert-read-must-never-fire
     """
     mark = len(conv._line_comments)
     value = (conv.emit_call(left, extends, promote_subject=True)
              if isinstance(left, N.Call) else emit(conv, left, extends))
     inner = str(value)
-    inert = _inert_note(conv, mark, inner) if in_chain else None
+    inert = _inert_note(conv, mark, inner)
     if inert:
+        if not in_chain:
+            return 'false'
         del conv._line_comments[mark:]
         return inert
-    if not _is_bool_valued(conv, left):
+    if right.text.strip() not in ('0', '1') or not _is_bool_valued(conv, left):
         return f'{inner} {op} {emit(conv, right, extends)}'
     if (op == '==') == (right.text.strip() == '1'):
         return inner
@@ -525,9 +560,13 @@ def _binop(conv, node: N.BinOp, extends: str) -> str:
             return f'{_operand(conv, left, node, extends)} {op} None'
         if _is_zero(left) and is_ref_typed(conv, right):
             return f'None {op} {_operand(conv, right, node, extends, right=True)}'
-        if isinstance(right, N.Literal) and right.text.strip() in ('0', '1'):
-            return _bool_literal_cmp(conv, left, right, op, extends,
-                                     in_chain=bool(_CHAIN_DEPTH[0]))
+        if isinstance(right, N.Literal) and not right.is_string \
+                and right.text.strip() == '1' and _is_ref_variable(conv, left):
+            null_op = '!=' if op == '==' else '=='
+            return f'{_operand(conv, left, node, extends)} {null_op} None'
+        equality = _numeric_cmp(conv, left, right, op, extends)
+        if equality is not None:
+            return equality
 
     # TES4 refs coerce to 0 when unset, so scripts test them with ORDERING
     # operators: `ref > 0` / `ref >= 1` means "is set", `ref <= 0` means "is
@@ -546,8 +585,35 @@ def _binop(conv, node: N.BinOp, extends: str) -> str:
 
     if op in ('&&', '||'):
         return _logical(conv, left, right, op, node, extends)
+    numeric = _numeric_cmp(conv, left, right, op, extends)
+    if numeric is not None:
+        return numeric
     return (f'{_operand(conv, left, node, extends)} {op} '
             f'{_operand(conv, right, node, extends, right=True)}')
+
+
+#: `a op b` reversed, so a literal-first comparison folds on the same path.
+_MIRROR_OP = {'>': '<', '<': '>', '>=': '<=', '<=': '>=', '==': '==',
+              '!=': '!='}
+
+
+def _numeric_cmp(conv, left, right, op: str, extends: str):
+    """A comparison against a numeric literal, or None.
+
+    The literal may be written on EITHER side, and the operator mirrors when it
+    is on the left, so an inert operand folds wherever the author put it.
+    See: docs/commentary/script_convert.md#an-inert-read-must-never-fire
+    """
+    if op not in _MIRROR_OP:
+        return None
+    chain = bool(_CHAIN_DEPTH[0])
+    if isinstance(right, N.Literal) and not right.is_string:
+        return _bool_literal_cmp(conv, left, right, op, extends,
+                                 in_chain=chain)
+    if isinstance(left, N.Literal) and not left.is_string:
+        return _bool_literal_cmp(conv, right, left, _MIRROR_OP[op], extends,
+                                 in_chain=chain)
+    return None
 
 
 def _logical(conv, left, right, op: str, node, extends: str) -> str:

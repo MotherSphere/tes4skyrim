@@ -26,9 +26,10 @@ from script_convert.command_rows import (
     COMMAND_ROWS, GMST_TO_ACTOR_VALUE, ACTOR_VALUE_FUNCTIONS,
     ACTOR_VALUE_READ_FUNCTIONS, param_types
 )
+from script_convert.commands_falloutnv import FALLOUT_HANDLERS
 
 #: TES4 command name (lowercase) -> handler `(ctx, call) -> str | None`.
-REGISTRY: dict = {}
+REGISTRY: dict = dict(FALLOUT_HANDLERS)
 
 
 def command(*names: str):

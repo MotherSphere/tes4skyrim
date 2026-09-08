@@ -74,6 +74,9 @@
 - [An unmapped AV command silently became a READ](#unmapped-av-command-became-a-read)
 - [A digit-leading member name swallowed its dot](#digit-leading-member-names)
 - [`Kill` takes only the killer](#kill-takes-only-the-killer)
+- [An inert read must never FIRE a guard](#an-inert-read-must-never-fire)
+- [A ref tested against `1` is still a null test](#ref-compared-to-one)
+- [A declaration can nest at ANY depth](#declarations-nest-at-any-depth)
 
 ## Papyrus / Script Conversion Notes
 <a id="papyrus-script-conversion-notes"></a>
@@ -231,10 +234,36 @@ term drops out of its `&&`/`||` chain exactly as a bare unknown operand does.
 Dropping a term from an `&&` widens the guard and from an `||` narrows it;
 inventing `0 == 0` instead decides it.
 
-Outside a chain the note stays inert (`0`): a lone `If <unknown> == 0` has no
-surviving term to carry the line, and handing the note back there would
-comment out the `If` itself — the paren-swallowing defect this whole section
-exists to avoid.
+### An inert read must never FIRE a guard
+<a id="an-inert-read-must-never-fire"></a>
+
+Outside a chain the note used to stay inert (`0`), on the reasoning that a lone
+`If <unknown> == 0` has no surviving term to carry the line, and handing the
+note back would comment out the `If` itself.
+
+That reasoning covers the LINE but not the LOGIC. `0` compared against the
+author's own literal is still a decided answer, and half the time it decides
+wrong in the dangerous direction:
+
+| Authored | Emitted | Effect |
+|---|---|---|
+| `if <unknown> == 1` | `If (0 == 1)` | always false — body dead, **safe** |
+| `if <unknown> == 0` | `If 0 == 0` | always TRUE — **guard gone** |
+
+Nehrim's `Nexusplanet01SCN` is the clear case: `if GetIgnoreFriendlyHits == 0`
+means "friendly hits are not ignored, so retaliate". `GetIgnoreFriendlyHits`
+has only a Papyrus setter, so the read is inert and the guard became
+unconditional — the NPC force-combats the player every time.
+
+The comparison therefore folds to the literal `false` when its operand went
+inert, which keeps the `If` intact (no paren swallowing), keeps the `;NE:` note
+on the line, and makes both directions fail SAFE. This matches what the `== 1`
+half already did by accident.
+
+Measured across all four plugins before the fix: **668 constant guards from a
+neutralised read** — FalloutNV 538 in 377 files, Nehrim 92 in 39, Morroblivion
+25 in 10, Oblivion 13 in 5. The dangerous `== 0` direction is 272 of FNV's and
+32 of Nehrim's.
 
 ### When EVERY term drops
 
@@ -3028,6 +3057,311 @@ only the flags that cannot be expressed. It keeps `actor_only`: that flag is
 what `cross_ref.py` reads to type a ref-var before emission, and removing it
 cost three Oblivion scripts their compile (`ObjectReference cannot be assigned
 to Actor`).
+
+### `Self` compared against a SCRIPT-typed reference
+<a id="self-compared-to-a-script-typed-ref"></a>
+
+A property naming a placed reference whose base carries a script is typed as
+that SCRIPT (`_add_scro_ref` prefers it so cross-script variable reads work).
+`Self` is likewise the script's own class, so an identity test between two such
+references compares two unrelated classes:
+
+```
+If Self == vHVLevel02MainDoorREF || Self == vHVLevel01DownstairsDoorREF
+you can't compare type `TES4_NVEcvDoorBG01SCRIPT` with type `TES4_HVLevel1To2DoorScript`
+```
+
+`_self_cast` already handled `Self == <Actor>` and `Self == <script>.member`;
+the bare script-typed property fell through. It casts the OTHER side to
+`ObjectReference` — the type both really are — rather than casting `Self` to
+Actor, because a door is not an actor and the comparison only asks whether the
+two references are the same object.
+
+🛑 **Guard the arm on `_self_reference(extends) == 'Self'`.** In an
+ActiveMagicEffect, TopicInfo or PlayerAlias script, TES4's `Self` is NOT the
+script's own object — it redirects to `GetTargetActor()`, `akSpeakerRef` or
+`GetReference()`. Without the guard, `MS40PotionEffect`'s
+`if (GetSelf == RonaHassildorRef)` emitted
+`(Self as ObjectReference) == (RonaHassildorRef as ObjectReference)`, comparing
+the MAGIC EFFECT against an NPC instead of the effect's target — a test that can
+never be true. Caught by the semantic diff as `calls[gettargetactor/0]: 3 -> 2`.
+
+### `GetFactionRelation` has TWO receiver kinds
+<a id="getfactionrelation-has-two-receivers"></a>
+
+**Code:** `script_convert/commands_falloutnv.py`
+
+FNV writes `<x>.GetFactionRelation <actor>` against two different receivers.
+Censused over all 9 authored sites (FNV-only; Oblivion, Nehrim and Morroblivion
+have none):
+
+| Receiver | Sites | Papyrus |
+|---|---:|---|
+| ACHR (a placed actor) | 8 | `Actor.GetFactionReaction(Actor)` — exact |
+| FACT (a faction) | 1 | none |
+
+`Faction.psc` offers only `int Function GetReaction(Faction akOther)`, which
+takes a FACTION, so the faction-toward-actor question has no reader. The
+handler declines for an actor receiver — letting the row emit the real native —
+and neutralises only the faction one.
+
+⚠️ The row alone got this wrong in both directions earlier: first reading the
+ARGUMENT as the receiver (emitting `player.GetReaction(var_)` plus a bogus
+`Faction Property player`), then typing the FACT receiver as an Actor.
+
+### A TRUNCATED script name breaks cross-script member types
+<a id="truncated-script-names"></a>
+
+Papyrus caps a ScriptName at 38 characters, so `papyrus_script_name` truncates a
+long EditorID and appends a 4-hex hash — `VHDLegionPowerPlant01BattleControllerScript`
+becomes `TES4_VHDLegionPowerPlant01BattleC_AD35`.
+
+`remote_type_of` stripped the `TES4_` prefix and looked the stem up in
+`script_all_vars`, which is keyed by the AUTHORED EditorID. For a truncated name
+that lookup always misses, so the member's type came back `''` and
+`_typed_assign` skipped the coercion it exists to apply:
+
+```
+Replacement = VHDLegionPP01BCREF.CurrentBackup
+value with type `ObjectReference` cannot be assigned to a variable with type `Actor`
+```
+
+The transform is the single source of truth, so re-applying it to each known
+script EditorID identifies the original. The mapping is built once and cached —
+it is a hot path.
+
+🛑 **Build it from ORIGINAL-CASE EditorIDs.** The suffix is an MD5 of the whole
+prefixed name, so it is case-sensitive:
+
+| Input | `papyrus_script_name` |
+|---|---|
+| `VHDLegionPowerPlant01BattleControllerScript` | `TES4_VHDLegionPowerPlant01BattleC_AD35` |
+| `vhdlegionpowerplant01battlecontrollerscript` | `TES4_vhdlegionpowerplant01battlec_B88E` |
+
+`script_all_vars` is keyed lowercase, so a map built from ITS keys computes the
+wrong hash and never matches. `script_formid_to_edid` carries the authored
+spelling and is the right source.
+
+### A cross-script READ was never checked for danglingness
+<a id="dangling-cross-script-read"></a>
+
+`_dangling_cross_script_target` already comments out a WRITE to `Owner.Var` when
+the owner resolves to a script whose variable table is known and lacks the name.
+The matching READ in `emit_member` had no such check — its last branch ("not a
+command anywhere, so a cross-script variable read") emitted the property access
+unconditionally, and the compiler rejected the script:
+
+```
+field or property `behemoth` not found      If (Game.GetPlayer().behemoth == 1)
+field or property `HasBeenEaten` not found  If ... && FortCaesarRef.HasBeenEaten
+```
+
+Censused over `export/FalloutNV.esm/SCPT.txt`, `behemoth` and `HasBeenEaten` are
+declared by **no script at all** — dangling in Bethesda's own data. `Follower1`
+and `CurrentBackup` ARE declared, but by a different script than the ref
+resolves to (`GomorrahCasinoEnterTriggerREF` carries
+`GomorrahCasinoEnterTriggerScript`, which has no `Follower1`), which is the same
+defect seen from the other side.
+
+The read now takes the note the write already took. The DETECTOR is unchanged:
+it still fires only when the owner resolves to a script whose variable list is
+known and lacks the name.
+
+🛑 **Do not widen it to "the record resolved but carries no SCRI".** That looks
+like it should catch `player.behemoth`, and it does — but a placed reference
+carries its script on the BASE OBJECT, not the REFR, so `record_scri` misses it
+and the rule condemns perfectly good cross-script access. Measured: the
+widening changed **480 Oblivion scripts**, dropping writes such as
+`DAClavicusDogStatueREF.dogtalk1` and `HorsePCWhiteAnvilREF.respawnhorse`, and
+it hit the play-tested `TES4_CharGenQuest`. Reverted; the four FNV names are
+left to their own row entries instead.
+
+### Five zero-argument commands were listed but never ROUTED
+<a id="listed-but-unrouted-commands"></a>
+
+`ZERO_ARG_REF_FUNCTIONS` named `getalarmed`, `getdisease`, `getwantblocking`,
+`ismoving` and `isturning`, but none had a row in `COMMAND_ROWS` — so nothing
+ever emitted them and `Ref.GetAlarmed` fell through `emit_member` to a property
+read that does not exist.
+
+The CK wiki's own "Papyrus Version" section names `IsAlarmed - Actor` as
+GetAlarmed's equivalent, so that one converts properly; the other four have no
+Papyrus section at all and become inert reads. With rows in place the literal
+set collapses to `isactor`, the rest arriving through `_flagged('zero_arg')`.
+
+Authored use: `getalarmed` 1 (FNV), `getfriendhit` 2 (Nehrim) + 2 (FNV),
+`getcontainerinventorycount` 3 (FNV); the other four are unused in all four
+plugins. `GetContainerInventoryCount` maps to `ObjectReference.GetNumItems()`
+(`Int Function GetNumItems() Native`), an exact equivalent.
+
+## The stage-arrival latch
+<a id="stage-arrival-latch"></a>
+
+**Code:** `script_convert/stage_latch.py`
+
+🛑 A `GetStage()==N && <timer> <= 0` guard waits on a timer that **stage N's own
+fragment charges**, and nothing makes that charge land before the guard is first
+tested. At or below zero is the timer's NORMAL resting state — it also goes
+negative whenever a line is dropped — so the instant stage N arrives the guard
+is ALREADY satisfied and the body runs before stage N's fragment has spoken.
+
+Measured (`temp/chargen_rec_4.log`, 14:47:14–18): CharacterGen sat at
+`convTimer = -0.076` for four seconds after Renault's line was dropped, so
+`GetStage()==16 && convTimer<=0` fired the moment stage 16 was set. `SetStage(17)`
+ran, the force-greet pulled the player into the menu, and the Emperor's stage-16
+line was never spoken — INFO `00032B11` ("You ... I've seen you") is gated on
+`GetStage CharacterGen == 16` and is the ONLY CharGenVoice entry for that stage,
+so once the stage reads 17 nothing qualifies at all.
+
+The fix is a latch: remember which stage the quest was on last pass, and require
+one full poll pass at stage N before honouring the guard — that pass is what lets
+stage N's fragment run and charge the timer. 25 guards of this shape exist in the
+Oblivion build; the CharacterGen ones are simply the ones that show.
+
+The latch is keyed CASE-INSENSITIVELY. One TES4 file spells the same quest both
+ways (CharacterGen's poll uses `characterGen` on some lines and `CharacterGen` on
+others); keying on the raw spelling emitted TWO latches, and a guard could then
+compare against the one the poll tail never updates — so it would never open.
+Papyrus is case-insensitive, so the duplicate declarations compiled and the fault
+would only have shown in game.
+
+### A bare ref command on a receiver parses as a MEMBER
+<a id="a-bare-ref-command-parses-as-member"></a>
+
+TES4 writes a zero-argument command without parentheses, so `rSelf.GetLinkedRef`
+reaches the tree as a `Member` (owner `rSelf`, name `GetLinkedRef`) rather than
+a `Call`. `is_ref_typed` answered the Call spelling from `_REF_RETURNING` but
+sent the Member spelling to the remote-variable lookup, which of course has no
+entry for a COMMAND name — so the null test never fired and
+`rSelf.GetLinkedRef != 0` emitted literally:
+
+```
+you can't compare type `ObjectReference` with type `Int`
+```
+
+The Member arm now checks `_REF_RETURNING` first. Both spellings mean the same
+read; only the punctuation differs.
+
+The rest of that arm is unchanged, and both its lookups are still required:
+`remote_type_of` resolves through the owner's declared `TES4_<script>` property
+type, while a quest named bare (`SE09.rebuiltGatekeeperRef`) has no such
+property and is reached by `_is_ref_typed_access` via EditorID → SCRI.
+
+### Code after a `Return` fails the whole script
+<a id="unreachable-after-return"></a>
+
+TES4 accepted unreachable code and simply never ran it. Bethesda shipped some:
+
+```
+If Button == 0
+    Return
+    Set FailMessage to 0        ; never executed, in the ORIGINAL
+    Set DisplayOnce to 0
+```
+
+Papyrus rejects the whole script for it — reported, confusingly, as
+`(block statement) invalid token: =,` on the assignment. Since the statement
+provably cannot run, replacing it with a `;NE:` marker changes no behaviour and
+saves the script.
+
+Measured: 17 statements across 5 scripts — FalloutNV 13 in 3
+(`LegateCampMongrelCageScript`, `VERT4BloodborneStalkerScript`,
+`VMS21aSupportScript`), Morroblivion 4 in 2. Oblivion and Nehrim have none.
+The Morroblivion pair already compiled, and dropping dead code cannot change
+what they do.
+
+### The cross-ref declaration scan did not know `int`
+<a id="cross-ref-scan-missed-int"></a>
+
+`cross_ref.py` builds `script_all_vars` — the table `remote_type_of` consults
+to type `Owner.member` — with its own regex over the SCTX text, and that regex
+listed `short|long|float|ref`. `TYPE_MAP` and the PARSER'S `VAR_TYPES` both
+accept `int`; only this one scan did not.
+
+A member declared `int` therefore resolved to `''`, so `_typed_assign` saw no
+target type and skipped the coercion it exists to apply:
+
+```
+VFSAtomicPimp.iChipTimeA = GameDaysPassed.GetValue()
+value with type `Float` cannot be assigned to a variable with type `Int`
+```
+
+Measured declarations by keyword: FalloutNV **1,789 `int`** (of 7,837),
+Oblivion 11, Nehrim 1, Morroblivion 0. `int` is legal TES4, so this is a shared
+bug that FNV merely exposes at scale — the three TES4 plugins have 12 members
+that were invisible to every cross-script type lookup.
+
+### `GetIsReference` is an IDENTITY test, not an actor test
+<a id="getisreference-not-an-actor-test"></a>
+
+The row rendered `{ref} == {a0}` under the `AV` subject, and `AV` passes
+`actor_func=True` into `_resolve_self_ref` — which promotes the receiver, and
+the local it was assigned from, to `Actor`. So a TRIGGER script's
+`set ThisTrigger to GetSelf` / `if ThisTrigger.GetIsReference <ref>` declared
+`Actor Property ThisTrigger` and compared it against a property typed as the
+script attached to the named record:
+
+```
+you can't compare type `Actor` with type `TES4_VHDOliverPlayerInRoomScript`
+```
+
+`GetIsReference` asks whether two references are the same object. It reads no
+actor value and calls no actor-only native, so `OBJREF` is the right subject —
+and a trigger, a door or a terminal is not an Actor, so the promotion was also
+wrong on its own terms (the `as Actor` cast on a non-actor hazard this file
+documents at #an-as-actor-cast-on-a-non-actor).
+
+9 FNV scripts failed on this. The emitted comparison text is unchanged for
+every TES4 call site — only the DECLARED type of the operands moves.
+
+### A ref tested against `1` is still a null test
+<a id="ref-compared-to-one"></a>
+
+TES4 refs coerce to 0 when unset, so scripts test them against a literal. The
+ordering forms (`ref > 0`, `ref >= 1`, `ref <= 0`) were already folded to
+`!= None` / `== None`, and so was `ref == 0` — but `ref == 1` fell through to
+the Bool-literal rule and emitted `ObjectReference == 1`, which the checker
+rejects ("you can't compare type `ObjectReference` with type `Int`").
+
+`== 1` means "is set", so it inverts: `ref == 1` → `ref != None`, and
+`ref != 1` → `ref == None`.
+
+Measured across all four plugins, this idiom appears only in FNV — 4 sites
+(`LinkedRef == 1` twice, `Companion1REF != 1`, `Companion2REF != 1`). Oblivion,
+Nehrim and Morroblivion have none once `ref`-declared names are separated from
+similarly-spelled `short`/`Int` ones.
+
+It applies to a DECLARED ref variable only (`_is_ref_variable`), never to a
+ref-RETURNING command. Only a stored reference can be unset; a command without
+a Papyrus native converts to an inert `0`, and rewriting that to `!= None`
+would DECIDE a guard the inert-operand path exists to drop. The first attempt
+skipped that distinction and broke `GetCrimeKnown ... == 1`, whose whole `||`
+chain is supposed to collapse — caught by
+`test_an_or_chain_that_loses_every_term_stays_shut`.
+
+### A declaration can nest at ANY depth
+<a id="declarations-nest-at-any-depth"></a>
+
+TES4 variables are script-global wherever they are written, so the parser hoists
+every `VarDecl` into one declaration list. The block hoist walked only
+`block.body` — the block's IMMEDIATE statements — so a declaration inside an
+`if` was never collected:
+
+```
+begin ScriptEffectStart
+    if myself == player
+        float randomTime                 ; <- invisible to the hoist
+        set randomTime to 5.0 + 20.0/99.0 * GetRandomPercent
+```
+
+The assignment then emitted against a name Papyrus had never seen: "undefined
+identifier `randomTime`". The hoist now uses `walk_stmts`, which already
+recursed through `body`/`orelse`/`elifs` for other callers.
+
+Measured: 12 FNV failures across 8 scripts (`randomTime`, `legToDisable`,
+`mytarget`, `targetREF`, `rLink`). Zero TES4 scripts nest a declaration, so the
+three Oblivion-family plugins are unaffected — but the fix is theirs too, since
+nothing in TES4 forbids the shape.
 
 ## Weather holds are RE-APPLICATION in TES4, a LOCK in Skyrim
 <a id="weather-holds-reapplication-vs-lock"></a>

@@ -10,7 +10,8 @@ from script_convert.constants import (
     KNOWN_GLOBALS, LOOSE_OPS, PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS,
     PLAYER_ALIAS_EXTENDS, RETURN_TYPES, SELF_NAMES, TYPE_MAP, _REF_TYPES,
     _canonical_global, _digit_stripped_formid, _record_type_to_base_papyrus,
-    _record_type_to_papyrus, _safe_property_name, resolve_property_formid,
+    _record_type_to_papyrus, _safe_property_name, papyrus_script_name,
+    resolve_property_formid,
     script_type_may_override
 )
 from script_convert.command_rows import (
@@ -130,6 +131,8 @@ class ScriptConverter:
         #: Papyrus type of the value in the assignment being emitted, read off
         #: its parse tree by `emit_assignment`.  Empty outside an assignment.
         self._value_type: str = ''
+        #: Emitted ScriptName -> source EditorID; built on first use.
+        self._truncated_scripts = None
         #: Parse tree of the script being converted, set by `_parse_source`.
         self._tree = None
         self._current_event: str = ''  # Current event header for context-aware conversion
@@ -201,75 +204,6 @@ class ScriptConverter:
         if 'fragment' in ev:
             return False
         return not any(e in ev for e in DISPATCH_EVENTS)
-
-    # `<quest>.GetStage() == N` ... `<timer> <= 0` in ONE condition.  Both
-    # orders occur, and other terms may sit between them.
-    _STAGE_TIMER_GUARD_RE = re.compile(
-        r'^(?P<indent>\s*)If\s+(?P<cond>.*?\b(?P<q>[A-Za-z_]\w*)\.GetStage\(\)\s*=='
-        r'\s*(?P<stage>\d+)\b.*?)\s*$', re.IGNORECASE)
-    _TIMER_ZERO_RE = re.compile(
-        r'\b(?P<timer>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*<=\s*0(?:\.0*)?\b')
-
-    def _guard_stage_timer(self, line: str) -> str:
-        """Close the stage-arrival race on `GetStage()==N && <timer> <= 0`.
-
-        \U0001f6d1 THE TIMER IS CHARGED BY STAGE N'S OWN FRAGMENT, and nothing makes
-        that charge land before this guard is first tested.  If the previous
-        beat left the timer at or below zero -- which is its NORMAL resting
-        state, and it also goes negative whenever a line is dropped -- then the
-        instant stage N arrives the guard is ALREADY satisfied and the body
-        runs before stage N's fragment has said anything.
-
-        Measured (temp/chargen_rec_4.log, 14:47:14-18): CharacterGen
-        sat at convTimer = -0.076 for four seconds after Renault's line was
-        dropped, so `GetStage()==16 && convTimer<=0` fired the moment stage 16
-        was set.  SetStage(17) ran, the force-greet pulled the player into the
-        menu, and the Emperor's stage-16 line was never spoken -- INFO 00032B11
-        ("You ... I've seen you") is gated on `GetStage CharacterGen == 16` and
-        is the ONLY CharGenVoice entry for that stage, so once the stage reads
-        17 nothing qualifies at all.
-
-        The fix is a stage-arrival latch: remember the stage this quest was on
-        when we last saw it, and require at least one poll pass at stage N
-        before honouring the guard.  That pass is what lets stage N's fragment
-        run and charge the timer.  25 guards of this shape exist in the
-        Oblivion build; the CharacterGen ones are simply the ones that show.
-        """
-        if 'GetStage()' not in line or '<=' not in line:
-            return line
-        m = self._STAGE_TIMER_GUARD_RE.match(line)
-        if not m:
-            return line
-        if not self._TIMER_ZERO_RE.search(m.group('cond')):
-            return line
-        quest = m.group('q')
-        stage = m.group('stage')
-        # One latch variable per quest, declared once by the caller.
-        var = self._stage_latch_var(quest)
-        indent = m.group('indent')
-        cond = m.group('cond')
-        return (f'{indent}If {cond} && {var} == {stage}'
-                f'  ; stage-arrival latch: stage {stage} seen a full pass, '
-                f'so its fragment has run')
-
-    def _stage_latch_var(self, quest: str) -> str:
-        """Name of the "stage we saw last pass" latch for `quest`, registering
-        it so the emitter declares and updates it.
-
-        Keyed CASE-INSENSITIVELY: TES4 scripts spell the same quest both ways
-        in one file (CharacterGen's poll uses `characterGen` on some lines and
-        `CharacterGen` on others).  Keying on the raw spelling emitted TWO
-        latches for one quest, and a guard could then compare against the one
-        the poll tail never updated -- the guard would never open.  Papyrus is
-        case-insensitive, so the duplicate declarations compiled and the fault
-        would only have shown in game.
-        """
-        key = quest.lower()
-        var = self.sc.stage_latches.get(key)
-        if var is None:
-            var = f'TES4_LastStage_{quest}'
-            self.sc.stage_latches[key] = var
-        return var
 
     def _emit_say_line(self, target: str, say_call: str, delay: str) -> str:
         """`set T to [ref.]Say[To] ... topic [+ n]` -> a TES4Polyfill.SayLine call.
@@ -653,6 +587,8 @@ class ScriptConverter:
         result = []
         for var in tree.variables:
             ptype = TYPE_MAP.get(var.vtype.lower(), 'Int')
+            self.sc.local_vars.add(var.name.lower())
+            self.sc.var_types[var.name.lower()] = ptype
             result.append('  %s %s = %s'
                           % (ptype, var.name, '0.0' if ptype == 'Float' else '0'))
         result += _script.emit_body(self, tree.body, extends, 1)
@@ -717,6 +653,12 @@ class ScriptConverter:
         if (prop_low not in KNOWN_COMMANDS
                 and prop_low not in BARE_BOOL_FUNCTIONS
                 and prop_low not in _MEMBER_COMMANDS):
+            reason = self._dangling_cross_script_target(f'{owner}.{name}')
+            if not reason and owner.strip().lower() == 'player':
+                reason = (f'{owner}.{name} - the player base carries no '
+                          f'script (dangling in the original script)')
+            if reason:
+                return self.note(reason)
             return f'{self._convert_ref(owner, extends)}.{safe}'
         return _dispatch.emit_command(self, owner, name, extends)
 
@@ -1150,7 +1092,7 @@ class ScriptConverter:
         owner_type = self.type_of(owner.strip(), locals_first=False)
         if not owner_type.startswith('TES4_'):
             return ''
-        script = owner_type[5:].lower()
+        script = self._script_edid_for(owner_type)
         member_low = member.lower()
         # The owning script's OWN use decides: a `ref` it calls an actor-only
         # method on is declared Actor there, so a write from here needs the
@@ -1159,6 +1101,24 @@ class ScriptConverter:
         if member_low in self.xref.script_actor_vars.get(script, ()):
             return 'Actor'
         return self.xref.script_all_vars.get(script, {}).get(member_low, '')
+
+    def _script_edid_for(self, owner_type: str) -> str:
+        """Source script EditorID behind a `TES4_<script>` property type.
+
+        Papyrus caps a ScriptName at 38 characters, so a long EditorID arrives
+        truncated and never matches `script_all_vars`.  The reverse map is
+        built once, from the ORIGINAL-CASE names -- the truncation hash is
+        case-sensitive, so a lowercased key produces a different suffix.
+        See: docs/commentary/script_convert.md#truncated-script-names
+        """
+        stem = owner_type[5:].lower()
+        if stem in self.xref.script_all_vars:
+            return stem
+        if self._truncated_scripts is None:
+            self._truncated_scripts = {
+                papyrus_script_name(edid).lower(): edid.lower()
+                for edid in self.xref.script_formid_to_edid.values()}
+        return self._truncated_scripts.get(owner_type.lower(), stem)
 
     def type_of(self, name: str, *, locals_first: bool = True) -> str:
         """Papyrus type carried by `name`, or '' if it is not declared here.
@@ -2356,13 +2316,14 @@ class ScriptConverter:
 
         Only fires when the owner resolves to a script whose variable list is
         KNOWN and does not contain the name — an unresolved owner is left alone
-        so this never suppresses a legitimate assignment.
+        so this never suppresses a legitimate access.
+        See: docs/commentary/script_convert.md#dangling-cross-script-read
         """
         if '.' not in raw_target or not self.xref:
             return ''
         owner, _, var = raw_target.partition('.')
         owner_low, var_low = owner.strip().lower(), var.strip().lower()
-        if not owner_low or not var_low:
+        if not owner_low or not var_low or var_low in KNOWN_COMMANDS:
             return ''
         # Resolve the owner EditorID to its attached script's variable table.
         fid = self.xref.edid_to_formid.get(owner_low, '')
@@ -2373,6 +2334,10 @@ class ScriptConverter:
                 script_low = self.xref.script_formid_to_edid.get(scri, '').lower()
         if not script_low and owner_low in self.xref.script_all_vars:
             script_low = owner_low
+        if not script_low:
+            ptype = self._property_type_ci(owner.strip())
+            if ptype.startswith('TES4_'):
+                script_low = ptype[5:].lower()
         if not script_low:
             return ''
         known = self.xref.script_all_vars.get(script_low)

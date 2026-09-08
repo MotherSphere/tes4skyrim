@@ -55,6 +55,12 @@ def emit_s32(lines: list, key: str, sub: Subrecord, offset: int = 0):
         lines.append(f"{key}={struct.unpack_from('<i', sub.data, offset)[0]}")
 
 
+def emit_u32(lines: list, key: str, sub: Subrecord, offset: int = 0):
+    """Emit an unsigned 32-bit value, for a flags or count field."""
+    if sub and len(sub.data) >= offset + 4:
+        lines.append(f"{key}={struct.unpack_from('<I', sub.data, offset)[0]}")
+
+
 def emit_raw_hex(lines: list, key: str, sub: Subrecord):
     """Emit raw bytes as a hex string."""
     if sub:

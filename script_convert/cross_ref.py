@@ -830,7 +830,8 @@ class CrossRefGraph:
 
         # Phase A: collect variable declarations per script
         _decl_re = re.compile(r'^\s*ref\s+(\w+)', re.IGNORECASE)
-        _all_decl_re = re.compile(r'^\s*(short|long|float|ref)\s+(\w+)', re.IGNORECASE)
+        _all_decl_re = re.compile(r'^\s*(short|long|int|float|ref)\s+(\w+)',
+                                  re.IGNORECASE)
         script_ref_vars: dict[str, set[str]] = {}
         script_all_vars: dict[str, dict[str, str]] = {}
         script_actor_vars: dict[str, set[str]] = {}

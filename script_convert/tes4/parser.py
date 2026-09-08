@@ -50,6 +50,7 @@ from script_convert.tes4.nodes import (
     Unary,
     VarDecl,
     While,
+    walk_stmts,
 )
 
 
@@ -626,8 +627,15 @@ class Parser:
         return node
 
     def _parse_body(self, terminators: frozenset) -> list:
-        """Statements until a terminator keyword or EOF."""
+        """Statements until a terminator keyword or EOF, minus unreachable ones.
+
+        TES4 accepted code after a `Return` and simply never ran it; Papyrus
+        rejects the whole SCRIPT for it, so a statement that provably cannot
+        run is replaced by a marker rather than emitted.
+        See: docs/commentary/script_convert.md#unreachable-after-return
+        """
         out = []
+        returned = False
         while True:
             self.skip_newlines()
             if self.at_end():
@@ -635,6 +643,11 @@ class Parser:
             stmt = self.parse_statement(terminators)
             if stmt is None:
                 return out
+            if returned and not isinstance(stmt, (Comment, Blank)):
+                stmt = Comment(text=';NE: unreachable after Return (line %d)'
+                                    % stmt.line, line=stmt.line)
+            elif isinstance(stmt, Return):
+                returned = True
             out.append(stmt)
 
     def _parse_block(self, line: int) -> Block:
@@ -797,20 +810,26 @@ def parse(source: str, mode: Mode = Mode.SCRIPT) -> Script:
         else:
             script.body.append(stmt)
 
-    # A block's body can also declare variables (TES4 allows it); hoist those
-    # too so the emitter sees one declaration list.
-    for block in script.blocks:
-        hoisted = []
-        for stmt in block.body:
-            if isinstance(stmt, VarDecl):
-                if stmt.name.lower() not in seen_vars:
-                    seen_vars.add(stmt.name.lower())
-                    script.variables.append(stmt)
-                continue
-            hoisted.append(stmt)
-        block.body = hoisted
-
+    _hoist_block_vars(script, seen_vars)
     return script
+
+
+def _hoist_block_vars(script: Script, seen_vars: set) -> None:
+    """Move every declaration inside a block into `script.variables`.
+
+    A TES4 variable is script-global wherever it is written, including nested
+    inside an `if`, so the walk has to be recursive -- a hoist over a block's
+    immediate statements alone leaves the nested name undeclared and every
+    assignment to it fails the checker.
+    See: docs/commentary/script_convert.md#declarations-nest-at-any-depth
+    """
+    for block in script.blocks:
+        for stmt in walk_stmts(block.body):
+            if isinstance(stmt, VarDecl) \
+                    and stmt.name.lower() not in seen_vars:
+                seen_vars.add(stmt.name.lower())
+                script.variables.append(stmt)
+        block.body = [s for s in block.body if not isinstance(s, VarDecl)]
 
 
 def is_self_contained(expr: str) -> bool:

@@ -237,11 +237,16 @@ RETURN_TYPES = dict(
     + [('get%s%s' % (kind, axis), 'Float')
        for kind in ('position', 'angle') for axis in 'xyz']
 
+    #: Math.psc natives we emit; every one but Ceiling/Floor returns a float.
+    + [(n, 'Float') for n in (
+        'abs', 'acos', 'asin', 'atan', 'cos', 'pow', 'sin', 'sqrt', 'tan')]
+
     #: Whole-number reads, plus TES4 names converting to a fixed expression.
     + [(n, 'Int') for n in (
         'getvalueint', 'getcrimegold', 'getitemcount', 'getgoldamount',
         'getlocklevel', 'getdayofweek', 'getdayoftheweek', 'getrandompercent',
-        'getrandpercent', 'getpcfame', 'getpcinfamy', 'getinfame')]
+        'getrandpercent', 'getpcfame', 'getpcinfamy', 'getinfame',
+        'ceiling', 'floor')]
 
     #: Reference-valued names; the `ak*` event parameters need a downcast.
     + [(n, 'ObjectReference') for n in (
@@ -300,6 +305,7 @@ _RECORD_TYPE_PAPYRUS = {
     'SPEL': 'Spell', 'ENCH': 'Enchantment', 'MGEF': 'MagicEffect',
     'CELL': 'Cell', 'WRLD': 'WorldSpace', 'PACK': 'Package',
     'SOUN': 'Sound', 'SNDR': 'Sound', 'DIAL': 'Topic', 'RACE': 'Race',
+    'MESG': 'Message', 'MSTT': 'Static',
     'FLST': 'FormList', 'KYWD': 'Keyword', 'LVLI': 'LeveledItem',
     'LVLN': 'LeveledActor', 'LVSP': 'LeveledSpell',
     'WEAP': 'Weapon', 'ARMO': 'Armor', 'BOOK': 'Book',

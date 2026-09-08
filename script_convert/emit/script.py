@@ -18,6 +18,7 @@ each statement's trailing source comment.
 
 from __future__ import annotations
 
+from script_convert.stage_latch import guard_stage_timer
 from script_convert.emit import stmt as S
 from script_convert.tes4 import nodes as N
 
@@ -128,7 +129,7 @@ def _text(conv, st: N.Stmt, extends: str) -> str:
     existed to undo.
     """
     conv._line_comments.clear()
-    text = conv._guard_stage_timer(S.emit(conv, st, extends))
+    text = guard_stage_timer(conv, S.emit(conv, st, extends))
     notes = '  '.join(conv._line_comments)
     conv._line_comments.clear()
     if notes:

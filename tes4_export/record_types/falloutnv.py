@@ -10,9 +10,11 @@ See: docs/commentary/tes4_export_falloutnv.md
 
 import struct
 
-from ..tes4_reader import Record, get_formid_str, get_string, get_subrecord
+from ..tes4_reader import (Record, get_all_subrecords,
+                           get_formid_str, get_string,
+                           get_subrecord)
 from .common import (emit_float, emit_model, emit_raw_hex,
-                     emit_script, emit_string, emit_u16)
+                     emit_script, emit_string, emit_u16, emit_u32)
 
 #: HEDR.Version reported by FO3/FNV plugins; Oblivion reports 0.8 or 1.0.
 FALLOUT_HEDR_MIN = 1.2
@@ -238,7 +240,25 @@ def export_NAVMESH(rec: Record) -> list:
     return lines
 
 
+def export_MESSAGE(rec: Record) -> list:
+    """A FO3/FNV MESG, which Skyrim carries as the same record type.
+
+    DESC/INAM/DNAM are required on the TES5 side; ITXT repeats once per button.
+
+    See: docs/commentary/tes4_export_falloutnv.md#mesg-export
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    emit_string(lines, "DESC", get_subrecord(rec, "DESC"))
+    emit_string(lines, "FULL", get_subrecord(rec, "FULL"))
+    emit_u32(lines, "DNAM", get_subrecord(rec, "DNAM"))
+    for i, sub in enumerate(get_all_subrecords(rec, "ITXT")):
+        emit_string(lines, f"Button[{i}].Text", sub)
+    return lines
+
+
 FALLOUT_BASE_EXPORTERS = {
+    "MESG": export_MESSAGE,
     "NAVM": export_NAVMESH,
     "NAVI": export_NAVMESH,
     "MSTT": export_STATIC_BASE,
