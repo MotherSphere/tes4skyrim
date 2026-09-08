@@ -13,7 +13,7 @@ later phase's state.
 from script_convert.blocks import (BLOCK_MAP, COMBAT_STATE_GUARDS,
                                    block_filter_guard)
 from script_convert.constants import (
-    POLL_BLOCKS, REF_SPECIFICITY, TYPE_MAP, _safe_property_name,
+    POLL_BLOCKS, REF_SPECIFICITY, TYPE_MAP, safe_property_name,
     papyrus_script_name
 )
 from script_convert.command_rows import (
@@ -127,7 +127,7 @@ def _promote_actor_locals(conv, tree) -> None:
             low = name.lower()
             if sc.var_types.get(low) == 'ObjectReference':
                 sc.var_types[low] = 'Actor'
-                sc.var_types[_safe_property_name(name).lower()] = 'Actor'
+                sc.var_types[safe_property_name(name).lower()] = 'Actor'
 
 
 def _load_symbols(conv, tree, editor_id: str) -> None:
@@ -136,7 +136,7 @@ def _load_symbols(conv, tree, editor_id: str) -> None:
     edid_low = (editor_id or '').lower()
     for var in (tree.variables if tree else ()):
         vname, vtype = var.name, var.vtype
-        safe = _safe_property_name(vname)
+        safe = safe_property_name(vname)
         # BOTH spellings: the body still writes the variable the TES4 way, and
         # a name that collides with a TES4 command (DiveRockScript's `short
         # message`) is only recognised as a variable -- rather than compiled as
@@ -200,9 +200,9 @@ def _narrow_ref_types(conv, tree) -> None:
     narrowed = _symbols.resolve_ref_types(
         stmts, refs, conv.type_of, conv._base_record_type)
     for low, ptype in narrowed.items():
-        for spelling in (low, _safe_property_name(low).lower()):
+        for spelling in (low, safe_property_name(low).lower()):
             sc.var_types[spelling] = ptype
-        safe = _safe_property_name(low)
+        safe = safe_property_name(low)
         if safe in sc.property_refs:
             sc.property_refs[safe] = ptype
 
@@ -303,11 +303,11 @@ def properties(conv, tree) -> list:
         if block.btype.lower() == 'function':
             for name in _udf_params(block.filter):
                 params.add(name.lower())
-                params.add(_safe_property_name(name).lower())
+                params.add(safe_property_name(name).lower())
 
     out, seen = [], set()
     for var in (tree.variables if tree else ()):
-        safe = _safe_property_name(var.name)
+        safe = safe_property_name(var.name)
         low = safe.lower()
         if low in seen or low in params:
             continue
@@ -382,10 +382,10 @@ def udf(conv, tree, extends: str) -> list:
     # ObjectReference skipped the downcast the wider handle needs.
     types = [_param_type(conv, p) for p in params]
     for name, ptype in zip(params, types):
-        for spelling in (name.lower(), _safe_property_name(name).lower()):
+        for spelling in (name.lower(), safe_property_name(name).lower()):
             conv.sc.var_types[spelling] = ptype
     lines = _script.emit_body(conv, block.body, extends, 1)
-    sig = ', '.join('%s %s' % (ptype, _safe_property_name(name))
+    sig = ', '.join('%s %s' % (ptype, safe_property_name(name))
                     for name, ptype in zip(params, types))
     conv.sc.udf_signature = types
     rtype = 'Int ' if conv.sc.udf_returns else ''
@@ -404,7 +404,7 @@ def _param_type(conv, name: str) -> str:
     behind, and returning it unchanged typed `mwGetFactionWitnessesFunc`'s
     parameter Form while the body passed it to IsInFaction.
     """
-    safe = _safe_property_name(name)
+    safe = safe_property_name(name)
     declared = conv.sc.var_types.get(name.lower(), 'Int')
     if declared not in ('ObjectReference', 'Form'):
         return declared
@@ -756,7 +756,7 @@ def _declared(tree, name_low: str):
     """The Papyrus-safe name of a variable this script declares, or None."""
     for var in (tree.variables if tree else ()):
         if var.name.lower() == name_low:
-            return _safe_property_name(var.name)
+            return safe_property_name(var.name)
     return None
 
 
@@ -1076,4 +1076,4 @@ def _promote_assigned_actors(conv, tree) -> None:
             low = name.lower()
             if sc.var_types.get(low) == 'ObjectReference':
                 sc.var_types[low] = 'Actor'
-                sc.var_types[_safe_property_name(name).lower()] = 'Actor'
+                sc.var_types[safe_property_name(name).lower()] = 'Actor'

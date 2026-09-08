@@ -22,7 +22,7 @@ converters then splice the VMAD in right after EDID (Skyrim order: EDID VMAD OBN
 import re
 
 from script_convert.converter import ScriptConverter, sctx_onactivate_consumes
-from script_convert.constants import (_safe_property_name, papyrus_script_name,
+from script_convert.constants import (safe_property_name, papyrus_script_name,
                                       resolve_property_formid,
                                       wants_placed_reference,
                                       PLAYER_ALIAS_EXTENDS)
@@ -690,7 +690,7 @@ def _resolve_props(sctx: str, edid: str, extends: str, xref,
     defaults them to zero, which matches the TES4 script's initial state.
     """
     conv = ScriptConverter(xref)
-    name = _safe_property_name(edid or 'Script')
+    name = safe_property_name(edid or 'Script')
     conv.convert_standalone(name, sctx, extends, edid)
 
     # Lazy (circular: import_main imports this module).
@@ -701,7 +701,7 @@ def _resolve_props(sctx: str, edid: str, extends: str, xref,
     for pname, ptype in conv.get_property_refs().items():
         if ptype in _VALUE_TYPES:
             continue
-        safe = _safe_property_name(pname)
+        safe = safe_property_name(pname)
         low = pname.lower()
         if low in ('player', 'playerref'):
             obj_props[safe] = (_PLAYER_BASE_FID if ptype == 'ActorBase'

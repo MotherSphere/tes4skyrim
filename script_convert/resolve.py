@@ -8,7 +8,7 @@ data.
 def resolve_property_formid(xref, prop_name: str) -> str:
     """EditorID lookup for a (possibly sanitized) property name.
 
-    Reverses each rename `_safe_property_name` can apply, in order: the exact
+    Reverses each rename `safe_property_name` can apply, in order: the exact
     `d<digits>` leading-digit prefix, the plain name, the legacy digit-DELETING
     scheme, the reserved-word `my` prefix, and the `<Name>Base` ActorBase
     de-collision.  An unreversed rename leaves the property None at runtime.

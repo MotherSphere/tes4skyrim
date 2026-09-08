@@ -69,23 +69,15 @@ _LIP_WORKER_COUNT = max(_WORKER_COUNT, min(64, _WORKER_COUNT * 2))
 # Tool detection + single-file conversion
 # ---------------------------------------------------------------------------
 
-def find_ffmpeg(ffmpeg_path: str = 'ffmpeg') -> 'str | None':
+def find_ffmpeg(ffmpeg_path: str = 'ffmpeg',
+                need_decoder: str = '') -> 'str | None':
     """Return the ffmpeg executable path if found, else None.
 
-    An explicit ``ffmpeg_path`` (anything but the bare default ``'ffmpeg'``)
-    is used ALONE: a caller who names a specific binary -- from config, or a
-    test -- gets that binary or None.  Silently falling back to the bundled
-    copy would turn a typo'd config path into a run that looks fine while
-    ignoring what the user asked for.
+    An explicit `ffmpeg_path` is used alone; otherwise the bundled build
+    is preferred over PATH. `need_decoder` skips a candidate that cannot
+    decode that codec.
 
-    Otherwise the search order is:
-      1. external/ffmpeg/ under the project root -- the minimal LGPL build
-         that ships with the repo (see external/ffmpeg/BUILD.md).
-      2. System PATH.
-
-    The bundled copy is preferred over PATH so a run is reproducible: it is a
-    known build with a known codec set, whereas whatever ffmpeg a user already
-    has could be any version with any codecs compiled out.
+    See: docs/commentary/asset_convert_audio.md#which-ffmpeg-a-run-uses
     """
     if ffmpeg_path and ffmpeg_path != 'ffmpeg':
         candidates = [ffmpeg_path]
@@ -104,11 +96,26 @@ def find_ffmpeg(ffmpeg_path: str = 'ffmpeg') -> 'str | None':
                 timeout=10,
                 **POPEN_FLAGS,
             )
-            if b'ffmpeg version' in r.stdout or b'ffmpeg version' in r.stderr:
-                return cand
+            if b'ffmpeg version' not in r.stdout                     and b'ffmpeg version' not in r.stderr:
+                continue
+            if need_decoder and not _ffmpeg_has_decoder(cand, need_decoder):
+                continue
+            return cand
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             continue
     return None
+
+
+def _ffmpeg_has_decoder(ffmpeg: str, decoder: str) -> bool:
+    """True when this ffmpeg build can decode *decoder*."""
+    try:
+        r = subprocess.run([ffmpeg, '-hide_banner', '-decoders'],
+                           capture_output=True, timeout=10, **POPEN_FLAGS)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+    out = (r.stdout or b'') + (r.stderr or b'')
+    return any(line.split()[1:2] == [decoder.encode()]
+               for line in out.splitlines() if line.strip())
 
 
 def find_xwmaencode(search_dir: 'str | None' = None) -> 'str | None':
@@ -563,7 +570,7 @@ TES4_VOICE_TYPE_MAP = {
 
 #: Oblivion voice filename. See: docs/commentary/asset_convert_audio.md#voice-file-naming-prefix
 VOICE_FILENAME_RE = re.compile(
-    r'^(.+)_([0-9a-fA-F]{8})_(\d+)\.(mp3|wav|xwm|fuz)$',
+    r'^(.+)_([0-9a-fA-F]{8})_(\d+)\.(mp3|ogg|wav|xwm|fuz)$',
     re.IGNORECASE,
 )
 
@@ -643,7 +650,56 @@ def find_lip_text(output_dir, source_name) -> 'dict | None':
     return None
 
 
-_VOICE_OUTPUT_EXTS = frozenset(('.fuz', '.xwm', '.wav', '.mp3', '.lip'))
+from asset_convert.audio.audio_falloutnv import (folder_gender,
+                                                  is_fallout_voice_root,
+                                                  load_voice_type_edids,
+                                                  voice_type_edid)
+from asset_convert.audio.voice_races import (load_race_voices,
+                                             vtyp_edid as _vtyp_edid)
+
+_VOICE_OUTPUT_EXTS = frozenset(('.fuz', '.xwm', '.wav', '.mp3', '.ogg', '.lip'))
+
+
+def _voice_decoder(voice_root) -> str:
+    """ffmpeg decoder this voice tree needs, or '' when plain MP3/WAV.
+
+    See: docs/commentary/asset_convert_audio.md#which-ffmpeg-a-run-uses
+    """
+    for path in voice_root.rglob('*.ogg'):
+        del path
+        return 'vorbis'
+    return ''
+
+
+def _resolve_voice_type(race: str, gender: str, fallout: bool,
+                        race_voices, unmapped_races: set,
+                        fnv_edids: dict = None) -> str:
+    """VTYP EditorID a source voice folder maps to.
+
+    A FO3/FNV folder IS the voice type. Oblivion resolves the race through the
+    plugin's own RACE records (what the importer built its VTYPs from), then the
+    fixed table, and finally a synthesised name recorded in *unmapped_races*.
+    """
+    if fallout:
+        return voice_type_edid(race, fnv_edids)
+    key = race_voices.folder_key(race)
+    if key:
+        return _vtyp_edid(key, gender)
+    vt = TES4_VOICE_TYPE_MAP.get((race, gender))
+    if vt:
+        return vt
+    for (r, g), name in TES4_VOICE_TYPE_MAP.items():
+        if r.lower() == race.lower() and g.upper() == gender:
+            return name
+    unmapped_races.add((race, gender))
+    return f'TES4{"Male" if gender == "M" else "Female"}{race}'
+
+
+def _voice_leaf_dirs(race_dir, fallout: bool) -> list:
+    """Directories holding this voice folder's recordings."""
+    if fallout:
+        return [race_dir]
+    return [d for d in race_dir.iterdir() if d.is_dir()]
 
 
 def prune_stale_voice_files(touched_dirs: set, intended: set,
@@ -752,7 +808,8 @@ def organize_voice_files(
     xwmaencode = None
     lipgenerator = None
     if convert_audio:
-        ffmpeg = find_ffmpeg(ffmpeg_path)
+        ffmpeg = find_ffmpeg(ffmpeg_path,
+                             need_decoder=_voice_decoder(voice_root))
         if not ffmpeg:
             raise RuntimeError(
                 'ffmpeg not found but convert_audio=True.  '
@@ -776,7 +833,6 @@ def organize_voice_files(
     stats = {'organized': 0, 'skipped': 0, 'no_match': 0, 'errors': 0}
     unmapped_races: set = set()
 
-    from asset_convert.audio.voice_races import load_race_voices, vtyp_edid as _vtyp_edid
     race_voices = load_race_voices(source_dir)
     if race_voices:
         print(f'  Plugin races: {len(race_voices.keys)} voice identities '
@@ -792,31 +848,21 @@ def organize_voice_files(
         if not plugin_dir.is_dir():
             continue
         effective_plugin = plugin_name or plugin_dir.name
+        fallout = is_fallout_voice_root(plugin_dir)
+        fnv_edids = load_voice_type_edids(source_dir) if fallout else {}
 
         for race_dir in plugin_dir.iterdir():
             if not race_dir.is_dir():
                 continue
             race = race_dir.name
 
-            for gender_dir in race_dir.iterdir():
-                if not gender_dir.is_dir():
-                    continue
-                gender = gender_dir.name.upper()[:1]   # 'M' or 'F'
+            for gender_dir in _voice_leaf_dirs(race_dir, fallout):
+                gender = (folder_gender(race) if fallout
+                          else gender_dir.name.upper()[:1])
 
-                # The plugin's own RACE records win: they are what the
-                # importer built its VTYP records from.
-                key = race_voices.folder_key(race)
-                voice_type = _vtyp_edid(key, gender) if key else None
-                if voice_type is None:
-                    voice_type = TES4_VOICE_TYPE_MAP.get((race, gender))
-                if voice_type is None:
-                    for (r, g), vt in TES4_VOICE_TYPE_MAP.items():
-                        if r.lower() == race.lower() and g.upper() == gender:
-                            voice_type = vt
-                            break
-                if voice_type is None:
-                    unmapped_races.add((race, gender))
-                    voice_type = f'TES4{"Male" if gender == "M" else "Female"}{race}'
+                voice_type = _resolve_voice_type(race, gender, fallout,
+                                                 race_voices, unmapped_races,
+                                                 fnv_edids)
 
                 out_dir = dest_dir / 'sound' / 'Voice' / effective_plugin / voice_type
                 out_dir.mkdir(parents=True, exist_ok=True)
@@ -850,7 +896,7 @@ def organize_voice_files(
                     # Transcript available + LipGenerator → lip-synced .fuz;
                     # otherwise bare .xwm (audio only, mouth won't move).
                     text = None
-                    if ffmpeg and src_ext in ('mp3', 'wav'):
+                    if ffmpeg and src_ext in ('mp3', 'ogg', 'wav'):
                         if lipgenerator and lip_text:
                             text = lip_text.get((fid24, int(resp_idx)))
                         dst_ext = 'fuz' if text else 'xwm'

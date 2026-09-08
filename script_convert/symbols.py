@@ -470,18 +470,18 @@ def property_declarations(property_refs, declared) -> list:
     type.  Declaring the generic one instead made every cross-script variable
     read through it fail to compile.
     """
-    from script_convert.constants import _safe_property_name
+    from script_convert.constants import safe_property_name
 
     merged = {}
     for pname, ptype in sorted(property_refs.items()):
-        key = _safe_property_name(pname).lower()
+        key = safe_property_name(pname).lower()
         known = merged.get(key)
         if known is None or (known[1] == 'Quest' and ptype != 'Quest'):
             merged[key] = (pname, ptype)
 
     out = []
     for pname, ptype in sorted(merged.values(), key=lambda x: x[0].lower()):
-        safe = _safe_property_name(pname)
+        safe = safe_property_name(pname)
         if safe.lower() in declared:
             continue
         declared.add(safe.lower())

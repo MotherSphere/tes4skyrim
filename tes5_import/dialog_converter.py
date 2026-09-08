@@ -47,6 +47,10 @@ from collections import defaultdict
 from .text_reader import get_formid_index_offset, remap_formid
 from .constants import ENGINE_GLOBAL_FORMIDS
 from .objective_text import short_objective
+from .quest_converter import (QUEST_PRIORITY_MAX, ZERO_STAGE_TOP,
+                              bark_choice_gate_bytes,
+                              compute_quest_priorities,
+                              has_quest_state_condition, quest_state_ctdas)
 from .writer import pack_group
 from .record_types.common import (
     get_formid,
@@ -121,182 +125,16 @@ DIAL_TYPE_MISC = 6
 # QUST conversion
 # ===========================================================================
 
-def _collect_scro_properties(rec: dict, fid_to_edid: dict, prefix: str = '') -> dict:
-    """Extract SCRO FormID refs from a record (optionally a stage-log prefix)
-    into VMAD property name -> remapped FormID."""
-    from script_convert.constants import _safe_property_name
-    props = {}
-    seen = set()
-    i = 0
-    while True:
-        key = f'{prefix}SCRO[{i}]'
-        fid_str = rec.get(key)
-        if fid_str is None:
-            break
-        i += 1
-        try:
-            raw_fid = int(fid_str, 16)
-        except (ValueError, TypeError):
-            continue
-        # The player's ids never bind through a SCRO: 0x14 has no EditorID to
-        # name a property with, and 0x07 is the TES4 player NPC_ (EditorID
-        # `Player`), which would bind the quest's `Actor Property Player` to a
-        # BASE record the VM refuses — the declared-name pass below binds the
-        # spelling the script uses to PlayerRef instead.
-        if raw_fid in (0, _PLAYER_BASE_FID, _PLAYER_FORMID):
-            continue
-        edid = fid_to_edid.get(raw_fid)
-        if not edid:
-            continue
-        safe = _safe_property_name(edid)
-        if safe.lower() in seen:
-            continue
-        seen.add(safe.lower())
-        # Engine globals are shared with Skyrim at the same FormID and are not
-        # re-emitted, so they must not be shifted into our index — see
-        # object_scripts.ENGINE_GLOBAL_FORMIDS.
-        if edid.lower() in ENGINE_GLOBAL_FORMIDS:
-            props[safe] = ENGINE_GLOBAL_FORMIDS[edid.lower()]
-            continue
-        remapped = get_formid(rec, key)
-        if remapped:
-            props[safe] = remapped
-    return props
 
 
-def _collect_all_scro_properties(rec: dict, fid_to_edid: dict) -> dict:
-    """Collect SCRO properties from record level and every stage log entry."""
-    props = _collect_scro_properties(rec, fid_to_edid)
-    stage_count = get_int(rec, 'StageCount')
-    for i in range(stage_count):
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        for j in range(log_count):
-            for name, fid in _collect_scro_properties(
-                    rec, fid_to_edid, prefix=f'Stage[{i}].Log[{j}].').items():
-                props.setdefault(name, fid)
-    return props
 
 
-def _quest_well_known_refs(rec: dict, xref=None) -> dict:
-    """{name: Papyrus type} of every property this quest's QF_ script declares.
-
-    Running the same converter the .psc was generated from is what tells us
-    WHICH properties the script actually declares — the synthesized records
-    (TES4ControlsDisabled, TES4Fame, TES4Msg_*) that resolve only through the
-    well-known registry, the engine-hardcoded names (Player) no SCRO covers,
-    and the declared TYPE of each, which decides whether an actor-base binding
-    must be redirected to the placed reference. Binding all ~1,880 registry
-    entries to every quest instead is what this replaced.
-
-    Best-effort: a converter failure yields an empty dict, and the property is
-    simply left unbound exactly as before this filtering existed.
-    """
-    scripts = []
-    record_script = get_str(rec, 'ResultScript')
-    if record_script:
-        scripts.append(record_script)
-    for i in range(get_int(rec, 'StageCount')):
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        if log_count:
-            for j in range(log_count):
-                src = get_str(rec, f'Stage[{i}].Log[{j}].ResultScript')
-                if src.strip():
-                    scripts.append(src)
-        else:
-            src = get_str(rec, f'Stage[{i}].ResultScript')
-            if src.strip():
-                scripts.append(src)
-    if not scripts or xref is None:
-        return {}
-
-    # One converter for all stages: convert_fragment deliberately preserves
-    # _property_refs across calls, which is how the QF_ generator accumulates
-    # the single declaration list the whole script shares.
-    from script_convert.converter import ScriptConverter
-    conv = ScriptConverter(xref)
-    for src in scripts:
-        try:
-            conv.convert_fragment(src, 'Quest')
-        except Exception:
-            continue
-    return dict(conv._property_refs)
 
 
-def _resolve_declared_properties(declared, well_known_props: dict = None) -> dict:
-    """FormID bindings for the engine-hardcoded and synthesized names a QF_
-    quest fragment declares.
-
-    The record's SCROs cover ordinary records, but NOT these: the player is in
-    no registry and its SCRO is deliberately skipped (see
-    _collect_scro_properties), and the synthesized records exist only in the
-    output. An unbound property is None and the first use aborts the WHOLE
-    fragment — `UrielSeptimRef.SetLookAt(Player)` killed Charactergen stage 12
-    before it unlocked CGEmperor01-24, leaving the Emperor with only 'Rumors'.
-
-    The player check comes FIRST so the engine's PlayerRef can never be
-    displaced by a same-named registry entry or record. Names that resolve to
-    nothing are omitted, never bound to zero.
-    """
-    out = {}
-    for name in (declared or ()):
-        low = name.lower()
-        if low in ('player', 'playerref'):
-            # An ActorBase-typed `Player` is the NPC_ (0x7), not the reference
-            # (0x14): the VM refuses a reference into an ActorBase property and
-            # the whole script's init aborts.  TES4 scripts reach the base by
-            # raw FormID — `GetIsID 7` in Knights' ND10 time-stop effect.
-            # `declared` is normally {name: type}, but callers may pass a
-            # bare sequence of names; without a type, assume the reference.
-            _dtype = (declared.get(name)
-                      if isinstance(declared, dict) else None)
-            out[name] = (_PLAYER_BASE_FID if _dtype == 'ActorBase'
-                         else _PLAYER_FORMID)
-        elif low in ENGINE_GLOBAL_FORMIDS:
-            out[name] = ENGINE_GLOBAL_FORMIDS[low]
-        elif well_known_props and name in well_known_props:
-            out[name] = well_known_props[name]
-    return out
 
 
-def _quest_stage_fragments(rec: dict) -> list:
-    """List (stage_index, log_index) tuples that need a Papyrus fragment.
-
-    A fragment is emitted for any stage log entry that has journal text or a
-    result script — the PSC generator emits Fragment_Stage_NNNN_Item_N for each,
-    and the VMAD fragment list must match exactly or the function never fires.
-    """
-    frags = []
-    stage_count = get_int(rec, 'StageCount')
-    for i in range(stage_count):
-        stage_idx = get_int(rec, f'Stage[{i}].Index')
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        # .strip() must match the PSC generator's filter exactly: E3 and
-        # SEObelisks have a whitespace-only '\r\n' stage-100 result script,
-        # which emitted a VMAD fragment entry with no matching .psc function.
-        if log_count > 0:
-            for j in range(log_count):
-                if (get_str(rec, f'Stage[{i}].Log[{j}].Text') or
-                        get_str(rec, f'Stage[{i}].Log[{j}].ResultScript').strip()):
-                    frags.append((stage_idx, j))
-        elif (get_str(rec, f'Stage[{i}].Text') or
-              get_str(rec, f'Stage[{i}].ResultScript').strip()):
-            frags.append((stage_idx, 0))
-    return frags
 
 
-def _quest_has_journal(rec: dict) -> bool:
-    """True if any stage carries journal log text (the quest is a real,
-    player-visible quest rather than a dialogue/control quest)."""
-    stage_count = get_int(rec, 'StageCount')
-    for i in range(stage_count):
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        if log_count > 0:
-            for j in range(log_count):
-                if get_str(rec, f'Stage[{i}].Log[{j}].Text'):
-                    return True
-        elif get_str(rec, f'Stage[{i}].LogEntry'):
-            return True
-    return False
 
 
 """ TES4 CTDA function indices used when resolving quest-target stage gates. """
@@ -314,61 +152,6 @@ _CTDA_OPS = {
 }
 
 
-def _target_live_at_stage(raw_hexes: list, stage_idx: int) -> bool:
-    """Would Oblivion have shown this quest target's marker at `stage_idx`?
-
-    Oblivion gates each QSTA with conditions — overwhelmingly `GetStage <op> N`
-    on the quest's own FormID, which is exactly "show this marker during this
-    part of the quest". Skyrim has no equivalent (its objective targets are
-    unconditional), so we resolve the gate here: evaluate the chain with
-    GetStage == stage_idx and put the target only on the objectives where it
-    holds.
-
-    OR semantics follow the CTDA chain rule: bit 0 of the type byte ORs a
-    condition with the NEXT one, so the chain is an AND of OR-groups. A
-    condition we cannot evaluate (any function other than GetStage/GetStageDone
-    — GetQuestVariable, GetDeadCount, …) is treated as PASSING: it is a runtime
-    fact we cannot know, and dropping the target on a maybe would lose a marker
-    Oblivion did show. A target with no conditions at all is always live.
-    """
-    if not raw_hexes:
-        return True
-
-    groups = []          # list of OR-groups; each group is a list of bools
-    current = []
-    for raw_hex in raw_hexes:
-        try:
-            raw = bytes.fromhex(raw_hex)
-        except ValueError:
-            continue
-        if len(raw) < 20:
-            continue
-        type_byte = raw[0]
-        comp = struct.unpack_from('<f', raw, 4)[0]
-        func = struct.unpack_from('<H', raw, 8)[0]
-
-        if func == _FUNC_GET_STAGE:
-            op = _CTDA_OPS.get(type_byte & 0xE0)
-            value = bool(op(float(stage_idx), comp)) if op else True
-        elif func == _FUNC_GET_STAGE_DONE:
-            # GetStageDone(quest, N): stage N has been completed. Approximate
-            # with "we are at or past N" — the only monotonic reading available
-            # from static data.
-            target_stage = struct.unpack_from('<I', raw, 16)[0]
-            done = stage_idx >= target_stage
-            op = _CTDA_OPS.get(type_byte & 0xE0)
-            value = bool(op(1.0 if done else 0.0, comp)) if op else True
-        else:
-            value = True                      # not statically knowable -> pass
-
-        current.append(value)
-        if not (type_byte & 0x01):            # no OR -> this group ends here
-            groups.append(current)
-            current = []
-    if current:
-        groups.append(current)
-
-    return all(any(g) for g in groups)
 
 
 # TES4 CTDA functions that express quest TIMING (when a line is live). These are
@@ -395,130 +178,12 @@ _PLAYER_PROGRESS_FUNCS = frozenset({71, 73})
 _VAR_STATE_FUNCS = frozenset({53, 79})
 
 
-def _has_quest_state_condition(rec: dict) -> bool:
-    """True if `rec` has any quest-TIMING condition of its own (GetStage etc.)."""
-    i = 0
-    while True:
-        raw_hex = rec.get(f'Condition[{i}].Raw')
-        if raw_hex is None:
-            return False
-        i += 1
-        if not raw_hex:
-            continue
-        try:
-            raw = bytes.fromhex(raw_hex)
-        except ValueError:
-            continue
-        if len(raw) >= 10 and struct.unpack_from('<H', raw, 8)[0] in \
-                _QUEST_STATE_FUNCS:
-            return True
 
 
-def _quest_state_ctdas(rec: dict, offset: int, script_vars: dict = None) -> list:
-    """Converted [(32-byte CTDA, cis2-or-None)] pairs for just the TIMING
-    conditions on `rec` — the gates a promoted choice target must inherit.
-
-    Reads Condition[i].Raw, keeps only:
-      * quest-state functions (GetStage etc.),
-      * run-on-target GetInFaction/GetFactionRank (player questline progress —
-        Oblivion's faction-rank-as-stage idiom),
-      * legacy variable reads, translated to GetVMScriptVariable/
-        GetVMQuestVariable with their CIS2 variable name,
-    converts + remaps them, and clears any dangling OR flag so the returned
-    list is a standalone AND-group. Identity/voice conditions are deliberately
-    excluded — the response topic already carries its own GetIsID; only the
-    missing TIMING gate is inherited. Returns [] when the revealer has no
-    timing conditions (e.g. an always-available greeting)."""
-    from .dialog_conditions import (CTDA_OR, CTDA_RUN_ON_TARGET, convert_ctda,
-                                    _convert_script_var_ctda)
-    out = []
-    i = 0
-    while True:
-        raw_hex = rec.get(f'Condition[{i}].Raw')
-        if raw_hex is None:
-            break
-        i += 1
-        if not raw_hex:
-            continue
-        try:
-            raw = bytes.fromhex(raw_hex)
-        except ValueError:
-            continue
-        if len(raw) < 10:
-            continue
-        func = struct.unpack_from('<H', raw, 8)[0]
-        if func in _VAR_STATE_FUNCS:
-            pair = _convert_script_var_ctda(raw, script_vars or {}, offset)
-            if pair is not None:
-                out.append(pair)
-            continue
-        if func not in _QUEST_STATE_FUNCS and not (
-                func in _PLAYER_PROGRESS_FUNCS
-                and raw[0] & CTDA_RUN_ON_TARGET):
-            continue
-        try:
-            ctda = convert_ctda(raw, offset)
-        except (ValueError, struct.error):
-            continue
-        if ctda is not None:
-            out.append((ctda, None))
-    # A trailing OR flag with nothing after it is invalid — clear it.
-    if out and (out[-1][0][0] & CTDA_OR):
-        out[-1] = (bytes([out[-1][0][0] & ~CTDA_OR]) + out[-1][0][1:],
-                   out[-1][1])
-    return out
 
 
-def _pack_gate_pair(pair) -> bytes:
-    """One inherited (CTDA, cis2) gate condition as packed subrecords."""
-    ctda, cis2 = pair
-    out = pack_subrecord('CTDA', ctda)
-    if cis2:
-        out += pack_string_subrecord('CIS2', cis2)
-    return out
 
 
-def _bark_choice_gate_bytes(revealer_gates: list) -> bytes:
-    """Combine per-revealer timing gates into one CTDA block for the
-    response topic's INFOs.
-
-    revealer_gates is a list (one entry per greeting that reveals this topic)
-    of lists of (converted CTDA bytes, cis2-or-None) pairs (that greeting's
-    timing AND-group). Semantics: the response is available if ANY revealer is
-    live (OR across revealers), and a revealer is live when ALL its conditions
-    hold (AND within).
-
-      * ANY revealer with an EMPTY gate → the response is always reachable from
-        that greeting → no gate at all (return b'').
-      * One revealer → emit its AND-group verbatim (covers stage-range gates
-        like `GetStage>=30 AND GetStage<120`).
-      * Several revealers each with exactly ONE condition → OR-chain them
-        (bit 0 set on all but the last).
-      * Several revealers where some carry an AND-group → a flat CTDA list
-        can't express OR-of-ANDs, so use the FIRST revealer's group (the
-        primary reveal path). Losing the gate entirely would let the topic leak
-        into the menu, which is the bug we're fixing; a slightly-off timing on
-        these ~31 multi-path topics is the lesser evil.
-    """
-    from .dialog_conditions import CTDA_OR
-    if not revealer_gates:
-        return b''
-    if any(len(g) == 0 for g in revealer_gates):
-        return b''                      # an always-available reveal path exists
-    if len(revealer_gates) == 1:
-        return b''.join(_pack_gate_pair(p) for p in revealer_gates[0])
-    if all(len(g) == 1 for g in revealer_gates):
-        # OR-chain of one condition per revealer.
-        out = b''
-        n = len(revealer_gates)
-        for idx, g in enumerate(revealer_gates):
-            c, cis2 = g[0]
-            is_last = (idx == n - 1)
-            tb = c[0] | CTDA_OR if not is_last else c[0] & ~CTDA_OR
-            out += _pack_gate_pair((bytes([tb]) + c[1:], cis2))
-        return out
-    # Mixed AND-groups across revealers — use the first revealer's group.
-    return b''.join(_pack_gate_pair(p) for p in revealer_gates[0])
 
 
 # FormID -> effective priority (0-100), from the most recent
@@ -539,128 +204,8 @@ QUEST_PRIORITY_MAX = 100
 ZERO_STAGE_TOP = 49
 
 
-def compute_quest_priorities(by_type: dict) -> dict:
-    """FormID -> effective dialogue-arbitration priority for every QUST.
-
-    Oblivion picks the first passing INFO in QUEST PRIORITY order (highest
-    first), NOT file order — Azzan's low-priority(11) first-meeting intro
-    would otherwise outrank the priority-60 Fighters Guild ad greeting that
-    reveals the join topics. Skyrim arbitrates dialogue by the QUEST's own
-    priority (QUST.DNAM.Priority), so the raw TES4 DATA.Priority value is
-    carried over for ordinary (staged) quests — EXCEPT that every STAGED
-    quest is boosted by a fixed offset so it universally outranks every
-    zero-stage "conversation container" quest (MG00General, MQConversations,
-    FGConversations, DarkConvSystem, ...), which exist purely to hold
-    ambient/HELLO-channel chatter. In Oblivion GREETING and HELLO are
-    separate channels, so a container quest's authored priority (sometimes
-    deliberately HIGH, e.g. MG00General=61, to win its own HELLO-channel
-    arbitration) never competed with a real quest's GREETING. Skyrim merges
-    both into one HELO topic per quest, so MG00General outranked
-    MG04Restore's priority-60 briefing outright: "Arielle only gives a
-    generic greeting" with the journal at the correct stage and every record
-    field individually correct. A quest with real stages represents actual
-    narrative progress the player is mid-story with, so it must always beat
-    a stage-less container quest's greeting.
-
-    The correction is a DOWNWARD CLAMP on container quests alone — staged
-    quests keep the priority their author wrote. TES4 priorities already live
-    in 0-100 (Oblivion's CS used the same band), so leaving them untouched is
-    both faithful and automatically in range; the ONLY thing that has to
-    change is a container quest that would outrank a staged one, and pulling
-    it down to ZERO_STAGE_TOP achieves the separation without moving anything
-    else. Container quests already at or below the ceiling keep their authored
-    value, so arbitration AMONG containers (two factions' idle chatter on one
-    generic NPC) is preserved exactly.
-
-    Two earlier approaches were WRONG and are recorded so they aren't retried:
-
-      * A uniform UPWARD shift on staged quests OVERFLOWED the band — TES4
-        priority 60 + offset 101 = 161 on FGC01Rats, and 265 of 391 quests
-        (68%) landed above 100. DNAM.Priority is not just a dialogue tiebreak,
-        it also arbitrates a quest ALIAS PACKAGE against an actor's standing
-        schedule, so an out-of-band value breaks AI too.
-      * RESCALING both groups onto sub-ranges stayed in band but destroyed the
-        authored values, collapsing 390 quests onto 35 distinct priorities
-        (125 tied at 83). Vanilla does the opposite: 1811 Skyrim.esm quests
-        use sparse, meaningful, clustered values (822 at 30, 280 at 0) that a
-        continuous remap cannot reproduce.
-
-    Only convert_QUST (the WRITTEN QUST.DNAM.Priority byte) reads this table.
-    DIAL PNAM must NOT: vanilla leaves PNAM at the 50.0 default on 5375 of
-    6535 player topics AND 659 of 664 Misc/greeting topics, i.e. greetings are
-    never boosted above the topic list. Writing quest priority into a bark
-    topic's PNAM put FGC01Rats' GREETING at 161 while its player topics stayed
-    at 50, and Pinarus lost every topic he owned (mountain-lion AND training).
-    """
-    quest_priority = {get_formid(r, 'FormID'): get_int(r, 'DATA.Priority')
-                      for r in by_type.get('QUST', [])
-                      if get_formid(r, 'FormID')}
-    staged_quest_fids = {get_formid(r, 'FormID') for r in by_type.get('QUST', [])
-                        if get_formid(r, 'FormID') and get_int(r, 'StageCount')}
-    zero_stage_fids = [f for f in quest_priority if f not in staged_quest_fids]
-    if staged_quest_fids and zero_stage_fids:
-        # Containers at or below the ceiling keep their authored priority
-        # untouched. Only the ones ABOVE it move, and they are ORDER-PRESERVING
-        # compressed into the headroom just under the ceiling rather than all
-        # clamped onto it — a flat clamp would tie MQConversations (85) with
-        # Dark00General (50) and hand arbitration between them to file order.
-        #
-        # The ceiling is FIXED, not min(staged priority): three staged quests
-        # (MQDragonArmor, SE06Battle, E3) are authored at 0, so a relative
-        # ceiling would be 0 and would flatten all 125 containers onto one
-        # value.
-        over = sorted((f for f in zero_stage_fids
-                       if quest_priority[f] > ZERO_STAGE_TOP),
-                      key=lambda f: (quest_priority[f], f))
-        if over:
-            # Distinct authored values map to distinct slots, highest landing on
-            # the ceiling, so relative order is exact. Slots run out only if a
-            # plugin has more than ZERO_STAGE_TOP distinct over-ceiling values;
-            # ties at the floor are then unavoidable but stay in the band.
-            distinct = sorted({quest_priority[f] for f in over})
-            base = max(0, ZERO_STAGE_TOP - len(distinct) + 1)
-            slot = {v: min(ZERO_STAGE_TOP, base + i)
-                    for i, v in enumerate(distinct)}
-            for f in over:
-                quest_priority[f] = slot[quest_priority[f]]
-    for fid, p in quest_priority.items():
-        quest_priority[fid] = max(0, min(QUEST_PRIORITY_MAX, p))
-    _QUEST_PRIORITY_OVERRIDE.clear()
-    _QUEST_PRIORITY_OVERRIDE.update(quest_priority)
-    return quest_priority
 
 
-def _quest_dnam(rec: dict) -> bytes:
-    """DNAM (12 bytes): Flags(U16) Priority(U8) FormVer(U8=0) Unknown(4) Type(U32).
-
-    TES4 flags -> TES5: keep StartGameEnabled (0x01) and AllowRepeatedStages
-    (0x08). A quest that was Start-Game-Enabled in Oblivion also gets
-    StartsEnabled (0x10) so it actually runs from a new game in Skyrim — which
-    is what makes its dialogue reachable. HasDialogueData (0x8000) is never set
-    (Skyrim.esm never uses it and it blocks dialogue processing).
-
-    Type: quests with journal stages get 8 (Side Quest) so they appear in the
-    journal. Type 0 (None) is Skyrim's journal-INVISIBLE control-quest type —
-    a Type-0 quest is never listed, so it can't be tracked and its objective
-    targets never produce compass/map markers (vanilla: only 16 of ~396
-    objective-bearing quests are Type 0).
-
-    Priority is the EFFECTIVE value from compute_quest_priorities() (staged
-    quests shifted above every zero-stage quest) when available, falling
-    back to the raw TES4 value for quests that table doesn't know about
-    (e.g. unit tests that convert a QUST record in isolation) — see that
-    function's docstring for why the raw DATA.Priority alone is not what the
-    engine arbitrates dialogue on.
-    """
-    tes4_flags = get_int(rec, 'DATA.Flags')
-    fid = get_formid(rec, 'FormID')
-    priority = _QUEST_PRIORITY_OVERRIDE.get(fid, get_int(rec, 'DATA.Priority'))
-    priority = max(0, min(QUEST_PRIORITY_MAX, priority))
-    flags = tes4_flags & 0x09          # StartGameEnabled | AllowRepeatedStages
-    if flags & 0x01:
-        flags |= 0x10                  # StartsEnabled
-    qtype = 8 if _quest_has_journal(rec) else 0
-    return struct.pack('<HBBII', flags, priority, 0, 0, qtype)
 
 
 # Oblivion shipped TWO journal texts for a control-tutorial stage — a gamepad
@@ -709,317 +254,14 @@ _CONTROL_TOKENS = {
 _CONTROL_TOKEN_RE = re.compile(r'&(\w+);')
 
 
-def _expand_control_tokens(text: str) -> str:
-    """Replace Oblivion `&sUActnX;` control tokens with Skyrim PC key names."""
-    if not text or '&' not in text:
-        return text
-    return _CONTROL_TOKEN_RE.sub(
-        lambda m: _CONTROL_TOKENS.get(m.group(1), m.group(0)), text)
 
 
-def _pc_stage_texts(texts: list) -> list:
-    """Drop console-only journal variants and expand PC control tokens.
-
-    `texts` is the stage's log entries in record order (None/'' preserved so
-    callers keep their QSDT pairing). Returns a list of the same length with
-    gamepad-only entries blanked to None and `&sUActnX;` tokens resolved to
-    Skyrim's default PC key names in whatever survives.
-    """
-    real = [(i, t) for i, t in enumerate(texts) if t]
-    if len(real) >= 2:
-        pad = [i for i, t in real
-               if _GAMEPAD_TEXT_RE.search(t) and not _PC_TEXT_RE.search(t)]
-        pc = [i for i, t in real if _PC_TEXT_RE.search(t)]
-        if pad and pc:
-            texts = [None if i in pad else t for i, t in enumerate(texts)]
-    return [_expand_control_tokens(t) if t else t for t in texts]
 
 
-def quest_objective_texts(rec: dict) -> list:
-    """The NNAM objective text of each objective convert_QUST emits, in order.
-
-    Skyrim shows the OBJECTIVE (NNAM) on the HUD, not the stage log entry
-    (CNAM). Both start from the same TES4 `Stage[].Log[].Text`, but NNAM is a
-    SHORT second-person imperative while CNAM is the long retrospective log
-    entry — vanilla never reuses one as the other. TES4 authored only the long
-    form, so `short_objective` swaps in the curated line (falling back to the
-    long text when the table has no entry). See objective_text.py.
-
-    The override builder needs this exact sequence to retranslate NNAM, so the
-    derivation lives here and both callers share it — reimplementing it in the
-    override spec is how the two drift apart.
-
-    One objective per stage index that has journal text, first non-empty log
-    entry winning, duplicate stage indices skipped.
-    """
-    out = []
-    seen_stages = set()
-    for i in range(get_int(rec, 'StageCount')):
-        stage_idx = get_int(rec, f'Stage[{i}].Index')
-        if stage_idx in seen_stages:
-            continue
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        texts = (_pc_stage_texts([get_str(rec, f'Stage[{i}].Log[{j}].Text')
-                                  for j in range(log_count)])
-                 if log_count > 0
-                 else [get_str(rec, f'Stage[{i}].LogEntry')])
-        txt = next((x for x in texts if x), None)
-        if not txt:
-            continue
-        seen_stages.add(stage_idx)
-        out.append(short_objective(txt))
-    return out
 
 
-def convert_QUST(rec: dict, fid_to_edid: dict = None,
-                 well_known_props: dict = None,
-                 unlock_plan: dict = None,
-                 unlock_globals: dict = None,
-                 pack_plan=None, xref=None) -> bytes:
-    """QUST — Quest conversion (original quest, not the synthetic dialogue one).
-
-    Order: EDID [VMAD] FULL DNAM NEXT [stages] [objectives] ANAM [aliases].
-    unlock_plan/unlock_globals bind the AddTopic unlock GLOB properties for
-    stage result scripts that reveal topics (the generated QF fragment sets
-    them via SetValue).
-    """
-    subs = b''
-    edid = get_str(rec, 'EditorID')
-    if edid:
-        subs += pack_string_subrecord('EDID', edid)
-
-    # VMAD — quest stage script fragments (Papyrus) plus the converted TES4
-    # quest script (SCRI), when either exists. The fragment list must match
-    # the generated PSC exactly.
-    stage_frags = _quest_stage_fragments(rec)
-    from .object_scripts import get_quest_script
-    attached = get_quest_script(get_formid(rec, 'FormID'))
-    if (stage_frags or attached) and edid:
-        from script_convert.pipeline import build_vmad_quest_fragments
-        prop_vals = (_collect_all_scro_properties(rec, fid_to_edid)
-                     if fid_to_edid else {})
-        # Bind every property the QF_ script DECLARES, not just what the SCROs
-        # cover: the player is in no registry and its SCRO is skipped, and the
-        # synthesized records (TES4ControlsDisabled, TES4Msg_*, ...) resolve
-        # ONLY through the well-known registry — looked up per declared name,
-        # because merging the whole ~1,880-entry registry put every unlock
-        # global on every scripted quest.
-        declared = _quest_well_known_refs(rec, xref)
-        for name, fid in _resolve_declared_properties(
-                declared, well_known_props).items():
-            if name.lower() in ('player', 'playerref'):
-                # The engine's PlayerRef always wins — a SCRO-derived case
-                # variant naming the converted TES4 player NPC_ would bind a
-                # BASE record the VM refuses, and the property reads None.
-                # (`fid` is already the base 0x7 when the property is declared
-                # ActorBase — see _resolve_declared_properties.)
-                for k in [k for k in prop_vals
-                          if k.lower() == name.lower() and k != name]:
-                    del prop_vals[k]
-                prop_vals[name] = fid
-            elif name.lower() in ENGINE_GLOBAL_FORMIDS:
-                prop_vals.setdefault(name, fid)
-            else:
-                prop_vals[name] = fid
-        # A reference-typed property naming an actor BASE means the placed
-        # instance (`CarmaloTruiand.moveto ...` on QF_MS26); the VM refuses an
-        # NPC_/CREA into it and the property reads None. Rebind the SCRO's
-        # base to its one placed ref — and bind names the SCROs missed.
-        if xref is not None:
-            from script_convert.constants import wants_placed_reference
-            offset = get_formid_index_offset()
-            for name, ptype in declared.items():
-                if not wants_placed_reference(ptype):
-                    continue
-                if name.lower() in ('player', 'playerref'):
-                    continue    # always PlayerRef 0x14, bound above
-                raw_hex = xref.edid_to_formid.get(name.lower(), '')
-                if not raw_hex or \
-                        xref.record_type.get(raw_hex, '') not in (
-                            'NPC_', 'CREA', 'ACTI', 'LIGH'):
-                    continue
-                ref_hex = xref.unique_placed_ref(raw_hex)
-                if not ref_hex:
-                    continue
-                try:
-                    fid = remap_formid(int(ref_hex, 16), offset)
-                except ValueError:
-                    continue
-                for k in [k for k in prop_vals
-                          if k.lower() == name.lower() and k != name]:
-                    del prop_vals[k]
-                prop_vals[name] = fid
-        if unlock_plan and unlock_globals:
-            ql = edid.lower()
-            for (qkey, _stage), gnames in unlock_plan['stage_reveals'].items():
-                if qkey == ql:
-                    for n in gnames:
-                        if n in unlock_globals:
-                            prop_vals[n] = unlock_globals[n]
-        subs += pack_subrecord('VMAD', build_vmad_quest_fragments(
-            edid, stage_frags, property_values=prop_vals or None,
-            attached_script=attached))
-
-    full = get_str(rec, 'FULL')
-    if full:
-        subs += pack_string_subrecord('FULL', full)
-
-    subs += pack_subrecord('DNAM', _quest_dnam(rec))
-    subs += pack_subrecord('NEXT', b'')
-
-    # Stages
-    stage_count = get_int(rec, 'StageCount')
-    for i in range(stage_count):
-        stage_idx = get_int(rec, f'Stage[{i}].Index')
-        subs += pack_subrecord('INDX', struct.pack('<HBB', stage_idx, 0, 0))
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        if log_count > 0:
-            stage_texts = _pc_stage_texts(
-                [get_str(rec, f'Stage[{i}].Log[{j}].Text')
-                 for j in range(log_count)])
-            for j in range(log_count):
-                log_flags = get_int(rec, f'Stage[{i}].Log[{j}].Flags')
-                subs += pack_uint8_subrecord('QSDT', log_flags & 0x03)
-                txt = stage_texts[j]
-                if txt:
-                    subs += pack_string_subrecord('CNAM', txt)
-        else:
-            complete = get_int(rec, f'Stage[{i}].CompleteQuest')
-            subs += pack_uint8_subrecord('QSDT', 0x01 if complete else 0)
-            txt = get_str(rec, f'Stage[{i}].LogEntry')
-            if txt:
-                subs += pack_string_subrecord('CNAM', txt)
-
-    # --- Quest targets -> reference aliases + per-objective targets ---
-    # Oblivion QSTA is QUEST-level: one entry per (target ref, condition set),
-    # where the conditions are GetStage bounds saying WHEN that target's compass
-    # marker is live. Skyrim QSTA is per-OBJECTIVE and vanilla leaves it
-    # UNCONDITIONAL — the objective being Displayed is what selects the marker
-    # (checked across Skyrim.esm: objectives read `QOBJ FNAM NNAM QSTA [QSTA…]`
-    # with CTDAs the rare exception, and the right target simply sits on the
-    # right objective).
-    #
-    # So the faithful mapping is to RESOLVE Oblivion's GetStage gates at build
-    # time rather than replay them at runtime: for each objective (= stage), emit
-    # only the targets whose TES4 conditions hold AT THAT STAGE, with no CTDAs.
-    # Carrying every target on every objective (the previous design) makes the
-    # engine face a list whose leading entries are false and it renders no marker
-    # at all — objective shows in the journal, compass/map stay empty.
-    alias_by_fid = {}
-    targets = []          # (alias_id, tes4_flags_low_byte, [raw TES4 ctda hex])
-    t = 0
-    while f'Target[{t}].FormID' in rec:
-        tfid = get_formid(rec, f'Target[{t}].FormID')
-        if tfid:
-            alias_id = alias_by_fid.setdefault(tfid, len(alias_by_fid))
-            tflags = get_int(rec, f'Target[{t}].Flags') & 0x01
-            raws = []
-            k = 0
-            while True:
-                raw = rec.get(f'Target[{t}].Condition[{k}].Raw')
-                if raw is None:
-                    break
-                raws.append(raw)
-                k += 1
-            targets.append((alias_id, tflags, raws))
-        t += 1
-
-    # Objectives — one per stage with journal text (objective index = stage
-    # index, which is what the generated stage fragments display).
-    seen_stages = set()
-    for i in range(stage_count):
-        stage_idx = get_int(rec, f'Stage[{i}].Index')
-        if stage_idx in seen_stages:
-            continue
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        texts = (_pc_stage_texts([get_str(rec, f'Stage[{i}].Log[{j}].Text')
-                                  for j in range(log_count)])
-                 if log_count > 0
-                 else [get_str(rec, f'Stage[{i}].LogEntry')])
-        txt = next((x for x in texts if x), None)
-        if not txt:
-            continue
-        seen_stages.add(stage_idx)
-        subs += pack_subrecord('QOBJ', struct.pack('<H', stage_idx))
-        subs += pack_uint32_subrecord('FNAM', 0)
-        # The HUD objective is the SHORT line, not the long log entry that
-        # CNAM (above) carries — see objective_text.py. Must stay identical to
-        # quest_objective_texts(), which the override builder uses to rebuild
-        # this same run for a translation plugin.
-        subs += pack_string_subrecord('NNAM', short_objective(txt))
-
-        live = [(a, f) for a, f, raws in targets
-                if _target_live_at_stage(raws, stage_idx)]
-        # An objective with no live target keeps its journal text but marks
-        # nothing — same as vanilla's marker-less objectives ("Return when
-        # you're ready"). If Oblivion gated every target away at this stage,
-        # honour that rather than inventing a marker.
-        emitted = set()
-        for alias_id, tflags in live:
-            if alias_id in emitted:
-                continue          # same ref gated by several stage windows
-            emitted.add(alias_id)
-            subs += pack_subrecord('QSTA', struct.pack('<iB3x',
-                                                       alias_id, tflags))
-
-    # --- Package aliases -------------------------------------------------
-    # A Skyrim quest package must hang off a reference alias (ALPC): that is
-    # what lets it outrank the actor's standing schedule, which is exactly what
-    # Oblivion achieved by putting a conditioned package at the top of the
-    # actor's AI list.  pack_plan (built in Phase 0) says which refs this quest's
-    # packages name; aliases are allocated here, and PACK reads back the SAME
-    # indices, so the two cannot drift.
-    qfid = get_formid(rec, 'FormID')
-    alias_packages = {}       # alias_id -> [pack_fid, ...]
-    if pack_plan is not None:
-        for ref_fid, alias_id in pack_plan.assign_aliases(qfid, alias_by_fid):
-            pkgs = pack_plan.packages_for_alias(qfid, ref_fid)
-            if pkgs:
-                alias_packages[alias_id] = pkgs
-        # A ref that was already a quest target can also run packages.
-        for ref_fid, alias_id in alias_by_fid.items():
-            pkgs = pack_plan.packages_for_alias(qfid, ref_fid)
-            if pkgs and alias_id not in alias_packages:
-                alias_packages[alias_id] = pkgs
-
-    subs += pack_uint32_subrecord('ANAM', len(alias_by_fid))  # Next Alias ID
-
-    # Reference aliases (forced ref).  Layout and flag value both follow vanilla:
-    # ALST, ALID, FNAM, ALFR, [ALPC...], VTCK, ALED.  **VTCK is present on
-    # 2687/2687 vanilla forced-ref aliases — a 100% invariant** (empty = "no
-    # voice-type override"), and every one of the 255 vanilla objective+forced-ref
-    # quests carries it.
-    # Flags 0x0292 = Optional (0x0002 — a fill failure must not block quest start,
-    # or the dialogue dies with it) + Allow Dead (0x0010) + Allow Disabled
-    # (0x0080) + Allow Reserved (0x0200); an attested vanilla combination.  The
-    # old 0x109A added Allow Reuse/Allow Destroyed and appears nowhere in vanilla.
-    for tfid, alias_id in sorted(alias_by_fid.items(), key=lambda kv: kv[1]):
-        subs += pack_uint32_subrecord('ALST', alias_id)
-        subs += pack_string_subrecord('ALID', _alias_name(tfid, alias_id,
-                                                          fid_to_edid))
-        subs += pack_uint32_subrecord('FNAM', 0x00000292)
-        subs += pack_formid_subrecord('ALFR', tfid)
-        for pfid in alias_packages.get(alias_id, ()):
-            subs += pack_formid_subrecord('ALPC', pfid)
-        subs += pack_formid_subrecord('VTCK', 0)
-        subs += pack_subrecord('ALED', b'')
-
-    return pack_record('QUST', qfid, get_int(rec, 'RecordFlags'), subs)
 
 
-def _alias_name(ref_fid: int, alias_id: int, fid_to_edid: dict) -> str:
-    """Stable, readable alias name.
-
-    Papyrus property bindings and ALPC links resolve by index, but a name that
-    tracks the reference makes the output legible in the CK/SSEEdit.  The player
-    alias is named 'Player' because that is what every vanilla quest calls it.
-    """
-    if ref_fid == 0x00000014:
-        return 'Player'
-    edid = (fid_to_edid or {}).get(ref_fid, '')
-    if edid:
-        return edid[:32]
-    return f'TES4Target{alias_id:02d}'
 
 
 # ===========================================================================
@@ -1773,43 +1015,16 @@ def build_say_topic_dispositions(by_type: dict) -> dict:
     return out
 
 
-def build_npc_to_vtyp_map(by_type: dict, num_new_masters: int,
-                          master_export: dict = None) -> dict:
-    """NPC/CREA FormID (remapped) -> VTYP FormID, from the VOICE the NPC
-    actually used in Oblivion.
+def _index_race_voices(by_type: dict) -> tuple:
+    """(RACE fid24 -> per-gender voice race, RACE fid24 -> the plugin's EditorID).
 
-    Oblivion resolves an NPC's voice folder through its RACE record's VNAM
-    (per-gender voice-race override), NOT the literal race: Khajiit->Argonian,
-    WoodElf/DarkElf->HighElf, Orc->Nord, Breton females->Imperial. The BSA has
-    NO recordings under khajiit/orc/wood elf/dark elf at all — assigning the
-    literal race gave those NPCs a VTYP whose voice folder is empty, so every
-    line was silent. Follow the same VNAM chain the engine uses so the
-    assigned VTYP is the folder the recordings really live in.
+    The plugin's own EditorID wins over the hardcoded Oblivion table, which
+    cannot name a race the plugin invented and misnames one that reuses an
+    Oblivion FormID for something else.
 
-    `master_export` adds the MASTERS' actors. A dependent plugin writes dialogue
-    for its master's NPCs (15 speakers in ElsweyrPelletine.esp), and a speaker
-    with no entry here reaches _topic_voice_types/_build_injected_ctdas as
-    nothing, so the line falls back to a default voice type. The masters' RACEs
-    are supplied by the CALLER through `by_type` (it prepends them to 'RACE'),
-    so only the actor side is read from here.
-
-    **A master's actor is keyed on its master_export KEY, not rec['FormID'].**
-    The record came from the master's OWN export, so its `FormID` field sits in
-    THAT file's index space; the key is the id in ours, which is what every
-    consumer of this map looks up.
+    See: docs/commentary/tes5_import_dialogue.md#voice-types-are-created-from-scratch
     """
-    from .skyrim_overrides import TES4_RACE_FID_TO_EDID, VOICE_TYPE_MAP
-    # RACE fid24 -> per-gender voice race fid24 (0/missing = the race itself).
-    race_voice = {}
-    # RACE fid24 -> the plugin's OWN EditorID.  A hardcoded Oblivion FormID
-    # table cannot name a race the plugin invented, and it silently misnames
-    # one that REUSES an Oblivion FormID for something else.  Nehrim does both:
-    # Alemanne1 sits at 0x18A893 (absent from the table -> every NPC fell
-    # through to the 'Imperial' default), and 0x19204 is HighElf in both games
-    # but Nehrim's reads FULL=Hochelf.  Its VNAM chain then points nearly every
-    # race at Alemanne1, which is exactly the one voice folder the BSA ships.
-    # The table stays as the fallback for master-owned races.
-    race_edids = {}
+    race_voice, race_edids = {}, {}
     for rr in by_type.get('RACE', []):
         rfid = get_formid(rr, 'FormID') & 0x00FFFFFF
         if not rfid:
@@ -1820,33 +1035,50 @@ def build_npc_to_vtyp_map(by_type: dict, num_new_masters: int,
         m = get_formid(rr, 'VNAM.MaleVoice') & 0x00FFFFFF
         f = get_formid(rr, 'VNAM.FemaleVoice') & 0x00FFFFFF
         race_voice[rfid] = {'Male': m or rfid, 'Female': f or rfid}
+    return race_voice, race_edids
 
+
+def build_npc_to_vtyp_map(by_type: dict, num_new_masters: int,
+                          master_export: dict = None) -> dict:
+    """NPC/CREA FormID (remapped) -> VTYP FormID, from the VOICE the actor used.
+
+    FO3/FNV actors name their voice type outright (NPC_.VTCK); Oblivion resolves
+    it through the RACE record's VNAM per-gender override, not the literal race.
+    `master_export` adds the masters' actors, read FIRST so this plugin's own
+    records overwrite them, and each is keyed on its master_export KEY -- the id
+    in OUR index space, which is what every consumer looks up.
+
+    See: docs/commentary/tes5_import_dialogue.md#voice-types-are-created-from-scratch
+    See: docs/commentary/tes4_export_falloutnv.md#voice-files
+    """
+    from .skyrim_overrides import TES4_RACE_FID_TO_EDID, VOICE_TYPE_MAP
+    from .synth_records import FALLOUT_VTYP_BY_EDID
+    authored_vtyp = {get_formid(v, 'FormID') & 0x00FFFFFF: fid
+                     for v in by_type.get('VTYP', ())
+                     for fid in (FALLOUT_VTYP_BY_EDID.get(
+                         (get_str(v, 'EditorID') or '').strip().lower()),)
+                     if fid}
+    race_voice, race_edids = _index_race_voices(by_type)
     npc_to_vtyp = {}
-    offset = num_new_masters
-    # (source id string, record) pairs. The masters come FIRST so this plugin's
-    # own records — an override included — overwrite them on the same key.
-    actor_sources = []
-    if master_export:
-        actor_sources.append((k, r) for k, r in master_export.items()
-                             if r.get('Signature') in ('NPC_', 'CREA'))
-    actor_sources.append((r.get('FormID', '0'), r) for sig in ('NPC_', 'CREA')
-                         for r in by_type.get(sig, []))
+    actor_sources = [((k, r) for k, r in (master_export or {}).items()
+                      if r.get('Signature') in ('NPC_', 'CREA')),
+                     ((r.get('FormID', '0'), r) for sig in ('NPC_', 'CREA')
+                      for r in by_type.get(sig, []))]
     for fid_str, rec in (p for src in actor_sources for p in src):
-        # Shift exactly as the record converters do, for any source index —
-        # an override keeps its master's index and must still land on the
-        # same key the converter stamps.
         try:
-            remapped = remap_formid(int(fid_str, 16), offset, is_own_id=True)
+            remapped = remap_formid(int(fid_str, 16), num_new_masters,
+                                    is_own_id=True)
         except (TypeError, ValueError):
             continue
-        gender = 'Female' if (get_int(rec, 'ACBS.Flags') & 1) else 'Male'
-        race_fid = get_formid(rec, 'RNAM.Race') & 0x00FFFFFF
-        voice_race_fid = race_voice.get(race_fid, {}).get(gender, race_fid)
-        race_edid = (race_edids.get(voice_race_fid)
-                     or TES4_RACE_FID_TO_EDID.get(voice_race_fid,
-                                                  'Imperial'))
-        vtyp = (VOICE_TYPE_MAP.get((race_edid, gender))
-                or VOICE_TYPE_MAP.get(('Imperial', gender), 0))
+        vtyp = authored_vtyp.get(get_formid(rec, 'VTCK.Voice') & 0x00FFFFFF)
+        if not vtyp:
+            gender = 'Female' if (get_int(rec, 'ACBS.Flags') & 1) else 'Male'
+            race_fid = get_formid(rec, 'RNAM.Race') & 0x00FFFFFF
+            voice_race = race_voice.get(race_fid, {}).get(gender, race_fid)
+            race_edid = (race_edids.get(voice_race)
+                         or TES4_RACE_FID_TO_EDID.get(voice_race, 'Imperial'))
+            vtyp = (VOICE_TYPE_MAP.get((race_edid, gender))
+                    or VOICE_TYPE_MAP.get(('Imperial', gender), 0))
         if vtyp:
             npc_to_vtyp[remapped] = vtyp
     return npc_to_vtyp
@@ -2352,7 +1584,7 @@ def build_dialog_groups(by_type: dict, writer, npc_to_vtyp: dict,
         if not is_bark_info:
             conv_choice_targets.update(targets_here)
             continue
-        gate = _quest_state_ctdas(info_rec, offset, script_vars)
+        gate = quest_state_ctdas(info_rec, offset, script_vars)
         for cfid in targets_here:
             bark_choice_gate[cfid].append(gate)  # gate may be [] (no timing)
     # Promote to top-level only when every revealer contributes a real timing
@@ -2691,10 +1923,7 @@ def _build_one_topic(dial_rec, info_by_dial, writer, offset,
         unlock_gate_bytes = pack_subrecord('CTDA', build_ctda(
             FUNC_GET_GLOBAL_VALUE, param1=gfid))
 
-    # Bark-choice timing gate: a top-level response topic reached from a
-    # (stage-gated) greeting inherits that greeting's quest-state gate so it
-    # only surfaces when Oblivion would have offered the choice.
-    bark_choice_gate_bytes = _bark_choice_gate_bytes(
+    bark_gate_bytes = bark_choice_gate_bytes(
         bark_choice_gate.get(dial_fid, []))
 
     # A conditionless line in a topic whose every other line shares a world-
@@ -2728,7 +1957,7 @@ def _build_one_topic(dial_rec, info_by_dial, writer, offset,
         topic_npc_fids=topic_npc_fids, service_gate_bytes=service_gate_bytes,
         unlock_gate_bytes=unlock_gate_bytes,
         shared_state_bytes=shared_state_bytes,
-        bark_choice_gate_bytes=bark_choice_gate_bytes, service_kind=service_kind,
+        bark_choice_gate_bytes=bark_gate_bytes, service_kind=service_kind,
         orig_quest_fid=orig_quest_fid, sge_quest_fids=sge_quest_fids,
         offset=offset, unlock_plan=unlock_plan,
         unlock_globals=unlock_globals, fid_to_edid=fid_to_edid,
@@ -2812,7 +2041,7 @@ def _convert_topic_infos(child_infos, owner_qfid, ctx):
             # GetStage/GetStageDone/GetQuestRunning knows when it should show;
             # ANDing the greeting's (possibly different) stage would suppress it.
             bc_gate = ctx.get('bark_choice_gate_bytes', b'')
-            if bc_gate and _has_quest_state_condition(info_rec):
+            if bc_gate and has_quest_state_condition(info_rec):
                 bc_gate = b''
             if bc_gate:
                 ctx['stats']['bark_choice_gated'] = \

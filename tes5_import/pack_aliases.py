@@ -98,7 +98,7 @@ def build_script_var_map(by_type: dict, master_export: dict = None) -> dict:
     condition without a variable NAME, so it emits no CIS2 and can never pass.
 
     Keys stay LOW-24 on purpose.  The only consumer is
-    dialog_conditions._convert_script_var_ctda, which looks up a CTDA's param1
+    dialog_conditions.convert_script_var_ctda, which looks up a CTDA's param1
     — a RAW TES4 FormID with no load-order offset applied — so it masks to the
     low 24 bits.  Keying this map on the remapped fid instead makes every
     GetScriptVariable/GetQuestVariable condition miss, which silently un-gates

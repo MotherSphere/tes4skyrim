@@ -340,7 +340,7 @@ _RECORD_TYPE_PAPYRUS = {
 # Utility functions (used by both converter.py and pipeline.py)
 # ===========================================================================
 
-def _sanitize_name(name: str) -> str:
+def sanitize_name(name: str) -> str:
     """Sanitize a script name for use as a filename."""
     return re.sub(r'[^\w]', '_', name)
 
@@ -390,7 +390,7 @@ def papyrus_script_name(edid: str, prefix: str = 'TES4_') -> str:
     which keeps them unique (several Oblivion scripts differ only in a suffix
     past the cut, e.g. TrigZoneCloseCurrentOblivionRdCitadel0{1..5}SCRIPT).
     """
-    name = prefix + _sanitize_name(edid)
+    name = prefix + sanitize_name(edid)
     if len(name) <= PAPYRUS_MAX_SCRIPT_NAME:
         return name
     digest = hashlib.md5(name.encode('utf-8')).hexdigest()[:4].upper()
@@ -399,7 +399,7 @@ def papyrus_script_name(edid: str, prefix: str = 'TES4_') -> str:
     return f'{name[:keep]}_{digest}'
 
 
-def _safe_property_name(name: str) -> str:
+def safe_property_name(name: str) -> str:
     """Return a Papyrus-safe property name, renaming reserved words."""
     # Oblivion's parser accepts quotes around any EditorID and Nehrim's authors
     # use them constantly (173 sites: `SetStage "MQ01Tate" 20`,
@@ -454,19 +454,9 @@ def _canonical_global(name: str) -> str:
     return _GLOBAL_CANONICAL.get(name.lower(), name)
 
 
-def _record_type_to_papyrus(rtype: str) -> str:
-    """Map a TES4 record type to a Papyrus property type."""
-    return _RECORD_TYPE_PAPYRUS.get(rtype, 'ObjectReference')
-
-
 def record_type_to_papyrus(rtype: str) -> str:
     """Map a TES4 record type to a Papyrus property type."""
-    return _record_type_to_papyrus(rtype)
-
-
-def safe_property_name(name: str) -> str:
-    """Return a Papyrus-safe property name, renaming reserved words."""
-    return _safe_property_name(name)
+    return _RECORD_TYPE_PAPYRUS.get(rtype, 'ObjectReference')
 
 
 def is_base_object_type(ptype: str) -> bool:
@@ -535,7 +525,7 @@ def wants_placed_reference(ptype: str) -> bool:
 def _record_type_to_base_papyrus(rtype: str) -> str:
     """Map a TES4 record type to the Papyrus type of its BASE form.
 
-    `_record_type_to_papyrus` answers "what do I call a *reference* to this",
+    `record_type_to_papyrus` answers "what do I call a *reference* to this",
     which is what most TES4 script arguments mean.  Base-object comparisons
     (`GetIsID`) mean the opposite: the operand is the base record itself, so an
     NPC_ is an ActorBase (not an Actor) and a placed reference resolves to the

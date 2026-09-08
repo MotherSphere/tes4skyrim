@@ -2080,7 +2080,7 @@ class TestServiceConversion:
         record's OWN DNAM.Priority byte has NO EFFECT in-game, because the
         engine arbitrates dialogue on the quest's own priority. convert_QUST
         must write the EFFECTIVE (boosted) priority, not the raw TES4 value."""
-        from tes5_import.dialog_converter import compute_quest_priorities, convert_QUST
+        from tes5_import.quest_converter import compute_quest_priorities, convert_QUST
         staged = {'Signature': 'QUST', 'FormID': '00035713',
                  'EditorID': 'RealQuest', 'DATA.Flags': '0',
                  'DATA.Priority': '60', 'StageCount': '1',
@@ -2116,7 +2116,7 @@ class TestServiceConversion:
         is why converted escort/travel packages could pass their condition and
         start (the actor stands up) yet never actually travel.
         """
-        from tes5_import.dialog_converter import (
+        from tes5_import.quest_converter import (
             QUEST_PRIORITY_MAX, compute_quest_priorities, convert_QUST)
         # Authored priorities spanning TES4's range, staged and zero-stage.
         quests = []
@@ -2147,11 +2147,7 @@ class TestServiceConversion:
                 assert pri[int(q['FormID'], 16)] == int(q['DATA.Priority']), \
                     'a staged quest must keep the priority its author wrote'
 
-        # No container may sit above the ceiling, so a normally-authored staged
-        # quest outranks every container. (Three vanilla staged quests are
-        # authored at 0, so this is NOT a universal min(staged) > max(zero) —
-        # clamping to that would flatten all 125 containers onto one value.)
-        from tes5_import.dialog_converter import ZERO_STAGE_TOP
+        from tes5_import.quest_converter import ZERO_STAGE_TOP
         zero = [pri[int(q['FormID'], 16)] for q in quests
                 if not int(q['StageCount'])]
         assert max(zero) <= ZERO_STAGE_TOP, \
@@ -3589,8 +3585,8 @@ class TestQuestJournalPlatformText:
     stage; Oblivion picked one at runtime, Skyrim renders both (2026-07-24)."""
 
     def test_gamepad_variant_dropped_when_pc_variant_exists(self):
-        from tes5_import.dialog_converter import _pc_stage_texts
-        out = _pc_stage_texts([
+        from tes5_import.quest_converter import pc_stage_texts
+        out = pc_stage_texts([
             '',
             'Use the left stick to move around. The right stick turns you.',
             'To move forward, &sUActnForward;. The mouse turns you.',
@@ -3601,8 +3597,8 @@ class TestQuestJournalPlatformText:
 
     def test_control_tokens_expanded(self):
         """&sUActnX; is an Oblivion UI token; Skyrim prints it verbatim."""
-        from tes5_import.dialog_converter import _pc_stage_texts
-        out = _pc_stage_texts(
+        from tes5_import.quest_converter import pc_stage_texts
+        out = pc_stage_texts(
             ['To ready your weapon, &sUActnRdyitem;. To block, '
              '&sUActnBlock;.'])
         assert '&sUActn' not in out[0]
@@ -3611,9 +3607,9 @@ class TestQuestJournalPlatformText:
     def test_ordinary_multi_entry_stage_untouched(self):
         """Only a clean gamepad/PC split may drop anything — a quest with two
         unrelated journal entries must keep both."""
-        from tes5_import.dialog_converter import _pc_stage_texts
+        from tes5_import.quest_converter import pc_stage_texts
         texts = ['Kill the bandit leader.', 'Return to Jauffre.']
-        assert _pc_stage_texts(texts) == texts
+        assert pc_stage_texts(texts) == texts
 
 
 class TestSayLineDurations:
@@ -6052,7 +6048,7 @@ class TestQuestObjectiveOverrideText:
     def test_objective_text_is_retranslated(self):
         from tes5_import.export_diff import diff_records
         from tes5_import.override_builder import apply_changes
-        from tes5_import.dialog_converter import convert_QUST
+        from tes5_import.quest_converter import convert_QUST
 
         master = self._quest('Merre Quest Ratten', 'Arbeit in der Mine')
         plugin = self._quest("Merre's Rat Quest", 'Work in the Mine')
@@ -6071,8 +6067,8 @@ class TestQuestObjectiveOverrideText:
 
     def test_derivation_matches_the_converter(self):
         """The helper must yield exactly the NNAMs convert_QUST emits."""
-        from tes5_import.dialog_converter import (convert_QUST,
-                                                  quest_objective_texts)
+        from tes5_import.quest_converter import (convert_QUST,
+                                                 quest_objective_texts)
         rec = self._quest('Some journal line', 'A Quest')
         emitted = [v for s, v in self._subs(convert_QUST(rec)) if s == b'NNAM']
         derived = quest_objective_texts(rec)
@@ -6691,13 +6687,13 @@ class TestObjectiveText:
     def test_table_keys_match_the_converter_derivation(self):
         """THE COUPLING THAT WOULD BREAK SILENTLY.
 
-        quest_objective_texts applies _pc_stage_texts first -- dropping gamepad
+        quest_objective_texts applies pc_stage_texts first -- dropping gamepad
         journal variants and expanding &sUActnX; control tokens -- and the
         table was built from that POST-processed text. If either transform
         changes, lookups start missing and every objective quietly reverts to
         the long journal paragraph with nothing logged.
         """
-        from tes5_import.dialog_converter import quest_objective_texts
+        from tes5_import.quest_converter import quest_objective_texts
         from tes5_import.objective_text import (load_objective_text,
                                                 short_objective)
         load_objective_text(quiet=True)

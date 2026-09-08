@@ -20,7 +20,7 @@ from script_convert import resolve_name as _resolve_name
 from script_convert.constants import (
     ACTOR_VALUE_MAP, ANIM_GROUP_EVENTS, ATTRIBUTE_STUB_VALUE, CASTABLE,
     PLACED_REF_SIGS, TES4_ASSAULT_BOUNTY, TES4_ATTRIBUTES, TES4_MURDER_BOUNTY,
-    TES4_STEAL_BOUNTY, _safe_property_name, papyrus_script_name
+    TES4_STEAL_BOUNTY, safe_property_name, papyrus_script_name
 )
 from script_convert.command_rows import (
     COMMAND_ROWS, GMST_TO_ACTOR_VALUE, ACTOR_VALUE_FUNCTIONS,
@@ -117,7 +117,7 @@ def stage(ctx, call) -> str:
     quest_src = parts[0].strip() if parts else (call.ref or '')
     if not quest_src:
         return None
-    prop = _safe_property_name(quest_src)
+    prop = safe_property_name(quest_src)
     # Never DOWNGRADE: the same quest is often reached both as a stage target
     # and as a cross-script variable owner (`Arena.SetStage 10` beside
     # `Arena.ChorrolMatch`), and the specific TES4_<script> type is what makes
@@ -155,7 +155,7 @@ def quest_state(ctx, call) -> str:
     # ABORTS the fragment -- so the Shivering Isles post-quest dialogue quest
     # was never started.
     quest_src = ctx._scro_alias_for(quest_src) or quest_src
-    prop = _safe_property_name(quest_src)
+    prop = safe_property_name(quest_src)
     # Keep an existing type: a TES4_XxxScript (which extends Quest) still
     # answers Start/Stop/IsRunning, and the cross-script variable reads that
     # need that type keep working.  Quest is enough when nothing is known --
@@ -182,7 +182,7 @@ def global_value(ctx, call) -> str:
     gname = call.source(0).strip()
     if not gname:
         return None
-    safe = _safe_property_name(gname)
+    safe = safe_property_name(gname)
     ctx.sc.property_refs[safe] = 'GlobalVariable'
     if call.name == 'getglobalvalue':
         return ctx._global_read(safe)
@@ -224,7 +224,7 @@ def udf_call(ctx, call) -> str:
         return None
     fid = ctx.xref.edid_to_formid.get(target.lower(), '') if ctx.xref else ''
     canon = ctx.xref.formid_to_edid.get(fid, target) if fid else target
-    prop = _safe_property_name(canon)
+    prop = safe_property_name(canon)
     ctx.sc.property_refs[prop] = papyrus_script_name(canon)
     args = [call.arg(i) for i in range(1, len(call))]
     ctx.sc.udf_calls.append((prop, tuple(args)))
@@ -251,7 +251,7 @@ def say(ctx, call) -> str:
     n = 1 if (call.name == 'sayto' and len(parts) >= 2) else 0
     topic = 'None'
     if len(parts) > n:
-        topic = _safe_property_name(parts[n].strip().split()[0])
+        topic = safe_property_name(parts[n].strip().split()[0])
         ctx._mark_topic_property(parts[n].strip().split()[0])
 
     ref = ctx._resolve_objref_ref(call.ref, call.extends)
@@ -561,7 +561,7 @@ def magic_effect_visuals(ctx, call) -> str:
     if not shader:
         return ctx.note(f'{call.written()} (no shader found for effect code)')
     ref = ctx._resolve_objref_ref(call.ref, call.extends)
-    safe = _safe_property_name(shader)
+    safe = safe_property_name(shader)
     ctx.sc.property_refs[safe] = 'EffectShader'
     if call.name in ('sme', 'stopmagiceffectvisuals'):
         return f'{safe}.Stop({ref})'
@@ -599,7 +599,7 @@ def get_is_current_package(ctx, call) -> str:
     ref = ctx._resolve_self_ref(call.ref, call.extends, actor_func=True)
     if ref == 'Self' and call.extends != 'Actor':
         ref = '(Self as Actor)'
-    safe = _safe_property_name(arg)
+    safe = safe_property_name(arg)
     ctx.sc.property_refs[safe] = 'Package'
     return f'({ref}.GetCurrentPackage() == {safe})'
 
@@ -769,7 +769,7 @@ def is_in_faction(ctx, call) -> str:
     """IsInFaction -- Papyrus declares it on Actor, so the subject is cast."""
     if not len(call):
         return None
-    ctx.sc.property_refs[_safe_property_name(call.source(0).strip())] = 'Faction'
+    ctx.sc.property_refs[safe_property_name(call.source(0).strip())] = 'Faction'
     ref = ctx._resolve_self_ref(call.ref, call.extends, actor_func=True)
     if ref == 'Self' and call.extends != 'Actor':
         ref = '(Self as Actor)'
@@ -816,7 +816,7 @@ def faction_reaction(ctx, call) -> str:
     for n in (0, 1):
         name = call.source(n).strip()
         if name:
-            ctx.sc.property_refs[_safe_property_name(name)] = 'Faction'
+            ctx.sc.property_refs[safe_property_name(name)] = 'Faction'
     f1, f2 = call.arg(0), call.arg(1)
     tiered = ctx._faction_reaction_call(
         f1, f2, call.source(2, '0'),
@@ -857,7 +857,7 @@ def get_in_cell(ctx, call) -> str:
         return f'{helper}({ref})'
 
     # A single cell compares directly.
-    prop = _safe_property_name(interiors[0] if interiors else name)
+    prop = safe_property_name(interiors[0] if interiors else name)
     ctx.sc.property_refs[prop] = 'Cell'
     return f'({ref}.GetParentCell() == {prop})'
 
@@ -982,7 +982,7 @@ def _is_faction(ctx, call, arg: str) -> bool:
         return True
     refs = ctx.sc.property_refs
     return 'Faction' in (refs.get(arg, ''),
-                         refs.get(_safe_property_name(src), ''))
+                         refs.get(safe_property_name(src), ''))
 
 
 # ---------------------------------------------------------------------------
@@ -1089,7 +1089,7 @@ def chargen_menu(ctx, call) -> str:
     ctx.sc.chargen_menu_seq += 1
     var = f'TES4_menuPick{ctx.sc.chargen_menu_seq}'
     retry = f'TES4_menuRetry{ctx.sc.chargen_menu_seq}'
-    first = _safe_property_name(pages[0][0])
+    first = safe_property_name(pages[0][0])
     ctx.sc.property_refs[first] = 'Message'
 
     # Show() returns -1 when the box could not display (a menu/dialogue
@@ -1109,7 +1109,7 @@ def chargen_menu(ctx, call) -> str:
     # Slot PAGE_OPTIONS on a non-final page is "More ...": the global choice
     # index is 9*page + button (see message_menus._paged).
     for page, (medid, _title, _btns) in enumerate(pages[1:], start=1):
-        safe = _safe_property_name(medid)
+        safe = safe_property_name(medid)
         ctx.sc.property_refs[safe] = 'Message'
         lines += [f'If {var} == {PAGE_OPTIONS * page}',
                   f'  {var} = {PAGE_OPTIONS * page} + {safe}.Show()',
@@ -1122,7 +1122,7 @@ def chargen_menu(ctx, call) -> str:
         lines.append(f'{keyword} {var} == {idx}')
         keyword, acted = 'ElseIf', True
         for spell in spells:
-            safe = _safe_property_name(spell)
+            safe = safe_property_name(spell)
             ctx.sc.property_refs[safe] = 'Spell'
             lines.append(f'  Game.GetPlayer().AddSpell({safe}, false)')
     if acted:
@@ -1135,7 +1135,7 @@ def chargen_menu(ctx, call) -> str:
     # an ungated fallback for that case.
     gname = plan.get('choice_global')
     if gname:
-        safe = _safe_property_name(gname)
+        safe = safe_property_name(gname)
         ctx.sc.property_refs[safe] = 'GlobalVariable'
         lines += [f'If {var} >= 0', f'  {safe}.SetValue({var} + 1)', 'EndIf']
     lines.append('TES4_ChargenMenuBusy = False')

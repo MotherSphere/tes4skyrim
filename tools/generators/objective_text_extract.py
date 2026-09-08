@@ -31,7 +31,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from tes5_import.text_reader import parse_export_file, get_int, get_str
-from tes5_import.dialog_converter import _pc_stage_texts
+from tes5_import.quest_converter import pc_stage_texts
 
 
 def objective_slots(rec):
@@ -47,7 +47,7 @@ def objective_slots(rec):
         if stage_idx in seen_stages:
             continue
         log_count = get_int(rec, f'Stage[{i}].LogCount')
-        texts = (_pc_stage_texts([get_str(rec, f'Stage[{i}].Log[{j}].Text')
+        texts = (pc_stage_texts([get_str(rec, f'Stage[{i}].Log[{j}].Text')
                                   for j in range(log_count)])
                  if log_count > 0
                  else [get_str(rec, f'Stage[{i}].LogEntry')])

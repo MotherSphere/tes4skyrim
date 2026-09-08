@@ -27,6 +27,11 @@ No root required. When the toolchain is missing, `--bootstrap` fetches the
 Ubuntu packages with `apt-get download` and unpacks them into ~/.cache, which
 needs no privileges -- `sudo apt-get install` would need a password this
 script has no way to supply.
+
+Decoders cover every source format the games ship: Oblivion voice lines are
+MP3, FO3/FNV's are Ogg Vorbis, and sound effects are PCM WAV (adpcm_ms and
+the wider PCM widths cover the handful of odd files in the BSAs). ffmpeg's
+native vorbis decoder is LGPL, so it does not change this build's licence.
 """
 
 import argparse
@@ -62,14 +67,12 @@ CONFIGURE_FLAGS = [
     '--disable-sdl2', '--disable-schannel', '--disable-debug',
     '--disable-programs', '--enable-ffmpeg',
     '--disable-avdevice', '--disable-postproc', '--disable-swscale',
-    # Oblivion voice lines are MP3; sound effects are PCM WAV. adpcm_ms and
-    # the wider PCM widths cover the handful of odd files in the BSAs.
-    '--enable-decoder=mp3,mp3float,pcm_s16le,pcm_u8,pcm_s24le,pcm_s32le,'
-    'pcm_f32le,adpcm_ms',
+    '--enable-decoder=mp3,mp3float,vorbis,pcm_s16le,pcm_u8,pcm_s24le,'
+    'pcm_s32le,pcm_f32le,adpcm_ms',
     '--enable-encoder=pcm_s16le',
-    '--enable-demuxer=mp3,wav,aiff',
+    '--enable-demuxer=mp3,ogg,wav,aiff',
     '--enable-muxer=wav',
-    '--enable-parser=mpegaudio',
+    '--enable-parser=mpegaudio,vorbis',
     '--enable-protocol=file',
     '--enable-filter=aresample,aformat,anull,atrim,volume',
     '--enable-small',

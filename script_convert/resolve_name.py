@@ -21,7 +21,7 @@ import re
 
 from script_convert.constants import (
     FAME_GLOBALS, KNOWN_GLOBALS, TES4_MURDER_BOUNTY, _FORM_TYPE_TESTS,
-    _canonical_global, _safe_property_name
+    _canonical_global, safe_property_name
 )
 from script_convert.command_rows import (
     COMMAND_ROWS, HANDLED_COMMANDS, ACTOR_VALUE_MAP_LOW,
@@ -321,6 +321,6 @@ def _record(conv, expr: str, low: str):
     # Papyrus is also case-insensitive the two declarations collided, the
     # caller's type lost, and the call became "undefined function".
     canon = xref.formid_to_edid.get(fid, expr)
-    safe = _safe_property_name(canon)
+    safe = safe_property_name(canon)
     conv.sc.property_refs[safe] = ptype
     return conv._global_read(safe) if ptype == 'GlobalVariable' else safe

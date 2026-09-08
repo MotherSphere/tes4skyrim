@@ -1304,3 +1304,92 @@ StartCombat needs the first, and every converted getdestroyed reads the second.
 The MESG menus are conditional on a plan, but their registration in
 WELL_KNOWN_PROPERTIES is what resolves the TES4Msg_* Message properties the
 converted .psc files declare -- the same TES4Fame/TES4Unlock binding pattern.
+
+## <a id="addtopic-unlock-gates"></a>AddTopic unlock gates: what reveals a topic
+
+**Code:** `tes5_import/dialog_unlocks.py`
+
+### Explicit reveals versus mentions
+
+EXPLICIT reveals (an `AddTopic` data list, an `AddTopic` script command, a Choice
+link) make the target reachable the instant the revealing line plays, independent
+of the target's own conditions.
+
+MENTION reveals -- the target's FULL name appearing in prose -- are tracked
+separately. An Oblivion greeting saying "you're ready for advancement" only
+auto-adds the topic WHEN THAT LINE FIRES, which is itself stage-gated, so a
+mention in a bark line must NOT count as "revealed on first contact". Treating
+it as one wrongly ungated 162 topics, e.g. Azzan's "Advancement" showing before
+the guild is joined.
+
+A choice link to a gated topic also reveals it: in Oblivion, offering a choice
+makes the target reachable regardless of its added state, and once taken it stays
+known. Speaking a line of topic T already requires T unlocked, so self-reveals
+are meaningless and would only bloat the fragment count.
+
+### Bark-revealed topics are not gated
+
+A GREETING/HELLO revealer fires the moment the player contacts the NPC, so in
+Oblivion the topic is effectively visible on first talk. A gate there only adds
+the risk of the reveal fragment racing the menu -- or a different greeting
+playing -- and locking the topic. Their own GetIsID/faction/stage conditions do
+the real filtering. Gates stay only on topics revealed exclusively by
+conversation lines or quest stages (e.g. "Rats" after Azzan's contract line).
+
+Only an EXPLICIT bark reveal (AddTopic/Choice) counts; a prose mention rides the
+bark line's own conditions and keeps the gate.
+
+### Why quest stages are the robust anchor
+
+A dialogue reveal is only as reliable as the line firing again, and an INFO's
+OnEnd fragment fires ONCE, while you are still in the menu. If a topic's only
+revealer for a given NPC is that one line and no post-reveal greeting re-fires
+it, a single missed or raced `SetValue` leaves the gate shut forever -- globals
+persist, so a reload does not help.
+
+This is the Azzan vs Burz split. Burz has a member greeting ("Maybe you want a
+contract?") that re-reveals `contract` on every talk, so his gate is continually
+re-armed. Azzan's post-join greetings are all gated to LATER stages, so once you
+join him nothing re-reveals it and the fragile one-shot is the whole story.
+
+The robust anchor is the QUEST STAGE the same result script sets: a stage
+fragment is guaranteed to run when the stage is reached, independent of dialogue
+timing, and it too persists. So any reveal whose result script also does
+`SetStage QUEST N` is additionally emitted as a stage reveal for (QUEST, N) --
+the Fighters Guild join line's `SetStage FGD00JoinFG 100` makes the JoinFG
+stage-100 fragment set `TES4Unlock_contract`, giving Azzan the same always-armed
+guarantee Burz gets from his greeting. This covers 806 reveals game-wide, not a
+special case.
+
+A reveal can only be anchored to a stage that ACTUALLY emits a fragment: the QUST
+VMAD fragment list (`tes5_import`) and the generated `.psc` functions
+(`script_convert`) must match exactly, so binding a `SetValue` to a stage with no
+fragment would either be dropped or create a dangling VMAD entry.
+
+### The invariant: a gate with no revealer is an unopenable door
+
+The gate (`GetGlobalValue` in the ESM) and the thing that opens it (a `SetValue`
+in a generated Papyrus fragment) are built from THIS plan by two different
+pipelines -- `tes5_import` writes the condition, `script_convert` writes the
+fragment body. If a topic is gated but nothing anywhere sets its global, the
+topic can NEVER appear: quest-blocking, and invisible to every record-level check
+because the ESM looks perfect.
+
+An ungated topic that shows a little early is a cosmetic bug; a gated topic with
+no revealer is a dead quest. So when the two disagree, drop the gate.
+
+### The bark-ungating exception
+
+A bark reveal ungates a topic EXCEPT when the topic is ALSO revealed by a
+conversation line. A greeting revealer belongs to whichever NPC that greeting is
+gated to, and says nothing about a DIFFERENT NPC whose reveal comes from a topic
+line.
+
+The `contract` topic proves it: three greetings AddTopic it (Burz's "Maybe you
+want a contract?" among them) AND the Fighters Guild join line does. Ungating it
+on the greetings' account detached it from the join entirely -- after joining
+Azzan, `contract` stood or fell purely on its own INFO conditions while
+`advancementFG`/`ratsTOPIC` stayed gated, so the menu desynchronised: a player
+who did not click Contract lost every topic and was left with the generic
+INFOGENERAL pool ("Rumors"), which is exactly the reported symptom. Keeping the
+gate makes the reveal explicit and idempotent from BOTH revealer kinds.

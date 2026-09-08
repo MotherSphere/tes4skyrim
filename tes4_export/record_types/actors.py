@@ -78,6 +78,23 @@ def _emit_spells(lines: list, rec: Record):
                 lines.append(f"Spell[{i}]={get_formid_str(struct.unpack_from('<I', splo.data, 0)[0])}")
 
 
+def _emit_appearance(lines: list, rec) -> None:
+    """Hair, eyes, combat style and the three FaceGen PCA blobs (raw hex)."""
+    emit_formid(lines, "HNAM.Hair", get_subrecord(rec, "HNAM"))
+    emit_float(lines, "LNAM.HairLength", get_subrecord(rec, "LNAM"))
+    emit_formid(lines, "ENAM.Eyes", get_subrecord(rec, "ENAM"))
+    hclr = get_subrecord(rec, "HCLR")
+    if hclr and len(hclr.data) >= 4:
+        lines.append(f"HCLR.R={hclr.data[0]}")
+        lines.append(f"HCLR.G={hclr.data[1]}")
+        lines.append(f"HCLR.B={hclr.data[2]}")
+    emit_formid(lines, "ZNAM.CombatStyle", get_subrecord(rec, "ZNAM"))
+    for sig in ("FGGS", "FGGA", "FGTS"):
+        sub = get_subrecord(rec, sig)
+        if sub:
+            lines.append(f"{sig}={sub.data.hex()}")
+
+
 def export_NPC_(rec: Record) -> list:
     lines = []
     emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
@@ -99,39 +116,14 @@ def export_NPC_(rec: Record) -> list:
     _emit_factions(lines, rec)
     emit_formid(lines, "INAM.DeathItem", get_subrecord(rec, "INAM"))
     emit_formid(lines, "RNAM.Race", get_subrecord(rec, "RNAM"))
+    emit_formid(lines, "VTCK.Voice", get_subrecord(rec, "VTCK"))
     _emit_spells(lines, rec)
     emit_script(lines, rec)
     _emit_items(lines, rec)
     _emit_aidt(lines, rec)
     _emit_ai_packages(lines, rec)
     emit_formid(lines, "CNAM.Class", get_subrecord(rec, "CNAM"))
-    emit_formid(lines, "HNAM.Hair", get_subrecord(rec, "HNAM"))
-
-    # LNAM - Hair Length
-    emit_float(lines, "LNAM.HairLength", get_subrecord(rec, "LNAM"))
-
-    # ENAM - Eyes
-    emit_formid(lines, "ENAM.Eyes", get_subrecord(rec, "ENAM"))
-
-    # HCLR - Hair Color
-    hclr = get_subrecord(rec, "HCLR")
-    if hclr and len(hclr.data) >= 4:
-        lines.append(f"HCLR.R={hclr.data[0]}")
-        lines.append(f"HCLR.G={hclr.data[1]}")
-        lines.append(f"HCLR.B={hclr.data[2]}")
-
-    emit_formid(lines, "ZNAM.CombatStyle", get_subrecord(rec, "ZNAM"))
-
-    # FGGS, FGGA, FGTS - FaceGen data (raw bytes as hex for morph mapping)
-    fggs = get_subrecord(rec, "FGGS")
-    if fggs:
-        lines.append(f"FGGS={fggs.data.hex()}")
-    fgga = get_subrecord(rec, "FGGA")
-    if fgga:
-        lines.append(f"FGGA={fgga.data.hex()}")
-    fgts = get_subrecord(rec, "FGTS")
-    if fgts:
-        lines.append(f"FGTS={fgts.data.hex()}")
+    _emit_appearance(lines, rec)
 
     # DATA - 33 bytes: 21 skills + health(u32) + 8 attributes
     data = get_subrecord(rec, "DATA")

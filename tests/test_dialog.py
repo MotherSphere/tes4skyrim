@@ -44,11 +44,11 @@ from tes5_import.dialog_converter import (
     classify_topic,
     convert_DIAL,
     convert_INFO,
-    convert_QUST,
     make_dlbr,
     make_dlvw,
     should_skip_dial,
 )
+from tes5_import.quest_converter import convert_QUST
 from tes5_import.tes5_reader import records
 from tes5_import.text_reader import set_formid_index_offset
 
@@ -1556,7 +1556,7 @@ class TestQuestFragmentPropertiesAllBind:
     """
 
     def _resolve(self, declared, well_known=None):
-        from tes5_import.dialog_converter import _resolve_declared_properties
+        from tes5_import.quest_converter import _resolve_declared_properties
         return _resolve_declared_properties(declared, well_known)
 
     def test_player_binds_to_playerref(self):

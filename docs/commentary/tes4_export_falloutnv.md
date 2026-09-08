@@ -561,3 +561,34 @@ ethnicity; it needs  registered as a  race pack.
 Child likewise: FNV children are a 0.8-scale variant with  bit 2 and
 child head/body meshes, and Skyrim's child races carry their own skeleton and
 armor-race handling.
+
+
+## <a id="voice-files"></a>Voice files: no gender level, Ogg Vorbis
+
+**Code:** `asset_convert/audio/audio_falloutnv.py`
+
+Oblivion and FO3/FNV disagree on both the voice tree shape and the codec, and
+either difference alone zeroes the voice stage:
+
+| | Oblivion | FO3/FNV |
+|---|---|---|
+| Path | `voice/<plugin>/<race FULL>/<m\|f>/` | `voice/<plugin>/<voice type>/` |
+| Codec | `.mp3` | `.ogg` (52,896 of 52,936 files in FalloutNV.esm) |
+| Folder identity | race display name | VTYP EditorID, gender in the name |
+
+`organize_voice_files` walked a fixed plugin -> race -> gender -> files tree, so
+on FNV the gender level bound to `.ogg` FILES, `is_dir()` skipped every one, and
+the file loop was never reached -- 0 organised, reported as "all already present
+or no files found". Even past the walk, `VOICE_FILENAME_RE` accepted only
+`mp3|wav|xwm|fuz`, so all 52,896 would have counted as `no_match`.
+
+FNV needs no race->voice mapping: the folder name IS the VTYP EditorID
+(`femaleadult01default` -> `FemaleAdult01Default`), and the importer stamps the
+same id from `NPC_.VTCK`, so the two sides agree by construction. That is why
+the exporter now emits `VTCK.Voice` -- Oblivion resolves voice through the RACE
+record's VNAM chain and never needed it, but in FNV it is the only authored
+link between an actor and its recordings.
+
+Gender is read off the folder prefix only for callers that still want it.
+Robot and creature voices (`robotvictor`, `creatureferalghoul`) match neither
+prefix and stay male, which is what they are.

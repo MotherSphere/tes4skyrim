@@ -550,7 +550,7 @@ def _gate_exprs(chain):
         if g['kind'] == 'stage' and g['quest_fid'] not in seen_q:
             seen_q.append(g['quest_fid'])
     qprop = {qfid: f'Conv{i}Q{j}' for j, qfid in enumerate(seen_q)}
-    from script_convert.constants import (_safe_property_name,
+    from script_convert.constants import (safe_property_name,
                                           papyrus_script_name)
     declared = set()
     n_item = n_var = 0
@@ -575,7 +575,7 @@ def _gate_exprs(chain):
             sname = papyrus_script_name(g['script_edid'])
             decls.append(f'{sname} Property {p} Auto')
             guard.append(p)
-            var = _safe_property_name(g['var'])
+            var = safe_property_name(g['var'])
             val = g['value']
             vtxt = str(int(val)) if float(val).is_integer() else f'{val}'
             terms.append(f'{p}.{var} {g["op"]} {vtxt}')

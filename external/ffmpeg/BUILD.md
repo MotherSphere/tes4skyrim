@@ -23,12 +23,15 @@ ffmpeg -y -i <src> -ac 1 -ar 44100 -c:a pcm_s16le <dst.wav>
 ```
 
 So the build enables only what that needs, plus a little headroom for the
-source formats Oblivion ships:
+source formats the games ship. Oblivion voice lines are MP3; **FO3/FNV voice
+lines are Ogg Vorbis** (52,896 of FalloutNV.esm's 52,936), which is why the
+`vorbis` decoder and `ogg` demuxer are enabled. ffmpeg's native Vorbis decoder
+is LGPL, so it does not change this build's licence:
 
-* **Decoders** — `mp3`, `mp3float`, `pcm_s16le`, `pcm_u8`, `pcm_s24le`,
-  `pcm_s32le`, `pcm_f32le`, `adpcm_ms`
+* **Decoders** — `mp3`, `mp3float`, `vorbis`, `pcm_s16le`, `pcm_u8`,
+  `pcm_s24le`, `pcm_s32le`, `pcm_f32le`, `adpcm_ms`
 * **Encoder** — `pcm_s16le`
-* **Demuxers** — `mp3`, `wav`, `aiff` · **Muxer** — `wav`
+* **Demuxers** — `mp3`, `ogg`, `wav`, `aiff` · **Muxer** — `wav`
 * **Filters** — `aresample`, `aformat`, `anull`, `atrim`, `volume`
   (`-ac`/`-ar` build an `aresample` graph internally)
 * **Protocol** — `file` only; the build is `--disable-network`

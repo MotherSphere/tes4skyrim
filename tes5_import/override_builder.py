@@ -841,7 +841,7 @@ def _rebuild_qust_targets(plugin_rec, master_rec, old_subs):
 
     Oblivion's QSTA conditions are GetStage gates saying WHEN a marker is live;
     convert_QUST resolves them at build time and hangs each target on the
-    objectives where the gate holds (see _target_live_at_stage). Changing a
+    objectives where the gate holds (see target_live_at_stage). Changing a
     target's conditions therefore changes which objective carries which
     marker — nothing a byte patch can express.
 
@@ -852,7 +852,7 @@ def _rebuild_qust_targets(plugin_rec, master_rec, old_subs):
     those ids point at are the master's, and this rebuild does not touch them —
     only which objective references which alias.
     """
-    from .dialog_converter import _target_live_at_stage, _pc_stage_texts
+    from .quest_converter import target_live_at_stage, pc_stage_texts
     from .objective_text import short_objective
     from .text_reader import get_str
 
@@ -905,7 +905,7 @@ def _rebuild_qust_targets(plugin_rec, master_rec, old_subs):
             i += 1
             continue
         log_count = get_int(plugin_rec, f'Stage[{i}].LogCount')
-        texts = (_pc_stage_texts(
+        texts = (pc_stage_texts(
             [get_str(plugin_rec, f'Stage[{i}].Log[{j}].Text')
              for j in range(log_count)])
             if log_count > 0
@@ -926,7 +926,7 @@ def _rebuild_qust_targets(plugin_rec, master_rec, old_subs):
         for alias_id, tflags, raws in remapped:
             if alias_id in emitted:
                 continue
-            if not _target_live_at_stage(raws, stage_idx):
+            if not target_live_at_stage(raws, stage_idx):
                 continue
             emitted.add(alias_id)
             out.append((b'QSTA', struct.pack('<iB3x', alias_id, tflags)))
@@ -1068,8 +1068,8 @@ def apply_changes(master_record: bytes, changes: dict,
             derived = _DERIVED_INDEXED_SUBRECORD.get((sig_name, key))
             if derived is not None:
                 d_sig, fn_name = derived
-                from . import dialog_converter
-                d_values = getattr(dialog_converter, fn_name)(plugin_export)
+                from . import quest_converter
+                d_values = getattr(quest_converter, fn_name)(plugin_export)
                 if d_values:
                     indexed[d_sig] = d_values
             if values:

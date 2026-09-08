@@ -473,3 +473,24 @@ ordering around it is load-bearing in two places:
 - **Prune AFTER conversion, never before.** A job that fails never writes its
   output; pruning first would delete the previous run's still-usable file and
   leave nothing in its place.
+
+## <a id="which-ffmpeg-a-run-uses"></a>Which ffmpeg a run uses
+
+**Code:** `asset_convert/audio/audio_converter.py` (`find_ffmpeg`)
+
+An explicit `ffmpeg_path` (anything but the bare default `ffmpeg`) is used
+ALONE: a caller naming a specific binary -- from config, or a test -- gets that
+binary or None. Silently falling back to the bundled copy would turn a typo'd
+config path into a run that looks fine while ignoring what the user asked for.
+
+Otherwise the search order is the bundled `external/ffmpeg/` build first (see
+`external/ffmpeg/BUILD.md`), then PATH. Bundled wins so a run is reproducible:
+it is a known build with a known codec set, whereas whatever ffmpeg a user
+already has could be any version with any codecs compiled out.
+
+`need_decoder` skips a candidate that cannot decode that codec. The bundled
+build is deliberately minimal (`--disable-everything`), so one predating a
+source format decodes nothing rather than falling back -- FO3/FNV voice is Ogg
+Vorbis where Oblivion's is MP3, and without this every one of FalloutNV.esm's
+52,896 `.ogg` lines failed with "Invalid data found when processing input".
+The codec check lets such a run fall through to a PATH ffmpeg that can read it.

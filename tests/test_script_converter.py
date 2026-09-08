@@ -21,7 +21,7 @@ from script_convert.constants import (
     TES4_ATTRIBUTES,
     PAPYRUS_MAX_SCRIPT_NAME,
     papyrus_script_name,
-    _safe_property_name,
+    safe_property_name,
     PLAYER_ALIAS_EXTENDS,
 )
 from script_convert.tes4 import nodes as N
@@ -49,7 +49,7 @@ from script_convert.objective_completion import (
     residue_stages,
 )
 from script_convert.pipeline import (
-    _sanitize_name,
+    sanitize_name,
     _pack_wstring,
     _superseded_stages,
     build_vmad_quest_fragments,
@@ -1028,13 +1028,13 @@ class TestVMADBuilders:
 
 class TestUtilities:
     def test_sanitize_name_simple(self):
-        assert _sanitize_name('TestScript') == 'TestScript'
+        assert sanitize_name('TestScript') == 'TestScript'
 
     def test_sanitize_name_spaces(self):
-        assert _sanitize_name('Test Script') == 'Test_Script'
+        assert sanitize_name('Test Script') == 'Test_Script'
 
     def test_sanitize_name_special(self):
-        assert _sanitize_name('Test-Script!') == 'Test_Script_'
+        assert sanitize_name('Test-Script!') == 'Test_Script_'
 
 
 class TestScroRefTyping:
@@ -1419,21 +1419,21 @@ class TestPapyrusCompilerContracts:
     def test_temp_prefixed_names_are_renamed(self):
         """PapyrusCompiler reserves the ::temp* register namespace for itself."""
         for name in ('temp', 'tempstage', 'template', 'tempRef'):
-            assert not _safe_property_name(name).startswith('temp')
+            assert not safe_property_name(name).startswith('temp')
 
     def test_temp_rename_is_case_sensitive(self):
         """`Temp` and `tmp` compile fine — only a lowercase `temp` prefix clashes."""
-        assert _safe_property_name('Temp') == 'Temp'
-        assert _safe_property_name('tmp') == 'tmp'
-        assert _safe_property_name('atemp') == 'atemp'
+        assert safe_property_name('Temp') == 'Temp'
+        assert safe_property_name('tmp') == 'tmp'
+        assert safe_property_name('atemp') == 'atemp'
 
     def test_vanilla_script_names_are_reserved(self):
         """A property may not reuse ANY Skyrim script name, not just a type."""
         for name in ('Door', 'DarkBrotherhood', 'MS14'):
-            assert _safe_property_name(name) != name
+            assert safe_property_name(name) != name
 
     def test_reserved_rename_preserves_casing(self):
-        assert _safe_property_name('DarkBrotherhood') == 'myDarkBrotherhood'
+        assert safe_property_name('DarkBrotherhood') == 'myDarkBrotherhood'
 
     def test_no_doubled_cast(self, xref):
         """`X as Int as Int` is a parse error."""
@@ -3064,7 +3064,7 @@ class TestGetDetectionLevelIsDetection:
 
 class TestPlaySoundPropertyIsNotQuoted:
     """Vanilla writes the EditorID quoted (`PlaySound "AMBBaenlinDeath"`).
-    Registering the RAW argument kept the quotes, and _safe_property_name
+    Registering the RAW argument kept the quotes, and safe_property_name
     turned each into an underscore — declaring a second, never-referenced
     `Sound Property _X_ Auto` beside the real one (75 across 23 files).
     """
@@ -3443,7 +3443,7 @@ class TestQuotedEditorIds:
         assert '"' in conv_line(converter, line, 'Quest')
 
     def test_safe_property_name_strips_wrapping_quotes(self):
-        assert _safe_property_name('"MQ01Tate"') == _safe_property_name('MQ01Tate')
+        assert safe_property_name('"MQ01Tate"') == safe_property_name('MQ01Tate')
 
 
 class TestPlayerBaseScriptRidesAQuestAlias:

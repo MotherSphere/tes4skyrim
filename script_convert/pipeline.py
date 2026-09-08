@@ -10,7 +10,7 @@ import struct
 from tes5_import.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
-from script_convert.constants import (_sanitize_name, _safe_property_name, _record_type_to_papyrus, papyrus_script_name,
+from script_convert.constants import (sanitize_name, safe_property_name, record_type_to_papyrus, papyrus_script_name,
                                      SERVICE_MENU_CALL, UDF_WIDE_TYPES)
 from script_convert.command_rows import KNOWN_COMMANDS
 from script_convert.cross_ref import CrossRefGraph, master_names
@@ -654,7 +654,7 @@ def _scpt_batch(records: list, output_dir: str, xref: CrossRefGraph, stats: dict
             # the engine runs off (see resolve_scro_aliases).
             conv.set_scro_aliases(resolve_scro_aliases(
                 sctx, _scro_list(rec), xref))
-            name = _sanitize_name(edid or f'Script_{formid}')
+            name = sanitize_name(edid or f'Script_{formid}')
             papyrus = conv.convert_standalone(name, sctx, extends, edid)
 
             # The FILENAME must match the ScriptName the converter emitted, or
@@ -785,11 +785,8 @@ def _sequence_gate(rec: dict) -> str:
     if not var:
         return ''
     quest, name, value = var
-    # The VARIABLE name needs the same sanitising the converter gives every
-    # property it declares — TES4 allows names Papyrus reserves (`endstate`,
-    # MS40) and a raw name here is a parser error.
-    return (f'{_safe_property_name(quest)}.'
-            f'{_safe_property_name(name)} == {value}')
+    return (f'{safe_property_name(quest)}.'
+            f'{safe_property_name(name)} == {value}')
 
 
 _SETSTAGE_RE = re.compile(r'^\s*\w[\w.]*\.SetStage\s*\(', re.IGNORECASE)
@@ -1534,7 +1531,7 @@ def _add_scro_ref(conv: 'ScriptConverter', fid: str, xref: CrossRefGraph):
     if not edid:
         return
     rtype = xref.record_type.get(fid, '')
-    ptype = _record_type_to_papyrus(rtype)
+    ptype = record_type_to_papyrus(rtype)
     # Prefer attached SCPT-derived type for cross-script property accesses
     # (e.g. Arena.AnnounceWin). For QUST records, start with 'Quest' base type —
     # the specific type will be promoted later if the script body uses dot-notation
@@ -1543,18 +1540,7 @@ def _add_scro_ref(conv: 'ScriptConverter', fid: str, xref: CrossRefGraph):
         script_type = xref.get_record_script_type(edid)
         if script_type:
             ptype = script_type
-    # Key on the Papyrus-SAFE name, which is what _convert_ref stores and what
-    # _collect_scro_properties writes into the VMAD.  Keying on the raw EditorID
-    # instead created a SECOND entry for any EditorID that gets renamed (MS14 is
-    # a vanilla Skyrim script name, so it becomes myMS14): the generic 'Quest'
-    # from this SCRO and the specific 'TES4_MS14Script' from _convert_ref lived
-    # under different keys, so the downgrade guard below never fired and the
-    # generic one won the declaration — leaving the body calling myMS14.QuestDone
-    # on a plain Quest ("field or property QuestDone not found").
-    key = _safe_property_name(edid)
-    # Don't downgrade a type already upgraded by _convert_ref (e.g. Quest → TES4_FGQuestTrack).
-    # _preload_stage_scro_refs is called once per stage and would otherwise reset types
-    # that were promoted when a prior stage's result script accessed cross-script vars.
+    key = safe_property_name(edid)
     cur = conv.sc.property_refs.get(key, '')
     if cur and cur != 'Quest' and ptype == 'Quest':
         return

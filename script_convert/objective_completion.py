@@ -160,13 +160,13 @@ def _closed_by(rec: dict, fragments: list) -> tuple:
 
     See: docs/commentary/script_convert.md#journal-objective-completion
     """
-    from tes5_import.dialog_converter import _target_live_at_stage
+    from tes5_import.quest_converter import target_live_at_stage
 
     targets = _quest_targets(rec)
     obj_stages = sorted({s for s, _j, text, *_ in fragments if text})
     live = {s: frozenset(i for i, raws in enumerate(targets)
                          if raws and _target_closes(raws)
-                         and _target_live_at_stage(raws, s))
+                         and target_live_at_stage(raws, s))
             for s in obj_stages}
     authored = _authored_ends(rec, fragments)
     terminal = _terminal_stages(rec)

@@ -60,6 +60,18 @@ def _global_name(edid: str, fid24: int, taken: set) -> str:
     return name
 
 
+def _ungate_bark_only_topics(gated: dict, bark_revealed: set,
+                             convo_revealed: set) -> dict:
+    """Drop the gate on topics revealed ONLY by a bark, never by a conversation.
+
+    See: docs/commentary/tes5_import_dialogue.md#the-bark-ungating-exception
+    """
+    if not bark_revealed:
+        return gated
+    bark_only = bark_revealed - convo_revealed
+    return {f: g for f, g in gated.items() if g not in bark_only}
+
+
 def build_unlock_plan(by_type: dict) -> dict:
     """Analyze the export and return the unlock plan:
 
@@ -214,15 +226,6 @@ def build_unlock_plan(by_type: dict) -> dict:
             continue
         own_topic = _low24(rec.get('ParentDIAL', ''))
         globals_set = set()
-        # EXPLICIT reveals (AddTopic data list, AddTopic script command, Choice
-        # link) make the target reachable the instant the revealing line plays,
-        # independent of the target's own conditions. MENTION reveals (the
-        # target's FULL name appearing in prose) are tracked separately: an
-        # Oblivion greeting that says "you're ready for advancement" only
-        # auto-adds the topic WHEN THAT LINE FIRES, which is itself
-        # stage-gated — so a mention in a bark line must NOT count as
-        # "revealed on first contact" (that wrongly ungated 162 topics, e.g.
-        # Azzan's "Advancement" showing before the guild is joined).
         explicit_set = set()
         i = 0
         while True:
@@ -239,9 +242,6 @@ def build_unlock_plan(by_type: dict) -> dict:
                 g = gated.get(dial_edid_to_fid24.get(name.lower(), 0))
                 if g:
                     explicit_set.add(g)
-        # A choice link to a gated topic also reveals it — in Oblivion,
-        # offering a choice makes the target reachable regardless of its
-        # added state, and once taken it stays known.
         i = 0
         while True:
             val = rec.get(f'Choice[{i}]')
@@ -267,43 +267,15 @@ def build_unlock_plan(by_type: dict) -> dict:
                 for m in mention_re.findall(text):
                     mention_set.add(names_to_global[m.lower()])
         globals_set = explicit_set | mention_set
-        # Speaking a line of topic T already requires T unlocked — self-reveals
-        # are meaningless and would only bloat the fragment count.
         globals_set.discard(gated.get(own_topic))
         if globals_set:
             info_reveals[info_fid24] = globals_set
-            # Only an EXPLICIT bark reveal (AddTopic/Choice) makes the topic
-            # visible on first contact; a prose mention rides the bark line's
-            # own conditions and must keep the gate.
             if _is_bark(own_topic):
                 bark_revealed |= explicit_set
             else:
                 convo_revealed |= explicit_set
 
-    # --- Bark-revealed topics are NOT gated. A GREETING/HELLO revealer fires
-    # the moment the player contacts the NPC — in Oblivion the topic is
-    # effectively visible on first talk, so a gate only adds the risk of the
-    # reveal fragment racing the menu (or a different greeting playing) and
-    # locking the topic. Their own GetIsID/faction/stage conditions do the
-    # real filtering. Gates stay only on topics revealed exclusively by
-    # conversation lines / quest stages (e.g. "Rats" after Azzan's contract
-    # line).
-    #
-    # EXCEPT when the topic is ALSO revealed by a conversation line. A greeting
-    # revealer belongs to whichever NPC that greeting is gated to, and it says
-    # nothing about a DIFFERENT NPC whose reveal comes from a topic line. The
-    # `contract` topic is the case that proves it: three greetings AddTopic it
-    # (Burz's "Maybe you want a contract?" among them) AND the Fighters Guild
-    # join line does. Ungating it on the greetings' account detached it from
-    # the join entirely — after joining Azzan, `contract` stood or fell purely
-    # on its own INFO conditions while `advancementFG`/`ratsTOPIC` stayed
-    # gated, so the menu desynchronised: the player who did not click Contract
-    # lost every topic and was left with the generic INFOGENERAL pool
-    # ("Rumors"), which is exactly the reported symptom. Keeping the gate makes
-    # the reveal explicit and idempotent from BOTH revealer kinds.
-    if bark_revealed:
-        bark_only = bark_revealed - convo_revealed
-        gated = {f: g for f, g in gated.items() if g not in bark_only}
+    gated = _ungate_bark_only_topics(gated, bark_revealed, convo_revealed)
     kept = set(gated.values())
     info_reveals = {fid: sorted(gs & kept)
                     for fid, gs in info_reveals.items() if gs & kept}
@@ -315,38 +287,13 @@ def build_unlock_plan(by_type: dict) -> dict:
         if gnames:
             stage_reveals[key] |= gnames
 
-    # A dialogue reveal is only as reliable as the line firing again — and an
-    # INFO's OnEnd fragment fires ONCE, while you are still in the menu. If the
-    # topic's only revealer for a given NPC is that one line, and no post-reveal
-    # greeting re-fires it, a single missed/raced SetValue leaves the gate shut
-    # forever (globals persist, so a reload does not help). This is the Azzan
-    # vs Burz split: Burz has a member greeting ("Maybe you want a contract?")
-    # that re-reveals `contract` on every talk, so his gate is continually
-    # re-armed; Azzan's post-join greetings are all gated to LATER stages, so
-    # once you join him nothing re-reveals it and the fragile one-shot is the
-    # whole story.
-    #
-    # The robust anchor is the QUEST STAGE the same result script sets: a stage
-    # fragment is guaranteed to run when the stage is reached, independent of
-    # dialogue timing, and it too persists. So any reveal whose result script
-    # also does `SetStage QUEST N` is additionally emitted as a stage reveal for
-    # (QUEST, N) — the Fighters Guild join line's `SetStage FGD00JoinFG 100`
-    # makes the JoinFG stage-100 fragment set TES4Unlock_contract, giving Azzan
-    # the same always-armed guarantee Burz gets from his greeting. Covers 806
-    # reveals game-wide, not a special case.
-    # A reveal can only be anchored to a stage that ACTUALLY emits a fragment:
-    # the QUST VMAD fragment list (tes5_import) and the generated .psc functions
-    # (script_convert) must match exactly, so binding a SetValue to a stage with
-    # no fragment would either be dropped or create a dangling VMAD entry. Build
-    # the set of stages that already have a fragment (journal text or a result
-    # script), keyed the same way _quest_stage_fragments computes it.
-    from .dialog_converter import _quest_stage_fragments
+    from .quest_converter import quest_stage_fragments
     frag_stages = defaultdict(set)   # quest_edid_lower -> {stage_index, ...}
     for rec in qusts:
         qedid = (rec.get('EditorID', '') or '').lower()
         if not qedid:
             continue
-        for stage_idx, _log in _quest_stage_fragments(rec):
+        for stage_idx, _log in quest_stage_fragments(rec):
             frag_stages[qedid].add(stage_idx)
 
     info_by_fid24 = {}
@@ -369,14 +316,6 @@ def build_unlock_plan(by_type: dict) -> dict:
     stage_reveals = {k: sorted(v) for k, v in stage_reveals.items() if v}
 
     # --- INVARIANT: a gate with no revealer is an unopenable door ---
-    # The gate (GetGlobalValue in the ESM) and the thing that opens it (a
-    # SetValue in a generated Papyrus fragment) are built from THIS plan by two
-    # different pipelines — tes5_import writes the condition, script_convert
-    # writes the fragment body. If a topic is gated but nothing anywhere sets
-    # its global, the topic can NEVER appear: quest-blocking, and invisible to
-    # every record-level check (the ESM looks perfect). An ungated topic that
-    # shows a little early is a cosmetic bug; a gated topic with no revealer is
-    # a dead quest — so when the two disagree, drop the gate.
     revealed = set()
     for gs in info_reveals.values():
         revealed.update(gs)

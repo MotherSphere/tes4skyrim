@@ -46,7 +46,7 @@ defaults to the inert `0` (`None` or `""` where the caller needs that type).
 import re
 
 from script_convert.constants import (
-    PAPYRUS_BOOL_FUNCTIONS, _safe_property_name
+    PAPYRUS_BOOL_FUNCTIONS, safe_property_name
 )
 from script_convert.command_rows import (
     ACTOR, AV, COMMAND_ROWS, COMPARISON_BOOL_FUNCTIONS, OBJREF, RAW
@@ -163,7 +163,7 @@ class _Args(dict):
         if kind == 's':
             return self._c.arg_src(n, default).strip().strip('"')
         if kind == 'p':
-            return _safe_property_name(self._c.arg_src(n, default))
+            return safe_property_name(self._c.arg_src(n, default))
         if kind == 'b':
             return ('true' if self._c.arg_src(n, default).lower()
                     in ('1', 'true') else 'false')
@@ -194,7 +194,7 @@ def emit_row(conv, row, ref_name, func_name, args_str, extends):
     for n, ptype in row.types.items():
         name = conv.arg_src(n)
         if name:
-            conv.sc.property_refs[_safe_property_name(name)] = ptype
+            conv.sc.property_refs[safe_property_name(name)] = ptype
     args = _Args(conv, row, args_str, extends)
     if '{ref}' in row.emit:
         args['ref'] = _ref(conv, row, ref_name, extends)

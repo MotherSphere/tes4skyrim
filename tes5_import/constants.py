@@ -263,8 +263,8 @@ def _init_dispatch():
     from .dialog_converter import (
         convert_DIAL,
         convert_INFO,
-        convert_QUST,
     )
+    from .quest_converter import convert_QUST
     from .record_types.weather import convert_CLMT
     from .record_types.equipment import (
         convert_ALCH,

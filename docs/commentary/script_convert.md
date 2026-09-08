@@ -4490,3 +4490,40 @@ table is hand-read, not derived.
 so it can never reveal an objective the rules close WRONGLY. That is why
 `objective_completion_audit.py --against` sweeps all 6,338 objectives; it is
 what caught the 51 and the 109 above, neither of which appears in the residue.
+
+## <a id="property-names-go-through-safe-property-name"></a>Every property name goes through `safe_property_name`
+
+**Code:** `script_convert/constants.py`, `script_convert/converter.py`,
+`script_convert/pipeline.py`, `tes5_import/quest_converter.py`
+
+`safe_property_name` (and `sanitize_name` / `record_type_to_papyrus` beside it)
+are the cross-package spelling contract for Papyrus identifiers. They carry no
+leading underscore precisely because `tes5_import` imports them across the
+package boundary -- 66 call sites in 13 files.
+
+The rule is that a name reaches Papyrus through this function on **every** path,
+because the same identifier must be spelled identically in the declaration, in
+the body, and in the VMAD key. Three separate bugs came from one path skipping
+it:
+
+**Quest refs in the body.** An Oblivion quest EditorID can collide with a Skyrim
+script name (`MS14`). Emitting it raw left the body calling `MS14.SetStage()`
+while the declaration said `myMS14`; the CK then reads `MS14` as the TYPE and
+fails with "cannot call the member function SetStage ... on a type".
+
+**Sequence-counter conditions.** TES4 allows names Papyrus reserves (`endstate`,
+`MS40`), so a raw variable name in a generated condition is a parser error.
+
+**SCRO property keys.** Keying on the raw EditorID created a SECOND entry for any
+renamed EditorID: the generic `Quest` from the SCRO and the specific
+`TES4_MS14Script` from `_convert_ref` lived under different keys, so the
+type-downgrade guard never fired and the generic one won the declaration --
+leaving the body calling `myMS14.QuestDone` on a plain `Quest` ("field or
+property QuestDone not found"). The key must be the Papyrus-SAFE name, which is
+what `_convert_ref` stores and what `_collect_scro_properties` writes into the
+VMAD.
+
+A type already upgraded by `_convert_ref` (`Quest` -> `TES4_FGQuestTrack`) must
+not be downgraded: `_preload_stage_scro_refs` runs once per stage and would
+otherwise reset types promoted when an earlier stage's result script accessed
+cross-script variables.

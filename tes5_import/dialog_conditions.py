@@ -390,20 +390,20 @@ _VM_VAR_FUNCS = {
 # CIS2 name for a script variable that does not exist: no converted script
 # ever declares it, so the read yields 0 — the value TES4's GetScriptVariable
 # returns for a scriptless ref or a missing variable.  See
-# _convert_script_var_ctda.
+# convert_script_var_ctda.
 _UNRESOLVED_VAR_SENTINEL = '::TES4NoSuchVariable_var'
 
 
 def papyrus_var_name(var: str) -> str:
     """Papyrus property name as a CIS2 script-variable reference.
 
-    Must mirror the converter's property renaming (_safe_property_name): the
+    Must mirror the converter's property renaming (safe_property_name): the
     ::<name>_var lookup is against the COMPILED property, so a TES4 variable
     the converter had to rename (reserved word, ::temp collision) must be
     referenced by its renamed form.
     """
-    from script_convert.constants import _safe_property_name
-    return f'::{_safe_property_name(var)}_var'
+    from script_convert.constants import safe_property_name
+    return f'::{safe_property_name(var)}_var'
 
 
 # --- Disposition -> Relationship Rank ---------------------------------------
@@ -761,7 +761,7 @@ def convert_ctda_list_with_strings(rec: dict, script_vars: dict = None,
 
     Conditions whose variable we cannot resolve are emitted against a sentinel
     name that no script declares, so they read 0 — exactly what TES4 returns
-    for a missing variable (see _convert_script_var_ctda).
+    for a missing variable (see convert_script_var_ctda).
     """
     if offset is None:
         offset = get_formid_index_offset()
@@ -783,7 +783,7 @@ def convert_ctda_list_with_strings(rec: dict, script_vars: dict = None,
 
         func = struct.unpack_from('<H', raw + b'\0' * 24, 8)[0]
         if func in _VM_VAR_FUNCS:
-            pair = _convert_script_var_ctda(raw, script_vars, offset,
+            pair = convert_script_var_ctda(raw, script_vars, offset,
                                             run_on_target_ref,
                                             drop_run_on_target)
             if pair is not None:
@@ -852,7 +852,7 @@ def sort_vm_conditions_last(pairs: list) -> list:
     return [p for g in cheap + vm for p in g]
 
 
-def _convert_script_var_ctda(raw: bytes, script_vars: dict, offset: int,
+def convert_script_var_ctda(raw: bytes, script_vars: dict, offset: int,
                              run_on_target_ref: 'int | None' = None,
                              drop_run_on_target: bool = False):
     """GetScriptVariable(ref, varIdx) -> GetVMScriptVariable(ref, '::var_var');

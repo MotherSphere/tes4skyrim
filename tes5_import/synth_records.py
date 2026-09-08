@@ -199,13 +199,65 @@ def create_ambient_gmst_overrides(writer: PluginWriter, by_type: dict):
     print(f"  Ambient dialogue pacing (GMST): {', '.join(written)}")
 
 
-def create_vtyp_records(writer: PluginWriter, export_dir: str = None):
+#: FO3/FNV voice folder name (lowercased VTYP EditorID) -> VTYP FormID.
+FALLOUT_VTYP_BY_EDID: dict = {}
+
+
+def _emit_authored_vtyps(records: list, emit) -> None:
+    """Write a FO3/FNV plugin's own VTYP records under their own EditorIDs.
+
+    Gender comes from the EditorID prefix, which is how FNV names them
+    (FemaleAdult01Default); anything else -- robots, creatures -- is male.
+    """
+    for rec in records:
+        edid = (get_str(rec, 'EditorID') or '').strip()
+        if not edid:
+            continue
+        gender = 'Female' if edid.lower().startswith('female') else 'Male'
+        FALLOUT_VTYP_BY_EDID[edid.lower()] = emit(edid, gender)
+    print(f"  Voice types: {len(FALLOUT_VTYP_BY_EDID)} authored VTYP records "
+          f"kept under their own EditorIDs")
+
+
+def _emit_race_vtyps(export_dir, emit, edid_to_fid: dict) -> None:
+    """Write one VTYP per (plugin race display name, gender) and bind them.
+
+    See: docs/commentary/tes5_import_dialogue.md#voice-types-are-created-from-scratch
+    """
+    try:
+        from asset_convert.audio.voice_races import load_race_voices
+        from asset_convert.audio.voice_races import vtyp_edid as _vtyp_edid
+    except ImportError:
+        return
+    try:
+        races = load_race_voices(export_dir)
+    except OSError:
+        return
+    if not races:
+        return
+    for key in races.keys:
+        for gender in ('Male', 'Female'):
+            emit(_vtyp_edid(key, gender), gender)
+    for race_edid, key in sorted(races.by_race_edid.items()):
+        for gender in ('Male', 'Female'):
+            set_voice_type(race_edid, gender,
+                           edid_to_fid[_vtyp_edid(key, gender)])
+    print(f"  Voice types: {len(edid_to_fid)} VTYP records "
+          f"({len(races.keys)} plugin races by display name), "
+          f"{len(races.by_race_edid)} race EditorIDs bound")
+
+
+def create_vtyp_records(writer: PluginWriter, export_dir: str = None,
+                        by_type: dict = None):
     """Create custom VTYP records for every race the output plugin can voice.
 
     Emits the fixed Oblivion set first so its FormIDs never move, then the
     plugin's own races. Updates VOICE_TYPE_MAP so NPC_ converters resolve them.
+    A FO3/FNV plugin authors its voice types outright, so those are emitted
+    under their own EditorIDs instead of being derived from race.
 
     See: docs/commentary/tes5_import_dialogue.md#voice-types-are-created-from-scratch
+    See: docs/commentary/tes4_export_falloutnv.md#voice-files
     """
     edid_to_fid: dict = {}
 
@@ -226,27 +278,9 @@ def create_vtyp_records(writer: PluginWriter, export_dir: str = None):
     for vtyp_edid, (race_edid, gender) in CUSTOM_VTYP_EDIDS.items():
         set_voice_type(race_edid, gender, _emit(vtyp_edid, gender))
 
-    if not export_dir:
-        return
-    try:
-        from asset_convert.audio.voice_races import load_race_voices
-        from asset_convert.audio.voice_races import vtyp_edid as _vtyp_edid
-    except ImportError:
-        return
-    try:
-        races = load_race_voices(export_dir)
-    except OSError:
-        return
-    if not races:
+    if by_type is not None and by_type.get('VTYP'):
+        _emit_authored_vtyps(by_type['VTYP'], _emit)
         return
 
-    for key in races.keys:
-        for gender in ('Male', 'Female'):
-            _emit(_vtyp_edid(key, gender), gender)
-    for race_edid, key in sorted(races.by_race_edid.items()):
-        for gender in ('Male', 'Female'):
-            set_voice_type(race_edid, gender,
-                           edid_to_fid[_vtyp_edid(key, gender)])
-    print(f"  Voice types: {len(edid_to_fid)} VTYP records "
-          f"({len(races.keys)} plugin races by display name), "
-          f"{len(races.by_race_edid)} race EditorIDs bound")
+    if export_dir:
+        _emit_race_vtyps(export_dir, _emit, edid_to_fid)

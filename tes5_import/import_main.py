@@ -35,9 +35,8 @@ from .magic_effects import set_tes4_effect_names
 from .dialog_converter import (
     build_dialog_groups,
     build_npc_to_vtyp_map,
-    compute_quest_priorities,
-    convert_QUST,
 )
+from .quest_converter import compute_quest_priorities, convert_QUST
 from .record_types.sound import convert_SOUN
 from .synth_records import (
     WELL_KNOWN_PROPERTIES,
@@ -587,7 +586,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
                                       reset_origin_faction)
     reset_origin_faction()
     if not ctx:
-        create_vtyp_records(writer, export_dir)
+        create_vtyp_records(writer, export_dir, by_type)
 
         # Plugin-origin marker faction. ROOT MASTERS ONLY (no TES4 masters of
         # their own): every actor this file defines joins it, and dialogue that

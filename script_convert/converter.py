@@ -10,7 +10,7 @@ from script_convert.constants import (
     KNOWN_GLOBALS, LOOSE_OPS, PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS,
     PLAYER_ALIAS_EXTENDS, RETURN_TYPES, SELF_NAMES, TYPE_MAP, _REF_TYPES,
     _canonical_global, _digit_stripped_formid, _record_type_to_base_papyrus,
-    _record_type_to_papyrus, _safe_property_name, papyrus_script_name,
+    record_type_to_papyrus, safe_property_name, papyrus_script_name,
     resolve_property_formid,
     script_type_may_override
 )
@@ -639,7 +639,7 @@ class ScriptConverter:
         what is left is the lookup.
         """
         prop_low = name.lower()
-        safe = _safe_property_name(name)
+        safe = safe_property_name(name)
         # A variable the owner's script actually declares is a property read,
         # whatever the name happens to collide with.
         if self._ref_has_script_var(owner, name):
@@ -1031,7 +1031,7 @@ class ScriptConverter:
             fid = self.xref.edid_to_formid.get(cand.lower(), '')
             if fid and self.xref.record_type.get(fid, '') == 'PACK':
                 canon = self.xref.formid_to_edid.get(fid, cand)
-                prop = _safe_property_name(canon)
+                prop = safe_property_name(canon)
                 self.sc.property_refs[prop] = 'Package'
                 return f'{actor}.GetCurrentPackage() {op} {prop}'
 
@@ -1048,7 +1048,7 @@ class ScriptConverter:
             joiner = ' || ' if op == '==' else ' && '
             terms = []
             for edid in packs:
-                prop = _safe_property_name(edid)
+                prop = safe_property_name(edid)
                 self.sc.property_refs[prop] = 'Package'
                 terms.append(f'{actor}.GetCurrentPackage() {op} {prop}')
             return '(' + joiner.join(terms) + ')' if len(terms) > 1                 else terms[0]
@@ -1240,7 +1240,7 @@ class ScriptConverter:
             tfid = self.xref.edid_to_formid.get(topic.lower(), '')
             if not tfid or self.xref.record_type.get(tfid, '') != 'DIAL':
                 return none
-        speaker = _safe_property_name(
+        speaker = safe_property_name(
             f'TES4Voice_{ref_name.lower()}_{voice.lower()}')
         self.sc.property_refs[speaker] = 'ObjectReference'
         return speaker, in_head
@@ -1275,12 +1275,12 @@ class ScriptConverter:
     def _papyrus_type_for(self, fid: str, rtype: str) -> str:
         """Papyrus property type for a record, as the IMPORTER writes it.
 
-        `_record_type_to_papyrus` maps the TES4 signature, which is right until
+        `record_type_to_papyrus` maps the TES4 signature, which is right until
         the importer changes the signature on the way out. A BOOK carrying an
         ENAM becomes a SCRL (see project_enchanted_book_is_a_scroll), so a
         `Book` property naming one cannot bind and reads None in-game.
         """
-        ptype = _record_type_to_papyrus(rtype)
+        ptype = record_type_to_papyrus(rtype)
         if (ptype == 'Book' and self.xref
                 and fid in getattr(self.xref, 'enchanted_books', ())):
             return 'Scroll'
@@ -1315,7 +1315,7 @@ class ScriptConverter:
         `cells` are INTERIOR EditorIDs (compared as Cell properties);
         `exterior` are (worldspace EditorID, x, y) grid keys.
         """
-        key = _safe_property_name(name)
+        key = safe_property_name(name)
         existing = self.sc.cell_families.get(key.lower())
         if existing is None:
             self.sc.cell_families[key.lower()] = (key, list(cells),
@@ -1696,7 +1696,7 @@ class ScriptConverter:
         _is_player_kw = low in ('player', 'playerref')
         if ((low in self.sc.local_vars or low in self.sc.var_types)
                 and not (as_receiver and _is_player_kw)):
-            return _safe_property_name(name)
+            return safe_property_name(name)
         if _is_player_kw:
             return 'Game.GetPlayer()'
         if low in SELF_NAMES:
@@ -1711,25 +1711,20 @@ class ScriptConverter:
         if '.' in name:
             parts = name.split('.', 1)
             ref_part = self._convert_ref(parts[0], extends)
-            return f'{ref_part}.{_safe_property_name(parts[1])}'
+            return f'{ref_part}.{safe_property_name(parts[1])}'
 
         if self.xref.is_quest_ref(name):
             # Use the canonical EditorID (original case from export) as the key
             # so this matches what _add_scro_ref stores (both use formid_to_edid).
             canon_fid = self.xref.edid_to_formid.get(low, '')
             canon_edid = self.xref.formid_to_edid.get(canon_fid, name) if canon_fid else name
-            # Through _safe_property_name like every other ref: an Oblivion quest
-            # EditorID can collide with a Skyrim script name (MS14), and emitting
-            # it raw here left the body calling `MS14.SetStage()` while the
-            # declaration said `myMS14` — the CK then reads MS14 as the TYPE
-            # ("cannot call the member function SetStage ... on a type").
-            safe = _safe_property_name(canon_edid)
+            safe = safe_property_name(canon_edid)
             self.sc.property_refs[safe] = self.xref.get_quest_script_type(name)
             return safe
 
         # Local variables take precedence over game form EditorIDs (name collision)
         if low in self.sc.local_vars or low in self.sc.var_types:
-            return _safe_property_name(name)
+            return safe_property_name(name)
 
         # Check if this is any known EditorID from the export.
         #
@@ -1766,7 +1761,7 @@ class ScriptConverter:
             script_type = self.xref.get_record_script_type(name)
             if script_type and self._script_type_binds(ptype, fid):
                 ptype = script_type
-            safe = _safe_property_name(canon_edid)
+            safe = safe_property_name(canon_edid)
             # Don't downgrade a more specific type (e.g., Actor from
             # _resolve_self_ref) back to a generic one (ObjectReference).
             cur = self.sc.property_refs.get(safe, '')
@@ -1775,7 +1770,7 @@ class ScriptConverter:
                 self.sc.property_refs[safe] = ptype
             return safe
 
-        return _safe_property_name(name)
+        return safe_property_name(name)
 
     def arg_srcs(self) -> list:
         """Every argument as AUTHORED source text."""
@@ -2020,7 +2015,7 @@ class ScriptConverter:
         The receiver reaching the actor-only cast below is already CONVERTED, so
         it can be an expression (`Game.GetPlayer()`), a cast (`(x as Actor)`) or
         a fixed event parameter.  Registering one of those as a property ref put
-        it through _safe_property_name and emitted a mangled, never-referenced
+        it through safe_property_name and emitted a mangled, never-referenced
         declaration — `Actor Property Game_GetPlayer__ Auto` appeared in 511
         scripts, bound to nothing.
 
@@ -2365,7 +2360,7 @@ class ScriptConverter:
             fid = self.xref.edid_to_formid.get(name.lower(), '')
             if fid:
                 canon = self.xref.formid_to_edid.get(fid, name)
-        prop = _safe_property_name(canon)
+        prop = safe_property_name(canon)
         low = prop.lower()
         if low in self.sc.local_vars or low in self.sc.var_types:
             prop = f'{prop}Base'
