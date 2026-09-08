@@ -1,4 +1,4 @@
-"""animationdata / animationsetdata emission + singlefile merging.
+"""animationdata / animationsetdata emission as TESRuntime cache fragments.
 
 The Skyrim engine loads a creature behavior project ONLY if it is registered
 in the two merged text databases shipped in ``Skyrim - Animations.bsa``:
@@ -7,10 +7,13 @@ in the two merged text databases shipped in ``Skyrim - Animations.bsa``:
   meshes/animationsetdatasinglefile.txt (attack-event -> clip map + preload
                                          CRC list per project)
 
-A loose file overrides the BSA copy wholesale, so our merged output must be
-``vanilla base + generated TES4 projects``. The base is pulled from the
-user's Skyrim installation (loose file, or extracted from the BSA — LE v104
-zlib / SSE v105 LZ4, via bsa_extract.read_bsa_files) and cached.
+Each is ONE global file, so the converter never writes it: every plugin
+emits one fragment (``SKSE/Plugins/TESRuntime/animation/<plugin>.json``)
+holding its own projects' already-formatted blocks, and the TESRuntime plugin
+composes ``vanilla base + every fragment`` in memory when the engine parses
+the files. ``compose_animationdata`` / ``compose_animationsetdata`` are the
+reference composition the DLL mirrors line for line.
+See: docs/reference/tes_runtime_fragments.md
 
 Grammar (verified line-exact against the LE extraction in
 references/Skyrim Animations):
@@ -32,9 +35,10 @@ animationdatasinglefile.txt:
 animationsetdatasinglefile.txt:
   <N projects>, then N "<Project>Data\\<Project>.txt" names, then per project:
     <n set files>, set file names, then per set file a V3 block:
-    "V3", "0", "0", <n attacks>, per attack (event name, "0", <n clips>,
-    clip generator names), <n anim files>, per file 3 hash lines:
-    crc(dir), crc(filename), crc("hkx").
+    "V3", <n swap events>, events, <n hand variables>, per variable 3 lines,
+    <n attacks>, per attack (event name, "0", <n clips>, clip generator
+    names), <n anim files>, per file 3 hash lines: crc(dir), crc(filename),
+    crc("hkx").
   Hash = CRC-32 (poly 0xEDB88320, reflected) with init=0 and xorout=0 over
   the lowercase string — EXCEPT strings of <= 4 chars, which are stored as
   their ASCII bytes packed little-endian ("hkx" -> 7891816). Dir strings
@@ -42,11 +46,16 @@ animationsetdatasinglefile.txt:
   against 5 vanilla projects.
 """
 
+import json
 import os
 import zlib
 
 VANILLA_SINGLEFILES = ('animationdatasinglefile.txt',
                        'animationsetdatasinglefile.txt')
+
+#: Mod-root-relative folder every fragment lives in; the DLL reads all *.json here.
+FRAGMENT_DIR = os.path.join('SKSE', 'Plugins', 'TESRuntime', 'animation')
+FRAGMENT_VERSION = 1
 
 
 # ---------------------------------------------------------------------------
@@ -128,45 +137,77 @@ def anim_file_index(manifest: dict) -> dict:
         dict.fromkeys(c['anim'] for c in manifest['clips']))}
 
 
+def clip_block_lines(clip: dict, anim_index: int) -> list:
+    """One animationdata clip block: name, file index, rate, crops, triggers.
+
+    `anim_index` is the clip's index into the character file's
+    animationNames (anim_file_index for a generated project). Sound triggers
+    always name the converted SOUN's descriptor
+    (`SoundPlay.TES4_<EDID>_SNDR`); footstep events are the engine's own,
+    and raw graph events pass through.
+    See: docs/commentary/asset_convert_creature.md#runtime-animation-cache-composition
+    """
+    timed = [(t, f'SoundPlay.TES4_{edid}_SNDR')
+             for t, edid in clip.get('sounds', []) if edid]
+    timed += [(t, name) for t, name in clip.get('feet', [])]
+    timed += [(t, name) for t, name in clip.get('events', [])]
+    for t in clip.get('hits', []):
+        timed.append((max(0.0, t - 0.3), 'weaponSwing'))
+        timed.append((max(0.0, t - 0.1), 'preHitFrame'))
+        timed.append((t, 'HitFrame'))
+    triggers = [f'{name}:{_fmt(t)}' for t, name in sorted(timed)]
+    if clip.get('end_event'):
+        triggers.append(f"{clip['end_event']}:{_fmt(clip['duration'])}")
+    lines = [clip['name'], str(anim_index), '%g' % clip.get('rate', 1),
+             '0', '0', str(len(triggers))]
+    lines += triggers
+    lines.append('')
+    return lines
+
+
 def project_block_lines(manifest: dict) -> list:
     """The animationdata/<project>.txt content."""
     anim_index = anim_file_index(manifest)
     lines = ['1', str(len(manifest['project_files']))]
     lines += manifest['project_files']
     lines.append('1')
-    for uid, clip in enumerate(manifest['clips']):
-        # Sound triggers ALWAYS carry a descriptor name: `SoundPlay.<SNDR
-        # EditorID>`. Verified by disassembling the SSE annotation handler
-        # (0x140565c90 in the GOG build) — it measures the payload with
-        # 0x140c60eb0 and jumps to the exit when the length is zero, so a bare
-        # `SoundPlay:` does nothing at all. Only a named payload reaches the
-        # by-name lookup at 0x140c260f0.
-        #
-        # Vanilla creature projects DO contain bare `SoundPlay:` entries (bear
-        # 14, wolf 66); by the same code path those are inert leftovers, not a
-        # mechanism to copy. Ours name the converted SOUN's companion
-        # descriptor, minted as TES4_<EDID>_SNDR by
-        # tes5_import.record_types.dialog_misc.convert_SOUN.
-        timed = [(t, f'SoundPlay.TES4_{edid}_SNDR')
-                 for t, edid in clip.get('sounds', []) if edid]
-        # Footstep events (FootFront/FootBack) — the engine's own, routed
-        # through the race's footstep/impact set, not through a descriptor.
-        timed += [(t, name) for t, name in clip.get('feet', [])]
-        # Raw graph events (e.g. the death pose clip's `Ragdoll` release —
-        # the vanilla wolf Death block's `Ragdoll:0.267`).
-        timed += [(t, name) for t, name in clip.get('events', [])]
-        for t in clip.get('hits', []):
-            timed.append((max(0.0, t - 0.3), 'weaponSwing'))
-            timed.append((max(0.0, t - 0.1), 'preHitFrame'))
-            timed.append((t, 'HitFrame'))
-        triggers = [f'{name}:{_fmt(t)}' for t, name in sorted(timed)]
-        if clip.get('end_event'):
-            triggers.append(f"{clip['end_event']}:{_fmt(clip['duration'])}")
-        lines += [clip['name'], str(anim_index[clip['anim']]),
-                  '%g' % clip.get('rate', 1),
-                  '0', '0', str(len(triggers))]
-        lines += triggers
-        lines.append('')
+    for clip in manifest['clips']:
+        lines += clip_block_lines(clip, anim_index[clip['anim']])
+    return lines
+
+
+def motion_entry_lines(uid: int, duration: float, motion: dict,
+                       trans_tol: float = 0.5, rot_tol: float = 0.002) -> list:
+    """One motion block: file index, duration, translation and rotation rows.
+
+    A file without root motion gets a single zero row at the clip duration.
+    Both row sets drop the t=0 sample the engine implies; rotations are
+    stored w,x,y,z by kf_decode and emitted x,y,z,w.
+    """
+    t_rows, r_rows = [], []
+    if motion:
+        times = motion['times']
+        if motion.get('translations'):
+            vals = [tuple(v) for v in motion['translations']]
+            for i in _rdp_keep(times, vals, trans_tol)[1:]:
+                x, y, z = vals[i]
+                t_rows.append(
+                    f'{_fmt(times[i])} {_fmt(x)} {_fmt(y)} {_fmt(z)}')
+        if motion.get('rotations'):
+            vals = [tuple(v) for v in motion['rotations']]
+            for i in _rdp_keep(times, vals, rot_tol)[1:]:
+                w, x, y, z = vals[i]
+                r_rows.append(f'{_fmt(times[i])} {_fmt(x)} {_fmt(y)} '
+                              f'{_fmt(z)} {_fmt(w)}')
+    if not t_rows:
+        t_rows = [f'{_fmt(duration)} 0 0 0']
+    if not r_rows:
+        r_rows = [f'{_fmt(duration)} 0 0 0 1']
+    lines = [str(uid), _fmt(duration), str(len(t_rows))]
+    lines += t_rows
+    lines.append(str(len(r_rows)))
+    lines += r_rows
+    lines.append('')
     return lines
 
 
@@ -176,8 +217,7 @@ def motion_block_lines(manifest: dict, trans_tol: float = 0.5,
 
     One block per ANIMATION FILE INDEX (the same index space as the clip
     blocks — see anim_file_index; vanilla stores root motion per animation,
-    not per clip).  Files without root motion get a single zero row at the
-    clip duration.
+    not per clip).
     """
     anim_index = anim_file_index(manifest)
     per_file = {}               # index -> representative clip (first user)
@@ -186,33 +226,20 @@ def motion_block_lines(manifest: dict, trans_tol: float = 0.5,
     lines = []
     for uid in sorted(per_file):
         clip = per_file[uid]
-        motion = manifest['motions'].get(clip['stem'])
-        dur = clip['duration']
-        t_rows, r_rows = [], []
-        if motion:
-            times = motion['times']
-            if motion.get('translations'):
-                vals = [tuple(v) for v in motion['translations']]
-                for i in _rdp_keep(times, vals, trans_tol)[1:]:  # skip t=0
-                    x, y, z = vals[i]
-                    t_rows.append(
-                        f'{_fmt(times[i])} {_fmt(x)} {_fmt(y)} {_fmt(z)}')
-            if motion.get('rotations'):
-                # stored w,x,y,z (kf_decode) -> emitted x,y,z,w
-                vals = [tuple(v) for v in motion['rotations']]
-                for i in _rdp_keep(times, vals, rot_tol)[1:]:
-                    w, x, y, z = vals[i]
-                    r_rows.append(f'{_fmt(times[i])} {_fmt(x)} {_fmt(y)} '
-                                  f'{_fmt(z)} {_fmt(w)}')
-        if not t_rows:
-            t_rows = [f'{_fmt(dur)} 0 0 0']
-        if not r_rows:
-            r_rows = [f'{_fmt(dur)} 0 0 0 1']
-        lines += [str(uid), _fmt(dur), str(len(t_rows))]
-        lines += t_rows
-        lines.append(str(len(r_rows)))
-        lines += r_rows
-        lines.append('')
+        lines += motion_entry_lines(
+            uid, clip['duration'], manifest['motions'].get(clip['stem']),
+            trans_tol, rot_tol)
+    return lines
+
+
+def crc_triple_lines(anim_dir: str, stems) -> list:
+    """The animationsetdata preload list: count, then 3 hash lines per file."""
+    dir_hash = str(beth_anim_hash(anim_dir))
+    ext_hash = str(beth_anim_hash('hkx'))
+    stems = sorted({s.lower() for s in stems})
+    lines = [str(len(stems))]
+    for stem in stems:
+        lines += [dir_hash, str(beth_anim_hash(stem)), ext_hash]
     return lines
 
 
@@ -223,76 +250,178 @@ def setdata_block_lines(manifest: dict) -> list:
     lines.append(str(len(attacks)))
     for event, clip_name in attacks:
         lines += [event, '0', '1', clip_name]
-    stems = sorted({c['stem'].lower() for c in manifest['clips']})
-    dir_hash = str(beth_anim_hash(manifest['anim_dir']))
-    ext_hash = str(beth_anim_hash('hkx'))
-    lines.append(str(len(stems)))
-    for stem in stems:
-        lines += [dir_hash, str(beth_anim_hash(stem)), ext_hash]
+    lines += crc_triple_lines(manifest['anim_dir'],
+                              (c['stem'] for c in manifest['clips']))
     return lines
 
 
 # ---------------------------------------------------------------------------
-# Singlefile merging (vanilla base + generated projects)
+# Fragments: what one plugin contributes to the two global files
 # ---------------------------------------------------------------------------
 
-def merge_animationdata(base_lines: list, manifests: list) -> list:
-    n = int(base_lines[0])
-    names = base_lines[1:1 + n]
-    body = base_lines[1 + n:]
-    # Never register a project the base already lists: one extra name with no
-    # matching data block desyncs the whole database (see _is_merged).
-    have = {x.lower() for x in names}
-    new_names, new_body = [], []
+def manifest_fragment(manifest: dict) -> tuple:
+    """A generated project's (animdata entry, animsetdata entry)."""
+    stem = os.path.splitext(manifest['project_txt'])[0]
+    return ({'project': manifest['project_txt'],
+             'clip_block': project_block_lines(manifest),
+             'motion_block': motion_block_lines(manifest)},
+            {'entry': f'{stem}Data\\{manifest["project_txt"]}',
+             'block': setdata_block_lines(manifest)})
+
+
+def fragment_path(plugin_out_dir: str, plugin_name: str) -> str:
+    """Where a plugin's fragment lives under its mod root."""
+    stem = os.path.splitext(os.path.basename(plugin_name))[0]
+    return os.path.join(plugin_out_dir, FRAGMENT_DIR, f'{stem}.json')
+
+
+def write_fragment(manifests: list, out_meshes_dir: str,
+                   plugin_name: str, plugin_out_dir: str = None) -> str:
+    """Write the plugin's fragment from its OWN project manifests.
+
+    Goes in `plugin_out_dir`'s SKSE/Plugins/TESRuntime/animation (defaulting
+    to the parent of `out_meshes_dir`). Entries are ordered by project name
+    so composition is deterministic. Returns the fragment path.
+    See: docs/reference/tes_runtime_fragments.md#the-runtime-composer
+    """
+    manifests = sorted(manifests, key=lambda m: m['project_txt'].lower())
+    animdata, animsetdata = [], []
     for m in manifests:
-        if m['project_txt'].lower() in have:
-            continue
-        pb = project_block_lines(m)
-        mb = motion_block_lines(m)
-        new_names.append(m['project_txt'])
-        new_body += [str(len(pb))] + pb + [str(len(mb))] + mb
-    return ([str(n + len(new_names))] + names + new_names + body + new_body)
+        ad, asd = manifest_fragment(m)
+        animdata.append(ad)
+        animsetdata.append(asd)
+    frag = {'version': FRAGMENT_VERSION,
+            'source': os.path.basename(plugin_name),
+            'animdata': animdata,
+            'animsetdata': animsetdata}
+    root = plugin_out_dir or os.path.dirname(os.path.normpath(out_meshes_dir))
+    path = fragment_path(root, plugin_name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(frag, f)
+    _write_project_sources(manifests, out_meshes_dir)
+    _remove_stale_singlefiles(out_meshes_dir)
+    return path
 
 
-def merge_animationsetdata(base_lines: list, manifests: list) -> list:
-    n = int(base_lines[0])
-    names = base_lines[1:1 + n]
-    body = base_lines[1 + n:]
-    have = {x.lower() for x in names}      # see merge_animationdata
-    new_names, new_body = [], []
+def _remove_stale_singlefiles(out_meshes_dir: str) -> None:
+    """Delete merged singlefiles left by the old build-time mechanism.
+
+    One would still deploy and race the vanilla file for its path.
+    """
+    for fn in VANILLA_SINGLEFILES:
+        stale = os.path.join(out_meshes_dir, fn)
+        if os.path.exists(stale):
+            os.remove(stale)
+
+
+def _write_project_sources(manifests: list, out_meshes_dir: str) -> None:
+    """Per-project debug copies of each block (never read by the engine)."""
+    ad_dir = os.path.join(out_meshes_dir, 'animationdata')
+    ba_dir = os.path.join(ad_dir, 'boundanims')
+    os.makedirs(ba_dir, exist_ok=True)
     for m in manifests:
         stem = os.path.splitext(m['project_txt'])[0]
-        entry = f'{stem}Data\\{m["project_txt"]}'
-        if entry.lower() in have:
+        with open(os.path.join(ad_dir, m['project_txt']), 'w',
+                  encoding='latin-1', newline='\r\n') as f:
+            f.write('\n'.join(project_block_lines(m)) + '\n')
+        with open(os.path.join(ba_dir, f'anims_{stem}.txt'), 'w',
+                  encoding='latin-1', newline='\r\n') as f:
+            f.write('\n'.join(motion_block_lines(m)) + '\n')
+        sd_dir = os.path.join(out_meshes_dir, 'animationsetdata',
+                              f'{stem}Data')
+        os.makedirs(sd_dir, exist_ok=True)
+        with open(os.path.join(sd_dir, m['project_txt']), 'w',
+                  encoding='latin-1', newline='\r\n') as f:
+            f.write('\n'.join(setdata_block_lines(m)) + '\n')
+
+
+def read_fragments(fragment_dir: str) -> list:
+    """Every *.json fragment under `fragment_dir`, sorted by filename."""
+    out = []
+    if not os.path.isdir(fragment_dir):
+        return out
+    for fn in sorted(os.listdir(fragment_dir), key=str.lower):
+        if not fn.lower().endswith('.json'):
             continue
-        new_names.append(entry)
-        new_body += setdata_block_lines(m)
-    return ([str(n + len(new_names))] + names + new_names + body + new_body)
+        with open(os.path.join(fragment_dir, fn), encoding='utf-8') as f:
+            out.append(json.load(f))
+    return out
 
 
-# Every project this converter generates is named 'tes4<folder>project'. Its
-# presence in a supposedly-VANILLA singlefile means the file is really one of
-# our own merged outputs (deployed loose into the game folder, or cached from
-# such a copy).
-_GENERATED_PROJECT_MARK = 'tes4'
+# ---------------------------------------------------------------------------
+# Composition: vanilla base + fragments (the DLL's reference behaviour)
+# ---------------------------------------------------------------------------
+
+def _split_registry(base_lines: list) -> tuple:
+    """(names, body) of a singlefile: the leading count + name list, rest."""
+    n = int(base_lines[0])
+    return list(base_lines[1:1 + n]), list(base_lines[1 + n:])
 
 
-def _is_merged(lines: list) -> bool:
-    """True when a singlefile already contains generated TES4 projects.
+def _wrapped(block: list) -> list:
+    """A block preceded by its line count, as the singlefile wraps it."""
+    return [str(len(block))] + list(block)
 
-    Merging onto such a file registers every project a second time while
-    appending only one data block, so the name list and the block list fall out
-    of step — the engine then reads the WRONG block for every project past the
-    first duplicate. Silent creatures were the visible symptom.
+
+def compose_animationdata(base_lines: list, fragments: list) -> list:
+    """Base singlefile + every fragment's `animdata` entries appended.
+
+    A project the base already registers is skipped: one extra name with no
+    matching data block desyncs the whole database.
     """
-    if not lines:
-        return False
-    try:
-        n = int(lines[0])
-    except (ValueError, IndexError):
-        return False
-    return any(_GENERATED_PROJECT_MARK in x.lower() for x in lines[1:1 + n])
+    names, body = _split_registry(base_lines)
+    have = {x.lower() for x in names}
+    new_names, new_body = [], []
+    for frag in fragments:
+        for e in frag.get('animdata', []):
+            if e['project'].lower() in have:
+                continue
+            have.add(e['project'].lower())
+            new_names.append(e['project'])
+            new_body += _wrapped(e['clip_block'])
+            if e.get('motion_block') is not None:
+                new_body += _wrapped(e['motion_block'])
+    return [str(len(names) + len(new_names))] + names + new_names \
+        + body + new_body
 
+
+def compose_animationsetdata(base_lines: list, fragments: list) -> list:
+    """Base setdata singlefile + every fragment's `animsetdata` entries."""
+    names, body = _split_registry(base_lines)
+    have = {x.lower() for x in names}
+    new_names, new_body = [], []
+    for frag in fragments:
+        for e in frag.get('animsetdata', []):
+            if e['entry'].lower() in have:
+                continue
+            have.add(e['entry'].lower())
+            new_names.append(e['entry'])
+            new_body += list(e['block'])
+    return [str(len(names) + len(new_names))] + names + new_names \
+        + body + new_body
+
+
+def compose_singlefiles(base: dict, fragments: list) -> dict:
+    """{filename: composed lines} for both singlefiles."""
+    return {'animationdatasinglefile.txt': compose_animationdata(
+                base['animationdatasinglefile.txt'], fragments),
+            'animationsetdatasinglefile.txt': compose_animationsetdata(
+                base['animationsetdatasinglefile.txt'], fragments)}
+
+
+def write_composed(lines_by_file: dict, out_dir: str) -> None:
+    """Write composed singlefiles the way the DLL serves them: CRLF, latin-1."""
+    os.makedirs(out_dir, exist_ok=True)
+    for fn, lines in lines_by_file.items():
+        with open(os.path.join(out_dir, fn), 'w', encoding='latin-1',
+                  newline='\r\n') as f:
+            f.write('\n'.join(lines) + '\n')
+
+
+# ---------------------------------------------------------------------------
+# The vanilla base (validators and tests only; the DLL reads the game's own)
+# ---------------------------------------------------------------------------
 
 def get_vanilla_singlefiles(skyrim_data_path: str, cache_dir: str) -> dict:
     """Locate the two vanilla singlefiles: cache -> loose file in the game
@@ -305,15 +434,7 @@ def get_vanilla_singlefiles(skyrim_data_path: str, cache_dir: str) -> dict:
         cached = os.path.join(cache_dir, fn)
         if os.path.exists(cached):
             with open(cached, encoding='latin-1') as f:
-                lines = f.read().splitlines()
-            if _is_merged(lines):
-                # A previously cached OUR-OUTPUT copy: drop it and re-source.
-                print(f'  [animdata] cached {fn} contains generated projects '
-                      f'— discarding and re-extracting a clean base')
-                os.remove(cached)
-                missing.append(fn)
-            else:
-                out[fn] = lines
+                out[fn] = f.read().splitlines()
         else:
             missing.append(fn)
     if not missing:
@@ -324,19 +445,7 @@ def get_vanilla_singlefiles(skyrim_data_path: str, cache_dir: str) -> dict:
         loose = os.path.join(skyrim_data_path or '', 'meshes', fn)
         if skyrim_data_path and os.path.exists(loose):
             with open(loose, 'rb') as f:
-                data = f.read()
-            # The loose file in the game's Data folder is very likely OUR OWN
-            # deployed output — merging onto it duplicates every generated
-            # project and desyncs the name list from the data blocks, so the
-            # engine reads the wrong block for every project after the first
-            # duplicate and the whole tail of the database is garbage.
-            # Only accept a loose copy that is still pristine vanilla.
-            if _is_merged(data.decode('latin-1').splitlines()):
-                print(f'  [animdata] loose {fn} in the game folder is already '
-                      f'merged (our deployed output) — extracting from the '
-                      f'BSA instead')
-                continue
-            sources[fn] = data
+                sources[fn] = f.read()
             missing.remove(fn)
     if missing:
         bsa = os.path.join(skyrim_data_path or '', 'Skyrim - Animations.bsa')
@@ -357,72 +466,3 @@ def get_vanilla_singlefiles(skyrim_data_path: str, cache_dir: str) -> dict:
             f.write(data)
         out[fn] = data.decode('latin-1').splitlines()
     return out
-
-
-def write_singlefiles(manifests: list, out_meshes_dir: str,
-                      skyrim_data_path: str, cache_dir: str,
-                      singlefile_dir: str = None,
-                      own_manifests: list = None) -> dict:
-    """Merge all generated project manifests onto the vanilla base and write
-    both singlefiles (plus the per-project debug sources) under
-    `out_meshes_dir`. Always merges from the VANILLA base so re-runs are
-    idempotent. Returns {filename: total project count}.
-
-    `singlefile_dir` redirects the two SHARED singlefiles (and only those)
-    elsewhere — a child plugin sends them to its MASTER's meshes dir. The game
-    reads exactly ONE animationdatasinglefile.txt out of Data, so a child that
-    ships its own copy is not adding a file, it is racing the master for the
-    same path: whichever deploys last silently de-registers the other's
-    projects. Writing through to the master's single shared copy removes the
-    race, and keeps the child's output to the files it genuinely owns. The
-    `own_manifests` is this plugin's OWN projects; the per-project source
-    files are written for those alone. It defaults to `manifests` so a
-    single-plugin (master) run is unchanged."""
-    base = get_vanilla_singlefiles(skyrim_data_path, cache_dir)
-    os.makedirs(out_meshes_dir, exist_ok=True)
-
-    merged_ad = merge_animationdata(
-        base['animationdatasinglefile.txt'], manifests)
-    merged_asd = merge_animationsetdata(
-        base['animationsetdatasinglefile.txt'], manifests)
-    sf_dir = singlefile_dir or out_meshes_dir
-    os.makedirs(sf_dir, exist_ok=True)
-    for fn, lines in (('animationdatasinglefile.txt', merged_ad),
-                      ('animationsetdatasinglefile.txt', merged_asd)):
-        with open(os.path.join(sf_dir, fn), 'w', encoding='latin-1',
-                  newline='\r\n') as f:
-            f.write('\n'.join(lines) + '\n')
-        # A child must not leave a stale copy of the shared file in its own
-        # tree: it would still deploy and still win the race.
-        if singlefile_dir:
-            stale = os.path.join(out_meshes_dir, fn)
-            if os.path.exists(stale):
-                os.remove(stale)
-
-    # Per-project source files (engine ignores these; kept for debugging).
-    # Written for the plugin's OWN projects only. `manifests` is the union of
-    # every plugin's projects — needed to merge the shared singlefiles above,
-    # but writing a per-project file for each one made a child ship the whole
-    # master's set (ElsweyrAnequina: 147 files for the 7 creatures it owns).
-    ad_dir = os.path.join(out_meshes_dir, 'animationdata')
-    ba_dir = os.path.join(ad_dir, 'boundanims')
-    os.makedirs(ba_dir, exist_ok=True)
-    for m in (own_manifests if own_manifests is not None else manifests):
-        stem = os.path.splitext(m['project_txt'])[0]
-        with open(os.path.join(ad_dir, m['project_txt']), 'w',
-                  encoding='latin-1', newline='\r\n') as f:
-            f.write('\n'.join(project_block_lines(m)) + '\n')
-        with open(os.path.join(ba_dir, f'anims_{stem}.txt'), 'w',
-                  encoding='latin-1', newline='\r\n') as f:
-            f.write('\n'.join(motion_block_lines(m)) + '\n')
-        sd_dir = os.path.join(out_meshes_dir, 'animationsetdata',
-                              f'{stem}Data')
-        os.makedirs(sd_dir, exist_ok=True)
-        with open(os.path.join(sd_dir, m['project_txt']), 'w',
-                  encoding='latin-1', newline='\r\n') as f:
-            f.write('\n'.join(setdata_block_lines(m)) + '\n')
-
-    return {'animationdatasinglefile.txt':
-            int(merged_ad[0]) if merged_ad else 0,
-            'animationsetdatasinglefile.txt':
-            int(merged_asd[0]) if merged_asd else 0}

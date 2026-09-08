@@ -557,6 +557,12 @@ def _cmd_start_mod(app, out_dir: str) -> list:
     return _with_out(_tool("tools", "release", "package_start_mod.py"), out_dir)
 
 
+def _cmd_runtime_dll(app, out_dir: str) -> list:
+    """Zip the built TESRuntime.dll as its own SKSE mod."""
+    return _with_out(_tool("tools", "release", "package_runtime_dll.py"),
+                     out_dir)
+
+
 def _cmd_pack_lod(app, out_dir: str) -> list:
     """Zip the baked AutoConvertLOD folder."""
     return _with_out(_tool("tools", "release", "pack_lod.py"), out_dir)
@@ -611,6 +617,7 @@ def _cmd_body_patch(app, out_dir: str) -> list:
 #: Global action -> the function building its argv.
 _CMD_FNS = {
     "package_start_mod": _cmd_start_mod,
+    "package_runtime_dll": _cmd_runtime_dll,
     "pack_lod": _cmd_pack_lod,
     "convert_ui": _cmd_convert_ui,
     "make_master": _cmd_make_master,
@@ -645,6 +652,7 @@ def _artifact_pack_lod():
 #: Global action -> the file under Finished Mods that proves it ran.
 _ARTIFACTS = {
     "package_start_mod": _artifact_start_mod,
+    "package_runtime_dll": lambda: "TESRuntime.zip",
     "convert_ui": _artifact_convert_ui,
     "pack_lod": _artifact_pack_lod,
     "modify_body_meshes": lambda: "Slot44 Patch.esp",
@@ -726,6 +734,12 @@ def _stat_part(path: Path, label: str, missing: str) -> str:
 def _stamp_start_mod(app) -> str:
     """The committed starter mod's dist tree."""
     return _tree_stamp(REPO_ROOT / "TESGameSelect" / "dist")
+
+
+def _stamp_runtime_dll(app) -> str:
+    """The built DLL alone, not the tree: obj/ churns on every compile."""
+    return _stat_part(REPO_ROOT / "tes_runtime" / "TESRuntime.dll",
+                      "dll", "missing")
 
 
 def _convert_ui_wanted(ui, cur, ob_dir, sk_dir) -> list:
@@ -841,6 +855,7 @@ def _stamp_converted_set(app, key: str, plugin_esm) -> str:
 #: Actions whose inputs are NOT the converted plugin set.
 _STAMP_FNS = {
     "package_start_mod": _stamp_start_mod,
+    "package_runtime_dll": _stamp_runtime_dll,
     "convert_ui": _stamp_convert_ui,
     "pack_lod": _stamp_pack_lod,
     "make_master": _stamp_make_master,

@@ -43,6 +43,7 @@ What a format or contract IS. Stable; no dates, no status.
 | [skyrim_mountable_actor.md](reference/skyrim_mountable_actor.md) | What makes a Skyrim actor mountable |
 | [tes4_record_definitions.md](reference/tes4_record_definitions.md) | TES4 (Oblivion) Complete Binary Record Definitions |
 | [tes5_binary_format.md](reference/tes5_binary_format.md) | Skyrim SE (TES5/SSE) Binary File Format — Exact Layout |
+| [tes_runtime_fragments.md](reference/tes_runtime_fragments.md) | TESRuntime animation cache fragments — the schema any mod emits |
 | [xedit_scripting.md](reference/xedit_scripting.md) | xEdit Scripting Reference (historical) |
 
 ## `commentary/`
