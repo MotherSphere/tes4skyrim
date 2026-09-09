@@ -7,7 +7,7 @@ from ..mesh_bounds import get_mesh_physics_flags
 from .common import (
     VENDOR_KYWD,
     _common_header_subs,
-    _prefix_path,
+    prefix_path,
     _resolve_obnd,
     _simple_object,
     get_float,
@@ -58,8 +58,8 @@ def convert_STAT(rec: dict) -> bytes:
     subs = _common_header_subs(rec, need_full=False, obnd_override=bounds)
     path = get_str(rec, 'Model.MODL')
     if path:
-        subs += pack_string_subrecord('MODL', _prefix_path(path))
-        key = _prefix_path(path).lower().replace('\\', '/')
+        subs += pack_string_subrecord('MODL', prefix_path(path))
+        key = prefix_path(path).lower().replace('\\', '/')
         if get_mesh_physics_flags(key) & 1:
             # MSTT layout (xEdit + Skyrim.esm): EDID OBND [FULL] MODL DATA
             # [SNAM]; DATA is a REQUIRED u8 — 0 on the swinging signs.
@@ -612,7 +612,7 @@ def convert_LIGH(rec: dict) -> bytes:
     subs += pack_obnd(*_resolve_obnd(rec, 'LIGH'))
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
     full = get_str(rec, 'FULL')
     if full:
         subs += pack_string_subrecord('FULL', full)
@@ -696,7 +696,7 @@ def convert_ANIO(rec: dict) -> bytes:
         subs += pack_string_subrecord('EDID', edid)
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
     bnam = get_str(rec, 'BNAM')
     if bnam:
         subs += pack_string_subrecord('BNAM', bnam)

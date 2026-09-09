@@ -269,10 +269,20 @@ coinciding with unambiguous neighbours in the same cell.
 | FNV 0013BC26 (vault) | 52 | 310 |
 | FNV 00103DF9 (craftsman homes) | 25 | 268 |
 
-So the Oblivion root-rotation wrapper is skipped for FO3/FNV: the root
-rotation is simply zeroed, and nothing is baked into the collision because
-FNV, like Skyrim, already placed the root body at REFR ∘ bodyT. Root
-translations occur only on VATS camera rigs.
+So the AUTHORED root rotation of a FO3/FNV mesh is zeroed, and nothing is
+baked into the collision because FNV, like Skyrim, already placed the root
+body at REFR ∘ bodyT. Root translations occur only on VATS camera rigs.
+
+<a id="fnv-weapon-flip"></a>The zeroing happens in `_convert_one_root`
+BEFORE the Prn seating, not inside `wrap_root_transform`. It used to sit in
+the wrapper, which runs after `convert_prn` has applied the weapon flip
+(`_apply_axe_flip`, [why](asset_convert_armor.md#weapon-attachment)), so a
+FNV gun's flip was zeroed with the authored rotation and every FNV weapon
+was held pointing at its holder; the retarget kept the hand's frame
+verbatim and the level aim was fixed and the gun still faced backwards,
+because the mesh itself was 180° from where the same pass puts an Oblivion
+weapon. Zeroing first lets the flip survive, and the wrapper then bakes it
+into the inner NiNode exactly as for an Oblivion blade.
 
 ### <a id="two-sided-welding"></a>Random winding, repaired from the render mesh
 
@@ -313,3 +323,351 @@ became 41 LINEOFSIGHT, a pick layer with no physical collision, so the player
 walked through them. Census of 1,500 FNV world meshes: layer 1 x373, 4 x32,
 3 x23, 10 x13, 13 x13, 2 x12, 19 x12, 26 x9, 5 x4, 15 x2, 6/9/14 x1.
 `fo3_layer()` passes 0-28 through and renumbers 29+.
+
+## <a id="gun-graph"></a>Guns are hand type 13, not crossbows
+
+**Code:** `asset_convert/havok/gun_anim_falloutnv.py`,
+`gun_graph_falloutnv.py`, `gun_patch_falloutnv.py`, `humanoid_graph.py`,
+`tes5_import/record_types/equipment_falloutnv.py` (`gun_profile`).
+
+Skyrim's `GetHandAnimType` (Address Library id 14220) answers an anim type per
+equipped form, topping out at 12 for a crossbow. A gun is given a **new type,
+13**: TESRuntime patches every call site of that function and of the one
+routine that writes the value into a graph
+(`BShkbAnimationGraph::SetVariableInt`, id 63609), so a WEAP listed in
+`<plugin>.guns.json` answers 13 and the write of `iRightHandType = 13` is
+followed by `iGunClass`, `iGunReload`, `iGunAttack`, `iGunClipSize` and
+`iGunAuto` from the same sidecar. Nothing plays a crossbow animation.
+
+The SSE humanoid graphs are patched in place through `external/hkxconv`
+(decompile to XML, edit, recompile). `1hm_behavior` gains a
+`TES4Gun_AttackState` entered on `crossbowAttackStart if iRightHandType == 13`
+ahead of the vanilla transition — that event is the only shot trigger the
+engine sends for a ranged weapon, so it is reused as the entry signal rather
+than as an animation choice.
+
+### <a id="attack-event-idle-tree"></a>Where `crossbowAttackStart` comes from
+
+The executable never references the `bowAttackStart` /
+`crossbowAttackStart` literals except to *recognize* them (one compare each
+in the attack-state receiver `ActorMediator` calls, id 39004); no RACE `ATKE`
+and no animationsetdata attack block names them either (0 of 87k RACE lines,
+0 of 74k set lines). The sender is the **IDLE tree**: an attack press runs
+`PlayerControls` → BGSAction `ActionRightAttack` → `TESActionData` →
+`ActorMediator::Process`, which finds the action's root IDLE, walks its
+children evaluating their CTDAs, and sends the winner's `ENAM` string.
+Skyrim.esm `BowAttack` (0005177C) is `GetEquippedItemType == 7`; Dawnguard's
+crossbow idle is `== 12`; the fallthrough child is `attackStart`, the melee
+attack. `GetEquippedItemType` (condition function 597, id 21677) calls
+`GetHandAnimType`, so a hook that answers 13 there fails the crossbow idle
+and the gun plays the melee attack with no `arrowRelease` and no ammo spent.
+The hook therefore answers the vanilla type (12) to that function and to the
+Papyrus `GetEquippedItemType` native (id 54685), and 13 to the graph writer
+and the animation-set selectors only.
+
+### <a id="turn-clips-are-overlays"></a>Turn clips are lower-body overlays
+
+FNV composes a stance by per-block priority, not by whole clips. Measured
+on the male rig: `mtidle` is priority 10 on every bone; `1hpaimdown` is 25
+on the root/pelvis/legs, 30 on the spine and head, 35 on the arms;
+`1hpturnright` has only 15 blocks (Bip01, NonAccum, pelvis, both legs, the
+four twist bones) at 30; `1hpforward` is 30/31 on the body and 35 on the
+arms. So standing still the AIM clip wins the whole body over the base idle
+and turning overlays the legs on it. Played alone, a turn clip leaves 44
+bones at the skeleton rest, a
+T-pose; `ready_machine` now blends the turn clip's lower body under the aim
+pose with the vanilla crossbow bone-weight arrays. `1hpaim.kf` (the level
+pitch) is not in the FalloutNV BSAs; the level pose is the fire clip's
+first frame ([why not the down/up midpoint](#level-aim-from-the-fire-clip)).
+
+The jump, sprint, shout and horse selectors key on `iRightHandEquipped` /
+`iLeftHandEquipped`, which the engine fills from the same hand-type routine
+(id 38821) while the weapon is drawn, so they are in `HAND_TYPE_VARS` and
+get a type-13 entry like the `iRightHandType` slots.
+
+### <a id="accum-root-identity"></a>The accum root plays as identity; NonAccum carries the 90°
+
+**Code:** `clip_retarget.py` `_source_locals`/`retarget_clip`,
+`kf_decode.py` `split_root_motion(flatten_to_first=True)`.
+
+Every FNV human clip follows the exporter convention in
+[asset_convert_animation.md](asset_convert_animation.md#animated-object-behaviour-graphs):
+the sequence's accum root `Bip01` is absent or an identity track, and
+`Bip01 NonAccum` carries the body's real transform. Census of the 94 `_male`
+gun and locomotion clips: 84 have no `Bip01` track, 10 an identity one, and
+all 94 author NonAccum at 83–90° yaw (the skeleton's `Bip01` rest is the
+same 90°). The engine applies the identity to `Bip01`, so NonAccum's 90° is
+the whole facing.
+
+The retarget did neither. `_source_locals` posed a track-less root at the
+NIF rest (90°), and `split_root_motion` flattened NonAccum's rotation to
+identity whenever it held translation motion (`mtidle` breathes). The two
+errors cancelled on `mtidle`, and `1hpforward` authors a `Bip01` track (so
+only the NIF rest was skipped, 87.5° kept on NonAccum), but a static clip
+such as `1hpaimdown` got both: 90° + 90°, the drawn pistol stood facing
+90° left and turned straight the moment locomotion played. Measured
+frame-0 pelvis forward axis: aimdown (-1, 0, 0), mtidle and forward
+(0, 1, 0).
+
+Now the source root is always identity, the gun path splits with
+`flatten_to_first=True` (NonAccum keeps its authored first-sample
+rotation), and the root is never mapped, so `NPC Root [Root]` stays at
+rest and `NPC COM [COM ]` carries the yaw, as vanilla clips do. `1hpforward`
+had been writing `NPC Root` at -90° with COM at +87.5° to compensate.
+Creatures keep the identity flatten: the Morroblivion accum leak in
+[asset_convert_animation.md](asset_convert_animation.md#accum-bind-pose-leak)
+is the opposite convention, and their patched clips are the reference.
+
+### <a id="jump-and-sprint"></a>Jump and sprint hold the gun
+
+**Code:** `gun_moves_falloutnv.py`, `gun_patch_falloutnv.py`
+(`patch_master`, `patch_sprint`).
+
+The six `Jump*_MSG` selectors in `0_master` and the two `Sprint*Side`
+selectors in `sprintbehavior` key on `iRightHandEquipped`, so a drawn gun
+used to jump and sprint as the cloned crossbow entry. Vanilla's crossbow
+jump is the model: a `BSBoneSwitchGenerator` whose default is the plain
+`MT_Jump_Behavior` and whose one overlay plays `CrossBow_IdleHeld` on the
+`RightHandAndQuiver` character property (a bone-weight array in the
+character file). The gun entry copies that shape with the class' aim pose
+on the `Arms` property, which the character file defines as both arms,
+both hands, their fingers and the `Weapon` node, so a rifle keeps both
+hands on the gun. FNV has no jump-start clip (only `jumploop`/`jumpland`)
+and no sprint at all, so the overlay is the whole answer for the jump
+selectors, and sprint plays the class' `fastforward` run clip in both side
+selectors (the blend of two copies is the clip itself).
+
+### <a id="stale-slot-13"></a>Vanilla already has a state 13
+
+`1HM_Readied_BehaviorGraph` (in `1hm_behavior` and its first-person copy)
+ships a leftover `State00` at stateId 13 holding
+`CrossBow_Standing_Locomotion_Behavior`, which no vanilla type reaches.
+`extend_type_slots` used to skip a machine that already had the new id, so
+the gun ready machine was never installed and a drawn gun stood in the
+vanilla crossbow locomotion. A pre-existing entry at the new type is now
+overwritten; the census over all 24 humanoid graphs found only these two. Per class the
+state runs fire (A/B alternation for automatics) → reload once the WEAP's clip
+size is spent → done, over a standing/moving lower body.
+
+The shot itself stays the engine's: clip triggers fire `arrowAttach`,
+`bowDrawn`, `BowRelease` and `arrowRelease` around the FNV `Hit` text key, the
+sequence the engine requires to launch a projectile (attack state 9 → 10 → 11
+→ 12). `reloadStart`/`reloadStop`/`bowEnd` do not exist in the executable and
+are graph-internal here. Shots are counted by idempotent per-frame
+`hkbEvaluateExpressionModifier` assignments rather than by an event, so a
+dropped frame cannot desync the count.
+
+<a id="fire-rate"></a>**Fire rate is FNV's own rule: the attack clip plays
+at the gun's `AnimAttackMult` and the next shot is accepted at its `a:`
+key.** Measured on the 9mm: `DNAM.AnimAttackMult` 1.25, `1hpattack3` next
+key `a:3` at 0.400 s, and the record's `ShotsPerSec` is 3.125 =
+1.25 / 0.4. Before this a shot cost the whole clip plus two 0.3 s root
+blends, about a second per trigger pull. Now the fire clips bind
+`playbackSpeed` to `weaponSpeedMult`, the engine variable the vanilla
+`CrossBow_Release` clip binds, filled from the WEAP's DNAM speed, which a
+FNV gun imports as its `AnimAttackMult`; the fire clip triggers
+`AttackWinStart` and `attackStop` at the `a:` key and `AttackWinEnd` at its
+end, exactly the vanilla release clip's trio; the fire states take
+`crossbowAttackStart` to the other fire state under that initiate window
+(`FLAG_USE_INITIATE_INTERVAL` on events 30/31, as vanilla); and the root
+leaves the gun attack state on the graph-internal `TES4GunAttackEnd` from
+Done instead of on `attackStop`, so an early `attackStop` no longer cuts
+the clip. A clip with no `a:` key opens the window at its last frame.
+
+<a id="automatic-fire-rate"></a>**An automatic fires once per loop, so the
+loop plays at rate × loop duration.** The 9mm SMG (`AttackAnim` 74,
+`attackloop`) has `FireRate` = `ShotsPerSec` = 11 and `AnimAttackMult`
+1.0, and `2haattackloop` is 0.167 s with no fire key and no `a:` key: at
+`weaponSpeedMult` = 1.0 that is six loops, so six shots, per second at
+best, and in game it fired far slower than that. A gun flagged automatic
+(`DNAM.Flags1` bit 1) now imports its `ShotsPerSec` (else `FireRate`) as
+the WEAP speed instead of `AnimAttackMult`, and each class' fire states
+carry a per-frame `fGunLoopSpeed = weaponSpeedMult * <loop duration>`
+assignment (a REAL graph variable, initial 1.0) that the `attackloop`
+clips bind `playbackSpeed` to, so the SMG's loop runs at 1.83× and its
+trigger trio fires 11 times a second. Non-loop attacks keep the
+`weaponSpeedMult` binding. Whether the engine's crossbow release path
+keeps up at that rate is measured in game, not assumed.
+
+<a id="reload-on-the-window"></a>**The empty-magazine check sits on the
+re-attack window too.** The reload transition was only on
+`TES4GunFireEnd`, but a held or spammed trigger takes the
+`crossbowAttackStart` window transition to the other fire state at the
+`a:` key, before the clip ends, so the magazine count ran past the clip
+size until the player stopped firing. The window now carries a second
+`crossbowAttackStart` transition to Reload at higher priority, without
+`FLAG_DISABLE_CONDITION`, conditioned on `RELOAD_COND`.
+
+<a id="fire-transitions-are-instant"></a>**The fire machine's transitions
+carry no blend effect.** The idempotent count is only idempotent while one
+state's modifier runs per frame: under the shared 0.3 s crossfade FireA and
+Done were both active for ~18 frames, Done re-based `iGunBaseA` to
+`iGunShots` and FireA set `iGunShots` to `iGunBaseA + 1` again, so every
+frame of the blend counted a shot. One pistol shot left the count past a
+13-round clip and the second shot's `TES4GunFireEnd` met `RELOAD_COND` (the
+"two shots then reload" report). `fire_machine` builds its states with
+`instant=True`, a null transition, so exactly one modifier runs per frame;
+the fire clips end at the aim pose, so nothing visible crossfades anyway.
+
+Every other humanoid graph (bash, block, sprint, stagger, magic, mounted,
+first person) has its type-12 slots cloned to 13, so no graph is short an
+entry; vanilla ships 12-entry left-hand selectors against 13 types and the
+engine clamps. Iron-sight variants are skipped — no zoom variable exists in
+the graphs to blend them — and first person keeps the cloned crossbow entries,
+since no FNV first-person clips are converted.
+
+## <a id="gun-animations"></a>Gun clip selection
+
+**Code:** `asset_convert/havok/gun_anim_falloutnv.py` (`select_stems`,
+`weapon_bindings`), `gun_vocabulary_falloutnv.py`.
+
+The gun/clip binding is authored on the WEAP `DNAM`, so the exporter must
+emit all three fields the graph keys on. Their offsets (`wbDefinitionsFNV`,
+`wbStruct(DNAM…)`) are **12 Flags1**, **15 Reload Animation**, **41 Attack
+Animation** — note 13 is Grip Animation, not attack. The exporter originally
+read only the first 12 bytes, so all 265 FalloutNV WEAPs exported without
+them; every gun then fell back to `reload=0` (`ReloadA`) and `attack=-1`.
+
+`DNAM.ReloadAnim` indexes `RELOAD_LETTERS` (`abcdefghijklmnopqrswxyz` —
+`wbReloadAnimEnum` order: A..S, then W, X, Y, Z), and `DNAM.AttackAnim` is a
+sparse enum (26 AttackLeft, 32 AttackRight, …, 255 DEFAULT) whose values are
+listed in `ATTACK_ANIMS`.
+
+**The weapon bone is `Weapon` in the Havok skeleton, `WEAPON` in the NIF.**
+`FALLOUT_TO_SKYRIM_BONE_MAP` names the NIF node, and `Skeleton.index` is
+case-sensitive, so the FNV `Weapon` track (`1hpequip.kf` carries one: the
+draw from the holster turns the bone 100°+ over 12 frames) was dropped on
+retarget and the gun sat rigid at Skyrim's rest offset in the hand. `_rig`
+resolves map targets case-insensitively against the hkx bone names; a
+mapped bone whose source is rigid to the hand retargets to exactly the rest
+local, so the change only adds the authored relative motion.
+
+<a id="weapon-bone-verbatim"></a>**The weapon bone keeps the source's world
+transform.** The gun mesh is authored in FNV's `Weapon` frame: `9mm.nif`
+runs along the bone's +X (extent −4.4..15.4 on X, 12.7 on Y, 2.5 on Z),
+where a Skyrim blade runs along the WEAPON node's +Y (`1handsword.nif`
+−11.6..58.1 on Y). The rotation retarget writes every bone as Skyrim's rest
+times the source's deviation from its own rest, and the two rests disagree
+by that quarter turn, so the drawn pistol pointed back at the holder. Bones
+in `VERBATIM_BONES` (`Weapon`) now take the source's world rotation and
+the source's offset from the parent unchanged, which puts the FNV mesh
+exactly where FNV's hand held it. Vanilla clips still pose the node the
+Skyrim way, so a gun held through a vanilla state shows the quarter turn.
+
+<a id="level-aim-from-the-fire-clip"></a>**The level aim is the fire
+clip's first frame, never the down/up midpoint.** With the weapon bone
+verbatim the drawn pistol still pointed straight back, unchanged, because
+the held pose was not the verbatim bone at all: base FNV ships no
+third-person `1hpaim.kf` (only `1hpaimdown`/`1hpaimup`; the DLC and TTW
+archives add one for the classes they touch), and the pose blender's level
+was the 50/50 blend of down and up. Measured on the retargeted clips, the
+`Weapon` X axis (the barrel) is (−0.11, −0.19, −0.98) in `1hpaimdown` and
+(−0.29, 0.12, 0.95) in `1hpaimup`: 180° apart, so their quaternion
+midpoint is equally forward or backward, and the hand and weapon took the
+backward path while the body bones, which move far less, blended sanely.
+`1hpattack3` frame 0 has the barrel at (−0.007, 1.0, 0.0), exactly
+forward: every FNV attack clip starts from the level aim pose, which is
+also the pose the partial clips are filled from. So a class (per stance
+prefix) with `aimdown` and no `aim` now converts its first attack clip's
+first frame as the `aim` stem (`first_frame_pose`, a looping two-frame
+clip with no keys), and `_fill_clip` and the locomotion stand-ins fall
+back to the same clip. The pitch blender then has a real level child, and
+its neighbours are only 90° away.
+
+Also checked and ruled out: the mesh converter's 180° weapon flip
+(`_apply_axe_flip`) never reaches a FNV gun, because `wrap_root_transform`
+zeroes a FO3/FNV root rotation; the shipped `9mm.nif` root is identity.
+
+**A declared reload letter need not exist for the class.** All 12 `2hh`
+handle weapons (minigun, flamer, gatling laser, plasma caster) declare
+`ReloadA`, but the authored `2hh` corpus runs `b`..`g` — there is no
+`2hhreloada.kf`. Selection therefore falls back to the class' first available
+letter (`_reload_fallbacks`), and a class with no reload clip at all builds a
+fire machine with no reload state, which is also the correct behaviour for a
+belt-fed weapon. A class with no *attack* clip is dropped from
+`present_classes` entirely and reuses the first class' machine.
+
+## <a id="first-person-rig"></a>First-person gun clips
+
+**Code:** `gun_anim_falloutnv.py` (`_rig`, `fill_missing_tracks`,
+`convert_gun_clips`), `gun_patch_falloutnv.py` (`VIEWS`),
+`tools/generators/skeleton_hkx_json.py`.
+
+The first-person project is its own graph set (`_1stperson\behaviors`),
+character file (`_1stperson\characters\firstperson.hkx`, rig
+`CharacterAssets\skeletonFirst.hkx`) and animation-cache project
+(`FirstPerson.txt`). It used to get only the cloned crossbow slots, so a
+drawn gun showed the vanilla crossbow arms. Now the four patched graphs and
+the registration run once per view over a per-view clip set. The
+first-person clips come from `characters\_1stperson` and land under
+`_1stperson\animations\tes4guns`: **a project's animation names resolve
+relative to the project's own folder** (vanilla keeps `1HM_1stP_Run.hkx`
+under `_1stperson\animations`), so the same `Animations\TES4Guns\<stem>`
+name serves both projects. Written under the third-person folder instead,
+the first-person graph reached our states (live: both graphs at
+`iRightHandType` 13 with the gun variables) but every bone sat at the bind
+pose, arms out of the camera's view.
+
+**The two rigs share the 99-bone order** (`skeleton_hkx_json.py` dumps
+both; the first-person one differs in proportions: calves 31.3 vs 35.6,
+forearms 20.3 vs 22.8, hands rotated a few degrees) but not the hierarchy
+above the pelvis: `NPC Root → LookNode (z 120.5) → Translate (−56.37) →
+Rotate → COM`, with `Camera1st` under the root at 120.5. FNV's first-person
+skeleton is the same idea, `Bip01 → NonAccum → Looking (118) → Translate
+(−118) → Rotate → Bip (67.77) → Pelvis`, `Camera1st` under Looking at
+y −3.74, and every shared body bone has the SAME world transform as the
+male rig, so the mined pose deltas apply unchanged. The map adds
+`Looking→LookNode`, `Translate`, `Rotate`, `Bip→COM`, `Camera1st`, and drops
+`NonAccum` (at the origin here; mapping it would put COM on the floor).
+
+**Translations are anchored on the look node.** Only the camera-relative
+geometry is visible, and the rigs differ in camera-to-COM height (56.4 vs
+50.2), so the translated bones (`LookNode`, `COM`, `Camera1st`) take the
+source's offset from `Bip01 Looking` added to `NPC LookNode`'s rest, not the
+target's own rest plus the source deviation as the third-person retarget
+does. `Translate`/`Rotate` keep their vanilla rest locals so the engine's
+pitch pivot stays where vanilla puts it.
+
+**Partial clips are overlays on the aim pose.** FNV's first-person
+locomotion clips carry five tracks (`Bip01` root motion, `Camera1st`,
+`Translate`, `Rotate`), attacks 38 of 71, reloads 60; every absent bone kept
+whatever the higher-priority aim clip held. A Havok clip plays an absent
+track at the skeleton rest, a T-pose, so missing tracks are filled with the
+class' level aim clip's first frame before the retarget. `1hpaim.kf` exists
+only in `Update.bsa`
+([asset_convert_mod_ingest.md](asset_convert_mod_ingest.md#update-bsa)).
+
+**Only the pistol has first-person locomotion of its own.** The
+`_1stperson\locomotion` folder holds `1hp*`, `1hm*` and `mt*` (plus a
+`sneak2hh` set); a rifle walks on the base `mt<direction>` camera bob over
+its aim. `_plan_view` converts those eight `mt` clips once per class that
+lacks a `<class>forward`, filled with that class' aim and named
+`<class><direction>`, so `loco_machine` needs no special case. FalloutNV:
+67 selected + 40 stand-in first-person clips, 138 clip generators in the
+FirstPerson project against 310 in DefaultMale/DefaultFemale.
+
+## <a id="dismemberment"></a>Limb dismemberment at runtime
+
+**Code:** `tes5_import/record_types/bodypart_falloutnv.py`,
+`tes_runtime/plugin/sever.cpp`.
+
+TES5's BPTD cannot hold FNV's limb data: the engine keys dismemberment on six
+part types, and FO3/FNV author many more. The import therefore writes a
+sidecar (`SKSE/Plugins/TESRuntime/<plugin>.bodyparts.json`) beside the plugin
+and mints one **MSTT per gore model** so a severed limb has a real form to
+place — `derive_formid('BPTD_LIMB', <model path>)`, keyed on the authored
+path.
+
+At runtime every melee and projectile hit lands in one routine
+(`Actor::ApplyHit`, id 38586, 8 call sites, all patched). A hit that takes
+health to zero severs the nearest severable or explodable part; a melee
+`HitData` carries no impact point, so the distance is measured from the
+attacker instead. The limb is hidden by partition, and the MSTT is dropped
+with the PlaceAtMe / SetPosition / ApplyHavokImpulse natives at the bone.
+
+Severed parts persist in the SKSE co-save (record `SEVR`) and are re-applied
+on the engine's own 3D-load re-apply call (`ReapplyDismemberment`, id 37644)
+and after a game load, so a limb does not grow back when the cell unloads.
+
+Both sidecars carry plugin-local FormIDs plus the owning file, resolved
+through the running load order at DataLoaded, so no load position is assumed.

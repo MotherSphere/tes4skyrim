@@ -313,13 +313,18 @@ def build_animation_xml(anim: 'AnimationData', skeleton_root: str) -> str:
 
 
 def decode_clip(ob_kf_path: str, fps: float = 30.0,
-                extract_motion: bool = True):
-    """Decode an Oblivion .kf. Returns (DecodedClip, motion_or_None)."""
+                extract_motion: bool = True, flatten_to_first: bool = False):
+    """Decode an Oblivion .kf. Returns (DecodedClip, motion_or_None).
+
+    `flatten_to_first` is `split_root_motion`'s: the accum bone keeps its
+    first-sample rotation instead of identity.
+    """
     clips = decode_kf(ob_kf_path, fps)
     if not clips:
         raise ValueError(f'no NiControllerSequence in {ob_kf_path}')
     clip = clips[0]
-    motion = split_root_motion(clip) if extract_motion else None
+    motion = (split_root_motion(clip, flatten_to_first=flatten_to_first)
+              if extract_motion else None)
     return clip, motion
 
 

@@ -13,7 +13,7 @@ import struct
 from ..tes4_reader import (Record, get_all_subrecords,
                            get_formid_str, get_string,
                            get_subrecord)
-from .common import (emit_float, emit_model, emit_raw_hex,
+from .common import (emit_float, emit_formid, emit_model, emit_raw_hex,
                      emit_script, emit_string, emit_u16, emit_u32)
 
 #: HEDR.Version reported by FO3/FNV plugins; Oblivion reports 0.8 or 1.0.
@@ -92,6 +92,9 @@ def _emit_weap_deltas(lines: list, rec: Record):
     TES4 packs both into one DATA; the keys emitted here are the TES4 ones so
     the importer needs no new vocabulary for the shared fields.
 
+    DNAM offsets (wbDefinitionsFNV): 12 Flags1, 15 Reload Animation,
+    41 Attack Animation -- the gun graph keys its clips on all three.
+
     See: docs/commentary/tes4_export_falloutnv.md#weapons-guns-become-crossbows
     """
     dnam = get_subrecord(rec, "DNAM")
@@ -101,6 +104,11 @@ def _emit_weap_deltas(lines: list, rec: Record):
         lines.append(f"DNAM.FalloutAnimType={anim}")
         lines.append(f"DATA.Speed={struct.unpack_from('<f', dnam.data, 4)[0]}")
         lines.append(f"DATA.Reach={struct.unpack_from('<f', dnam.data, 8)[0]}")
+    if dnam and len(dnam.data) >= 16:
+        lines.append(f"DNAM.Flags1={dnam.data[12]}")
+        lines.append(f"DNAM.ReloadAnim={dnam.data[15]}")
+    if dnam and len(dnam.data) >= 42:
+        lines.append(f"DNAM.AttackAnim={dnam.data[41]}")
 
     data = get_subrecord(rec, "DATA")
     if data and len(data.data) >= 15:
@@ -110,6 +118,90 @@ def _emit_weap_deltas(lines: list, rec: Record):
         lines.append(f"DATA.Weight={struct.unpack_from('<f', d, 8)[0]}")
         lines.append(f"DATA.Damage={struct.unpack_from('<h', d, 12)[0]}")
         lines.append(f"DATA.ClipSize={d[14]}")
+    _emit_weap_fire(lines, rec, dnam)
+
+
+#: FO3/FNV WEAP sound and link subrecords, emitted under their own signature.
+_WEAP_FORMIDS = ("SNAM", "XNAM", "NAM7", "TNAM", "UNAM", "NAM9", "NAM8",
+                 "NAM0", "WNAM", "INAM")
+
+
+def _emit_weap_fire(lines: list, rec: Record, dnam):
+    """The gun's projectile, ammo use, rate fields and sound links.
+
+    DNAM offsets (wbDefinitionsFNV): 14 Ammo Use, 36 Projectile, 42
+    Projectile Count, 60 Animation Attack Multiplier, 64 Fire Rate, 88
+    Attack Shots/Sec. SNAM appears twice (shoot 3D, shoot distant); the
+    first is the shot.
+    See: docs/commentary/tes4_export_falloutnv.md#projectiles
+    """
+    if dnam and len(dnam.data) >= 44:
+        d = dnam.data
+        lines.append(f"DNAM.AmmoUse={d[14]}")
+        lines.append(f"DNAM.Projectile="
+                     f"{get_formid_str(struct.unpack_from('<I', d, 36)[0])}")
+        lines.append(f"DNAM.ProjectileCount={d[42]}")
+    if dnam:
+        emit_float(lines, "DNAM.AnimAttackMult", dnam, 60)
+        emit_float(lines, "DNAM.FireRate", dnam, 64)
+        emit_float(lines, "DNAM.ShotsPerSec", dnam, 88)
+    for sig in _WEAP_FORMIDS:
+        emit_formid(lines, sig, get_subrecord(rec, sig))
+
+
+def _emit_proj_deltas(lines: list, rec: Record):
+    """PROJ, a type TES4 lacks: model, the 84-byte DATA, muzzle flash, level.
+
+    DATA offsets (wbDefinitionsFNV): 0 flags u16, 2 type u16, 4 gravity,
+    8 speed, 12 range, 16 light, 20 muzzle flash light, 24 tracer chance,
+    36 explosion, 40 sound, 44 muzzle flash duration, 48 fade duration,
+    52 impact force, 64 default weapon.
+    See: docs/commentary/tes4_export_falloutnv.md#projectiles
+    """
+    emit_string(lines, "FULL", get_subrecord(rec, "FULL"))
+    emit_model(lines, "Model", rec)
+    data = get_subrecord(rec, "DATA")
+    if data and len(data.data) >= 68:
+        d = data.data
+        lines.append(f"DATA.Flags={struct.unpack_from('<H', d, 0)[0]}")
+        lines.append(f"DATA.Type={struct.unpack_from('<H', d, 2)[0]}")
+        for key, off in (("Gravity", 4), ("Speed", 8), ("Range", 12),
+                         ("TracerChance", 24), ("MuzzleFlashDuration", 44),
+                         ("FadeDuration", 48), ("ImpactForce", 52)):
+            emit_float(lines, f"DATA.{key}", data, off)
+        for key, off in (("Light", 16), ("MuzzleFlashLight", 20),
+                         ("Explosion", 36), ("Sound", 40),
+                         ("DefaultWeapon", 64)):
+            fid = struct.unpack_from("<I", d, off)[0]
+            lines.append(f"DATA.{key}={get_formid_str(fid)}")
+    emit_string(lines, "NAM1", get_subrecord(rec, "NAM1"))
+    emit_u32(lines, "VNAM", get_subrecord(rec, "VNAM"))
+
+
+def _emit_ammo_deltas(lines: list, rec: Record):
+    """AMMO's FO3/FNV layout: a 13-byte DATA and the weight in DAT2.
+
+    DATA: speed f32, flags u8 (bit 0 Ignores Normal Weapon Resistance, bit 1
+    Non-Playable), 3 unused, value s32, clip rounds u8. DAT2: projectiles
+    per shot u32, projectile FormID, weight f32, consumed ammo, percentage.
+    The TES4 keys are emitted for the shared fields.
+
+    See: docs/commentary/tes4_export_falloutnv.md#ammo-is-a-bolt
+    """
+    data = get_subrecord(rec, "DATA")
+    if data and len(data.data) >= 13:
+        d = data.data
+        lines.append(f"DATA.Speed={struct.unpack_from('<f', d, 0)[0]}")
+        lines.append(f"DATA.Flags={d[4]}")
+        lines.append(f"DATA.Value={struct.unpack_from('<i', d, 8)[0]}")
+        lines.append(f"DATA.ClipRounds={d[12]}")
+    dat2 = get_subrecord(rec, "DAT2")
+    if dat2 and len(dat2.data) >= 12:
+        d = dat2.data
+        lines.append(f"DAT2.ProjPerShot={struct.unpack_from('<I', d, 0)[0]}")
+        lines.append(f"DAT2.Projectile="
+                     f"{get_formid_str(struct.unpack_from('<I', d, 4)[0])}")
+        lines.append(f"DATA.Weight={struct.unpack_from('<f', d, 8)[0]}")
 
 
 def _emit_wrld_deltas(lines: list, rec: Record):
@@ -257,6 +349,7 @@ _DELTA_DISPATCH = {
     "CELL": _emit_cell_deltas,
     "REFR": _emit_refr_deltas,
     "WEAP": _emit_weap_deltas,
+    "AMMO": _emit_ammo_deltas,
     "NAVM": _emit_navm_deltas,
     "NAVI": _emit_navi_deltas,
     "WRLD": _emit_wrld_deltas,
@@ -340,8 +433,65 @@ def export_MESSAGE(rec: Record) -> list:
     return lines
 
 
+def export_PROJECTILE(rec: Record) -> list:
+    """A PROJ base record: its EditorID plus the projectile fields."""
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    _emit_proj_deltas(lines, rec)
+    return lines
+
+
+def export_FORMLIST(rec: Record) -> list:
+    """A FLST: its EditorID and one `LNAM[i]` FormID per member, in order.
+    A gun's `NAM0` names one of these (its ammo list), not an AMMO.
+    See: docs/commentary/tes4_export_falloutnv.md#formlists
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    for i, sub in enumerate(get_all_subrecords(rec, "LNAM")):
+        emit_formid(lines, f"LNAM[{i}]", sub)
+    return lines
+
+
+#: FNV IPDS DATA: twelve IPCT FormIDs in this material order (wbDefinitionsFNV).
+IMPACT_MATERIALS = ("Stone", "Dirt", "Grass", "Glass", "Metal", "Wood",
+                    "Organic", "Cloth", "Water", "HollowMetal", "OrganicBug",
+                    "OrganicGlow")
+
+
+def export_IMPACT(rec: Record) -> list:
+    """An IPCT: model, the 24-byte DATA as hex, and its two SOUN links.
+    See: docs/commentary/tes4_export_falloutnv.md#impacts
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    emit_model(lines, "Model", rec)
+    emit_raw_hex(lines, "DATA", get_subrecord(rec, "DATA"))
+    emit_formid(lines, "SNAM", get_subrecord(rec, "SNAM"))
+    emit_formid(lines, "NAM1", get_subrecord(rec, "NAM1"))
+    return lines
+
+
+def export_IMPACTSET(rec: Record) -> list:
+    """An IPDS: one `DATA.<material>` IPCT FormID per IMPACT_MATERIALS slot.
+    See: docs/commentary/tes4_export_falloutnv.md#impacts
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    data = get_subrecord(rec, "DATA")
+    if data:
+        for i, key in enumerate(IMPACT_MATERIALS[:len(data.data) // 4]):
+            fid = struct.unpack_from("<I", data.data, 4 * i)[0]
+            lines.append(f"DATA.{key}={get_formid_str(fid)}")
+    return lines
+
+
 FALLOUT_BASE_EXPORTERS = {
     "MESG": export_MESSAGE,
+    "PROJ": export_PROJECTILE,
+    "FLST": export_FORMLIST,
+    "IPCT": export_IMPACT,
+    "IPDS": export_IMPACTSET,
     "NAVM": export_NAVMESH,
     "NAVI": export_NAVMESH,
     "MSTT": export_STATIC_BASE,

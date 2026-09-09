@@ -25,7 +25,7 @@ from ..skyrim_overrides import (
 )
 from .race_falloutnv import fallout_race_edid
 from .common import (
-    _prefix_path,
+    prefix_path,
     get_float,
     get_formid,
     get_int,
@@ -2043,7 +2043,7 @@ def _build_hdpt(rec: dict, *, model_override: str = '',
 
     model = model_override or get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
         # MODT stub (version 2, no texture hashes) — the same form the GRAS
         # and CLMT converters emit.
         subs += pack_subrecord('MODT', struct.pack('<III', 2, 0, 0))
@@ -2061,7 +2061,7 @@ def _build_hdpt(rec: dict, *, model_override: str = '',
     # NAM0/NAM1 — the .tri part.
     if tri_path:
         subs += pack_uint32_subrecord('NAM0', HDPT_PART_TRI)
-        subs += pack_string_subrecord('NAM1', _prefix_path(tri_path))
+        subs += pack_string_subrecord('NAM1', prefix_path(tri_path))
 
     # RNAM — Valid Races.  Group variants carry their group's list; race-
     # named hair keys off the SOURCE record's EditorID as before.

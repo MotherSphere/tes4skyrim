@@ -281,6 +281,8 @@ def _init_dispatch():
     )
     from .record_types.magic import convert_MGEF
     from .record_types.message_falloutnv import convert_MESG
+    from .record_types.projectile_falloutnv import convert_PROJ
+    from .record_types.impact_falloutnv import convert_IPCT, convert_IPDS
     from .record_types.items import (
         convert_ACTI,
         convert_ANIO,
@@ -315,6 +317,9 @@ def _init_dispatch():
     IMPORT_DISPATCH.update({sig: (convert_STAT if kind == 'STAT' else convert_ACTI)
                             for sig, kind in FALLOUT_BASE_TYPES.items()})
     IMPORT_DISPATCH['MESG'] = convert_MESG
+    IMPORT_DISPATCH['PROJ'] = convert_PROJ
+    IMPORT_DISPATCH['IPCT'] = convert_IPCT
+    IMPORT_DISPATCH['IPDS'] = convert_IPDS
     IMPORT_DISPATCH.update({
         # Simple objects
         'STAT': convert_STAT,

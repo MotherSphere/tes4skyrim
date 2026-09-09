@@ -101,14 +101,10 @@ def read_bsa_files(bsa_path, wanted_names):
     return found
 
 
-# Some mods name their BSAs with a base that doesn't match the plugin stem.
-# Nehrim ships "N - *.bsa" (meshes/textures/sounds/misc/voices), none of which
-# start with "Nehrim". Map plugin stem → the extra BSA name bases to also probe.
-# ("L - *.bsa" in a Nehrim install comes from a separate mod, not the base game,
-# so it is intentionally not probed here.)
+#: Extra archive bases per stem, in probe order. See: docs/commentary/asset_convert_mod_ingest.md#update-bsa
 _EXTRA_BSA_BASES = {
     "nehrim": ["N", "L"],
-    "falloutnv": ["Fallout"],
+    "falloutnv": ["Fallout", "Update"],
 }
 
 # GOTY Oblivion.esm has Shivering Isles MERGED INTO IT: every SI record lives
@@ -181,6 +177,7 @@ def get_bsa_files(data_path, source_file):
         # Split BSAs (Oblivion - Meshes.bsa, N - Textures1.bsa, etc.)
         for pattern in [
             f"{base} - Meshes.bsa",
+            f"{base} - Meshes2.bsa",
             f"{base} - Textures - Compressed.bsa",
             f"{base} - Textures.bsa",
             f"{base} - Textures1.bsa",  # Nehrim splits textures across two BSAs

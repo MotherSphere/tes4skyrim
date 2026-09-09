@@ -425,6 +425,11 @@ WROTE. A bare command is refused: a heredoc writes a `.py` no gate ever sees.
 gets a literal `|` and still exits 0. Use `grep -E "a|b"` or `-e a -e b`. Zero
 matches is a broken query, never evidence about the tree.
 
+🛑 **A BASH HEREDOC EATS BACKSLASHES** — `\a`, `\1`, `\_` become bell, byte 1,
+`_`. Never write a Windows path, regex or doc text through `cat <<'EOF'` /
+`python - <<'EOF'`. Use the Write tool for the file, and build paths with
+`chr(92)` or forward slashes. Applies to the doc-gate hook too.
+
 🛑 <a id="doc-rules"></a>**THE CODE RULES ARE A REQUIREMENT, NOT A GUIDELINE.**
 `.claude/hooks/doc_rules_gate.py` runs `--gate-diff` BEFORE an Edit lands and
 REFUSES it, charging the lines you changed plus the comments above them.

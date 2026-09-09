@@ -1,0 +1,1688 @@
+{
+ "name": "NPC Root [Root]",
+ "bones": [
+  {
+   "name": "NPC Root [Root]",
+   "parent": -1,
+   "translation": [
+    -0.0,
+    2e-06,
+    0.0
+   ],
+   "quat_xyzw": [
+    0.0,
+    -0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC LookNode [Look]",
+   "parent": 0,
+   "translation": [
+    0.0,
+    2.8e-05,
+    120.499969
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Translate [Pos ]",
+   "parent": 1,
+   "translation": [
+    -3e-06,
+    -2.3e-05,
+    -56.369164
+   ],
+   "quat_xyzw": [
+    0.0,
+    -0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Rotate [Rot ]",
+   "parent": 2,
+   "translation": [
+    -0.0,
+    -0.0,
+    -3.1e-05
+   ],
+   "quat_xyzw": [
+    0.0,
+    -0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC COM [COM ]",
+   "parent": 3,
+   "translation": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Pelvis [Pelv]",
+   "parent": 4,
+   "translation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "quat_xyzw": [
+    -0.0,
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Thigh [LThg]",
+   "parent": 5,
+   "translation": [
+    -6.615069,
+    0.000405,
+    0.0
+   ],
+   "quat_xyzw": [
+    -0.020316,
+    0.997841,
+    -0.032063,
+    -0.053593
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Calf [LClf]",
+   "parent": 6,
+   "translation": [
+    2e-06,
+    0.0,
+    31.316988
+   ],
+   "quat_xyzw": [
+    0.037969,
+    0.000111,
+    0.007678,
+    0.999249
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Foot [Lft ]",
+   "parent": 7,
+   "translation": [
+    -2e-06,
+    -1e-05,
+    27.404402
+   ],
+   "quat_xyzw": [
+    -0.51706,
+    0.002775,
+    -0.135304,
+    0.845183
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Thigh [RThg]",
+   "parent": 5,
+   "translation": [
+    6.615069,
+    0.000405,
+    0.0
+   ],
+   "quat_xyzw": [
+    0.020316,
+    0.997841,
+    -0.032062,
+    0.053593
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Calf [RClf]",
+   "parent": 9,
+   "translation": [
+    -1e-06,
+    0.0,
+    31.31699
+   ],
+   "quat_xyzw": [
+    0.037933,
+    -0.000112,
+    -0.007655,
+    0.999251
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Foot [Rft ]",
+   "parent": 10,
+   "translation": [
+    1e-06,
+    -8e-06,
+    27.404396
+   ],
+   "quat_xyzw": [
+    -0.517096,
+    -0.002635,
+    0.1352,
+    0.845178
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtRBone01",
+   "parent": 0,
+   "translation": [
+    4.999999,
+    -3e-06,
+    -4.999999
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtRBone02",
+   "parent": 0,
+   "translation": [
+    4.999999,
+    -4e-06,
+    -9.999998
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtRBone03",
+   "parent": 0,
+   "translation": [
+    4.999999,
+    -5e-06,
+    -14.999996
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtLBone01",
+   "parent": 0,
+   "translation": [
+    -4.999999,
+    -4e-06,
+    -14.999996
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtLBone02",
+   "parent": 0,
+   "translation": [
+    -4.999999,
+    -2e-06,
+    -4.999999
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtLBone03",
+   "parent": 0,
+   "translation": [
+    -4.999999,
+    -3e-06,
+    -9.999998
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtBBone01",
+   "parent": 0,
+   "translation": [
+    -0.0,
+    -5.000001,
+    -4.999998
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtBBone02",
+   "parent": 0,
+   "translation": [
+    -0.0,
+    -5.000004,
+    -14.999995
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtBBone03",
+   "parent": 0,
+   "translation": [
+    -0.0,
+    -5.000003,
+    -9.999997
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtFBone01",
+   "parent": 0,
+   "translation": [
+    0.0,
+    4.999994,
+    -14.999997
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtFBone02",
+   "parent": 0,
+   "translation": [
+    0.0,
+    4.999997,
+    -5.0
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "x_SkirtFBone03",
+   "parent": 0,
+   "translation": [
+    0.0,
+    4.999995,
+    -9.999999
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Spine [Spn0]",
+   "parent": 4,
+   "translation": [
+    9e-06,
+    -5.23985,
+    3.791618
+   ],
+   "quat_xyzw": [
+    -0.021799,
+    -0.0,
+    -1e-06,
+    0.999762
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Spine1 [Spn1]",
+   "parent": 24,
+   "translation": [
+    -0.0,
+    -3e-06,
+    8.748718
+   ],
+   "quat_xyzw": [
+    0.075374,
+    0.0,
+    -0.0,
+    0.997155
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Spine2 [Spn2]",
+   "parent": 25,
+   "translation": [
+    0.0,
+    -0.017104,
+    9.864075
+   ],
+   "quat_xyzw": [
+    -0.12036,
+    -0.0,
+    -1e-06,
+    0.99273
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Clavicle [LClv]",
+   "parent": 26,
+   "translation": [
+    -1.695095,
+    5.887476,
+    19.4543
+   ],
+   "quat_xyzw": [
+    0.062744,
+    -0.804005,
+    0.279299,
+    0.521183
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L UpperArm [LUar]",
+   "parent": 27,
+   "translation": [
+    8e-06,
+    -4e-06,
+    14.043946
+   ],
+   "quat_xyzw": [
+    0.320604,
+    0.349662,
+    0.079519,
+    -0.876713
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Forearm [LLar]",
+   "parent": 28,
+   "translation": [
+    0.0,
+    2e-06,
+    20.264107
+   ],
+   "quat_xyzw": [
+    -0.208385,
+    0.0,
+    0.0,
+    0.978047
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Clavicle [RClv]",
+   "parent": 26,
+   "translation": [
+    1.695094,
+    5.887476,
+    19.454277
+   ],
+   "quat_xyzw": [
+    0.062888,
+    0.803988,
+    -0.279476,
+    0.521097
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R UpperArm [RUar]",
+   "parent": 30,
+   "translation": [
+    -2.3e-05,
+    4e-06,
+    14.043939
+   ],
+   "quat_xyzw": [
+    -0.317773,
+    0.352442,
+    0.085538,
+    0.876064
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Forearm [RLar]",
+   "parent": 31,
+   "translation": [
+    8e-06,
+    -1.8e-05,
+    20.264114
+   ],
+   "quat_xyzw": [
+    -0.208385,
+    0.0,
+    0.0,
+    0.978047
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "AnimObjectA",
+   "parent": 0,
+   "translation": [
+    -4.999999,
+    -2e-06,
+    0.0
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "AnimObjectB",
+   "parent": 0,
+   "translation": [
+    4.999999,
+    -3e-06,
+    0.0
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Neck [Neck]",
+   "parent": 26,
+   "translation": [
+    -1.4e-05,
+    0.02696,
+    22.039452
+   ],
+   "quat_xyzw": [
+    -0.029133,
+    -0.00017,
+    -0.005293,
+    0.999562
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Head [Head]",
+   "parent": 35,
+   "translation": [
+    0.0,
+    -4e-06,
+    8.818726
+   ],
+   "quat_xyzw": [
+    0.095523,
+    0.000446,
+    -6.3e-05,
+    0.995427
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPCEyeBone",
+   "parent": 36,
+   "translation": [
+    -0.0,
+    8.004573,
+    4.279793
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Hand [LHnd]",
+   "parent": 29,
+   "translation": [
+    0.0,
+    -2e-06,
+    16.046654
+   ],
+   "quat_xyzw": [
+    0.010348,
+    -0.022805,
+    -0.6824,
+    0.730549
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Hand [RHnd]",
+   "parent": 32,
+   "translation": [
+    4e-06,
+    0.0,
+    16.046677
+   ],
+   "quat_xyzw": [
+    0.012215,
+    0.02732,
+    0.677117,
+    0.735267
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "AnimObjectL",
+   "parent": 38,
+   "translation": [
+    -4e-06,
+    -2.434544,
+    7.159229
+   ],
+   "quat_xyzw": [
+    0.5,
+    -0.5,
+    0.5,
+    0.5
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "AnimObjectR",
+   "parent": 39,
+   "translation": [
+    1.5e-05,
+    -2.659622,
+    7.86552
+   ],
+   "quat_xyzw": [
+    -0.5,
+    -0.5,
+    0.5,
+    -0.5
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "Shield",
+   "parent": 38,
+   "translation": [
+    -4e-06,
+    -2.434544,
+    7.159229
+   ],
+   "quat_xyzw": [
+    0.5,
+    -0.5,
+    0.5,
+    0.5
+   ],
+   "scale": 0.999999,
+   "lock": false
+  },
+  {
+   "name": "Weapon",
+   "parent": 39,
+   "translation": [
+    1.5e-05,
+    -2.659622,
+    7.86552
+   ],
+   "quat_xyzw": [
+    -0.5,
+    -0.5,
+    0.5,
+    -0.5
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Pauldron",
+   "parent": 26,
+   "translation": [
+    -11.106996,
+    1.008799,
+    13.913918
+   ],
+   "quat_xyzw": [
+    0.067476,
+    -0.17878,
+    -0.016737,
+    0.98143
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Pauldron",
+   "parent": 26,
+   "translation": [
+    11.106997,
+    1.008801,
+    13.913925
+   ],
+   "quat_xyzw": [
+    0.067476,
+    0.17878,
+    0.016737,
+    0.98143
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "MagicEffectsNode",
+   "parent": 24,
+   "translation": [
+    1.3e-05,
+    4.477252,
+    5.701752
+   ],
+   "quat_xyzw": [
+    0.021799,
+    0.0,
+    1e-06,
+    0.999762
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L MagicNode [LMag]",
+   "parent": 38,
+   "translation": [
+    -0.900009,
+    -3.487801,
+    8.748428
+   ],
+   "quat_xyzw": [
+    -0.0,
+    -0.0,
+    -0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R MagicNode [RMag]",
+   "parent": 39,
+   "translation": [
+    0.900005,
+    -3.487797,
+    8.748402
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC Head MagicNode [Hmag]",
+   "parent": 36,
+   "translation": [
+    0.0,
+    11.539471,
+    -3.274872
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Toe0 [LToe]",
+   "parent": 8,
+   "translation": [
+    -3.7e-05,
+    -0.016318,
+    10.661139
+   ],
+   "quat_xyzw": [
+    -0.294947,
+    -0.001668,
+    -0.000515,
+    0.955512
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Toe0 [RToe]",
+   "parent": 11,
+   "translation": [
+    3.5e-05,
+    -0.016325,
+    10.66114
+   ],
+   "quat_xyzw": [
+    -0.294896,
+    0.001511,
+    0.000467,
+    0.955528
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L ForearmTwist1 [LLt1]",
+   "parent": 29,
+   "translation": [
+    3.4e-05,
+    -1.5e-05,
+    10.11726
+   ],
+   "quat_xyzw": [
+    -0.706703,
+    -0.023924,
+    -0.706701,
+    0.023925
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L ForearmTwist2 [LLt2]",
+   "parent": 29,
+   "translation": [
+    2.7e-05,
+    -2.3e-05,
+    4.638622
+   ],
+   "quat_xyzw": [
+    -0.706421,
+    -0.031169,
+    -0.706418,
+    0.031169
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L UpperarmTwist1 [LUt1]",
+   "parent": 28,
+   "translation": [
+    0.0,
+    7e-06,
+    -8e-06
+   ],
+   "quat_xyzw": [
+    -0.706901,
+    -0.017042,
+    -0.706901,
+    0.017042
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L UpperarmTwist2 [LUt2]",
+   "parent": 54,
+   "translation": [
+    7.040337,
+    0.0,
+    4e-06
+   ],
+   "quat_xyzw": [
+    -0.012051,
+    -0.0,
+    -0.0,
+    0.999927
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R ForearmTwist1 [RLt1]",
+   "parent": 32,
+   "translation": [
+    0.000214,
+    5.1e-05,
+    10.117218
+   ],
+   "quat_xyzw": [
+    -0.02886,
+    -0.70651,
+    -0.028856,
+    0.706525
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R ForearmTwist2 [RLt2]",
+   "parent": 32,
+   "translation": [
+    -0.000206,
+    1.7e-05,
+    4.638748
+   ],
+   "quat_xyzw": [
+    -0.031843,
+    -0.70639,
+    -0.031841,
+    0.706389
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R UpperarmTwist1 [RUt1]",
+   "parent": 31,
+   "translation": [
+    -8e-06,
+    -1.7e-05,
+    8e-06
+   ],
+   "quat_xyzw": [
+    -0.026306,
+    -0.706617,
+    -0.026306,
+    0.706618
+   ],
+   "scale": 1.000001,
+   "lock": false
+  },
+  {
+   "name": "NPC R UpperarmTwist2 [RUt2]",
+   "parent": 58,
+   "translation": [
+    7.040314,
+    2e-06,
+    0.0
+   ],
+   "quat_xyzw": [
+    0.015662,
+    -0.0,
+    0.0,
+    0.999877
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "Quiver",
+   "parent": 26,
+   "translation": [
+    -9.955933,
+    -15.939663,
+    2.47702
+   ],
+   "quat_xyzw": [
+    0.312227,
+    -0.601086,
+    0.656607,
+    0.33178
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "WeaponAxe",
+   "parent": 5,
+   "translation": [
+    22.694361,
+    -6.799067,
+    -11.567394
+   ],
+   "quat_xyzw": [
+    0.335844,
+    0.517245,
+    0.521204,
+    0.589926
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "WeaponBack",
+   "parent": 26,
+   "translation": [
+    20.124115,
+    -12.633553,
+    24.115257
+   ],
+   "quat_xyzw": [
+    -0.680067,
+    0.373598,
+    0.274506,
+    0.567961
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "WeaponBow",
+   "parent": 26,
+   "translation": [
+    5.915015,
+    -13.575838,
+    18.847328
+   ],
+   "quat_xyzw": [
+    0.288714,
+    -0.57207,
+    0.648837,
+    0.410354
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "WeaponDagger",
+   "parent": 5,
+   "translation": [
+    -10.894523,
+    10.032897,
+    5.129005
+   ],
+   "quat_xyzw": [
+    -0.652494,
+    -0.114181,
+    0.245345,
+    0.707827
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "WeaponMace",
+   "parent": 5,
+   "translation": [
+    18.045439,
+    -2.95582,
+    4.736885
+   ],
+   "quat_xyzw": [
+    0.608482,
+    0.508549,
+    -0.495283,
+    -0.354715
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "WeaponSword",
+   "parent": 5,
+   "translation": [
+    -16.906425,
+    4.38103,
+    6.172012
+   ],
+   "quat_xyzw": [
+    -0.571596,
+    -0.261035,
+    0.682737,
+    0.372839
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger00 [LF00]",
+   "parent": 38,
+   "translation": [
+    -2.860394,
+    -0.920223,
+    3.167053
+   ],
+   "quat_xyzw": [
+    0.060123,
+    -0.396041,
+    0.553637,
+    0.730084
+   ],
+   "scale": 0.999999,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger01 [LF01]",
+   "parent": 67,
+   "translation": [
+    0.0,
+    8e-06,
+    3.323605
+   ],
+   "quat_xyzw": [
+    0.164966,
+    0.077377,
+    -0.012983,
+    0.983174
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger02 [LF02]",
+   "parent": 68,
+   "translation": [
+    0.0,
+    -4e-06,
+    2.931976
+   ],
+   "quat_xyzw": [
+    0.055634,
+    0.024394,
+    -0.00136,
+    0.998152
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger10 [LF10]",
+   "parent": 38,
+   "translation": [
+    -2.294836,
+    -0.074375,
+    9.224899
+   ],
+   "quat_xyzw": [
+    0.293411,
+    -0.02124,
+    -0.057506,
+    0.954019
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger11 [LF11]",
+   "parent": 70,
+   "translation": [
+    -4e-06,
+    0.0,
+    3.145672
+   ],
+   "quat_xyzw": [
+    0.137886,
+    0.0,
+    0.0,
+    0.990448
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger12 [LF12]",
+   "parent": 71,
+   "translation": [
+    4e-06,
+    -8e-06,
+    1.892735
+   ],
+   "quat_xyzw": [
+    0.110665,
+    0.0,
+    0.0,
+    0.993858
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger20 [LF20]",
+   "parent": 38,
+   "translation": [
+    0.004997,
+    -0.174416,
+    9.211712
+   ],
+   "quat_xyzw": [
+    0.309346,
+    -0.008754,
+    -0.089682,
+    0.946671
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger21 [LF21]",
+   "parent": 73,
+   "translation": [
+    -1e-05,
+    6e-06,
+    3.796635
+   ],
+   "quat_xyzw": [
+    0.155762,
+    -0.0,
+    -0.0,
+    0.987795
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger22 [LF22]",
+   "parent": 74,
+   "translation": [
+    6e-06,
+    2e-06,
+    2.129436
+   ],
+   "quat_xyzw": [
+    0.122462,
+    -0.0,
+    -0.0,
+    0.992473
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger30 [LF30]",
+   "parent": 38,
+   "translation": [
+    1.901957,
+    -0.714516,
+    8.775921
+   ],
+   "quat_xyzw": [
+    -0.351751,
+    -0.039879,
+    0.200852,
+    -0.913422
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger31 [LF31]",
+   "parent": 76,
+   "translation": [
+    -1.1e-05,
+    8e-06,
+    3.329411
+   ],
+   "quat_xyzw": [
+    0.162579,
+    0.0,
+    -0.0,
+    0.986695
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger32 [LF32]",
+   "parent": 77,
+   "translation": [
+    0.0,
+    -6e-06,
+    1.992256
+   ],
+   "quat_xyzw": [
+    0.063456,
+    -0.0,
+    0.0,
+    0.997985
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger40 [LF40]",
+   "parent": 38,
+   "translation": [
+    3.404236,
+    -1.569462,
+    7.839504
+   ],
+   "quat_xyzw": [
+    -0.302743,
+    -0.049118,
+    0.205435,
+    -0.929371
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger41 [LF41]",
+   "parent": 79,
+   "translation": [
+    2e-06,
+    -4e-06,
+    2.343258
+   ],
+   "quat_xyzw": [
+    0.153841,
+    0.0,
+    0.0,
+    0.988096
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC L Finger42 [LF42]",
+   "parent": 80,
+   "translation": [
+    2e-06,
+    -2e-06,
+    1.745815
+   ],
+   "quat_xyzw": [
+    0.206116,
+    -0.0,
+    0.0,
+    0.978527
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger00 [RF00]",
+   "parent": 39,
+   "translation": [
+    2.860388,
+    -0.920219,
+    3.167038
+   ],
+   "quat_xyzw": [
+    0.060123,
+    0.396041,
+    -0.553637,
+    0.730084
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger01 [RF01]",
+   "parent": 82,
+   "translation": [
+    4e-06,
+    -4e-06,
+    3.323601
+   ],
+   "quat_xyzw": [
+    0.164966,
+    -0.077378,
+    0.012983,
+    0.983174
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger02 [RF02]",
+   "parent": 83,
+   "translation": [
+    4e-06,
+    4e-06,
+    2.931984
+   ],
+   "quat_xyzw": [
+    0.055634,
+    -0.024394,
+    0.00136,
+    0.998152
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger10 [RF10]",
+   "parent": 39,
+   "translation": [
+    2.294828,
+    -0.074387,
+    9.22488
+   ],
+   "quat_xyzw": [
+    0.293411,
+    0.02124,
+    0.057506,
+    0.954019
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger11 [RF11]",
+   "parent": 85,
+   "translation": [
+    8e-06,
+    6e-06,
+    3.145676
+   ],
+   "quat_xyzw": [
+    0.137886,
+    -0.0,
+    0.0,
+    0.990448
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger12 [RF12]",
+   "parent": 86,
+   "translation": [
+    4e-06,
+    0.0,
+    1.892735
+   ],
+   "quat_xyzw": [
+    0.110665,
+    0.0,
+    -0.0,
+    0.993858
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger20 [RF20]",
+   "parent": 39,
+   "translation": [
+    -0.004992,
+    -0.174397,
+    9.211693
+   ],
+   "quat_xyzw": [
+    0.309346,
+    0.008754,
+    0.089682,
+    0.946671
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger21 [RF21]",
+   "parent": 88,
+   "translation": [
+    4e-06,
+    2e-06,
+    3.796642
+   ],
+   "quat_xyzw": [
+    0.155762,
+    0.0,
+    -0.0,
+    0.987795
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger22 [RF22]",
+   "parent": 89,
+   "translation": [
+    -8e-06,
+    -8e-06,
+    2.129444
+   ],
+   "quat_xyzw": [
+    0.122462,
+    0.0,
+    -0.0,
+    0.992473
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger30 [RF30]",
+   "parent": 39,
+   "translation": [
+    -1.901955,
+    -0.714512,
+    8.775906
+   ],
+   "quat_xyzw": [
+    0.351751,
+    -0.039879,
+    0.200852,
+    0.913422
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger31 [RF31]",
+   "parent": 91,
+   "translation": [
+    4e-06,
+    4e-06,
+    3.329414
+   ],
+   "quat_xyzw": [
+    0.16258,
+    0.0,
+    -0.0,
+    0.986695
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger32 [RF32]",
+   "parent": 92,
+   "translation": [
+    2e-06,
+    0.0,
+    1.992256
+   ],
+   "quat_xyzw": [
+    0.063455,
+    -0.0,
+    0.0,
+    0.997985
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger40 [RF40]",
+   "parent": 39,
+   "translation": [
+    -3.404234,
+    -1.569462,
+    7.839489
+   ],
+   "quat_xyzw": [
+    0.302743,
+    -0.049118,
+    0.205435,
+    0.929371
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger41 [RF41]",
+   "parent": 94,
+   "translation": [
+    -6e-06,
+    -6e-06,
+    2.343258
+   ],
+   "quat_xyzw": [
+    0.153841,
+    0.0,
+    -0.0,
+    0.988096
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "NPC R Finger42 [RF42]",
+   "parent": 95,
+   "translation": [
+    6e-06,
+    2e-06,
+    1.745811
+   ],
+   "quat_xyzw": [
+    0.206116,
+    -0.0,
+    -0.0,
+    0.978527
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "Camera1st [Cam1]",
+   "parent": 0,
+   "translation": [
+    1e-06,
+    2.8e-05,
+    120.499969
+   ],
+   "quat_xyzw": [
+    -1e-06,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  },
+  {
+   "name": "Camera Control",
+   "parent": 0,
+   "translation": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "quat_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "scale": 1.0,
+   "lock": false
+  }
+ ]
+}

@@ -70,7 +70,8 @@ from asset_convert.nif.nif_passes import (add_animobject_bged, wrap_root_transfo
                                           convert_sound_text_keys,
                                           fix_controller_flags,
                                           resolve_palette_strings,
-                                          strip_empty_text_keys)
+                                          strip_empty_text_keys,
+    zero_fallout_root_rotation)
 from asset_convert.nif.morphs import (emulate_morphs,
                                       normalize_blend_interpolators)
 from asset_convert.nif.sequences import (apply_rest_visibility,
@@ -1021,6 +1022,7 @@ def _convert_one_root(data, i, root, stats, fix_textures, src_path, creature,
     """
     root = _wrap_geometry_root(data, i, root, stats)
     root = _normalise_billboard_root(data, i, root)
+    zero_fallout_root_rotation(root)
 
     is_sky = stats.get('_sky_type') is not None
     if type(root).__name__ == 'NiNode' and not is_worn_armor and not is_sky:

@@ -19,7 +19,7 @@ from ..writer import (
 )
 
 
-def _prefix_path(path: str) -> str:
+def prefix_path(path: str) -> str:
     """Prefix asset path with tes4\\ namespace.
     Strips leading 'textures\\' if present since Skyrim auto-prefixes it."""
     if not path:
@@ -117,7 +117,7 @@ def _resolve_obnd(rec: dict, obnd_sig: str) -> tuple:
         return authored
     path = get_str(rec, 'Model.MODL')
     if path:
-        key = _prefix_path(path).lower().replace('\\', '/')
+        key = prefix_path(path).lower().replace('\\', '/')
         bounds = get_mesh_obnd(key)
         if bounds is not None:
             return bounds
@@ -172,7 +172,7 @@ def _simple_object(rec: dict, sig: str, has_full: bool = True,
     if has_model:
         path = get_str(rec, 'Model.MODL')
         if path:
-            subs += pack_string_subrecord('MODL', _prefix_path(path))
+            subs += pack_string_subrecord('MODL', prefix_path(path))
     subs += extra_subs
     return pack_record(sig, get_formid(rec, 'FormID'), get_int(rec, 'RecordFlags'), subs)
 

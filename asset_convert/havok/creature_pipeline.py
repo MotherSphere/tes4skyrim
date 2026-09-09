@@ -518,6 +518,25 @@ def manifests_under(meshes_dir: str) -> dict:
     return out
 
 
+def convert_guns(export_dir: str, out_meshes_dir: str, workers: int = None,
+                 log=print) -> dict:
+    """A FO3/FNV plugin's gun clips and humanoid graph patch; the fragment
+    appends that register them ({} for a plugin without guns).
+
+    See: docs/commentary/asset_convert_falloutnv.md#gun-graph
+    """
+    from asset_convert import paths
+    from asset_convert.havok.gun_anim_falloutnv import convert_gun_clips
+    from asset_convert.havok.gun_patch_falloutnv import build_gun_graphs
+
+    manifest = convert_gun_clips(export_dir, out_meshes_dir, workers=workers,
+                                 log=log)
+    if not manifest:
+        return {}
+    work = os.path.join(str(paths.EXPORT), 'skyrim_assets', 'humanoid_graph')
+    return build_gun_graphs(manifest, out_meshes_dir, work, log)
+
+
 def convert_creatures(export_dir: str, out_meshes_dir: str,
                       names: list = None, workers: int = None,
                       log=print) -> dict:
@@ -527,7 +546,8 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
     cache fragment (SKSE/Plugins/TESRuntime/animation/<plugin>.json) and
     <export_dir>/creature_projects.json. The fragment is built from ALL of
     this plugin's projects on disk, so a subset run (`names`) keeps every
-    other creature registered.
+    other creature registered. A full run also retargets a FO3/FNV plugin's
+    gun clips (a no-op without gun WEAPs).
 
     Returns {'projects': {name: manifest}, 'errors': {name: str}}.
     See: docs/reference/tes_runtime_fragments.md#the-runtime-composer
@@ -639,10 +659,12 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
         if m.get('namespace') == namespace:
             all_manifests.setdefault(m['name'], m)
 
-    if all_manifests:
+    appends = {} if names else convert_guns(export_dir, out_meshes_dir,
+                                            workers, log)
+    if all_manifests or appends:
         plugin_out = os.path.dirname(os.path.normpath(out_meshes_dir))
         path = write_fragment(list(all_manifests.values()), out_meshes_dir,
-                              os.path.basename(plugin_out), plugin_out)
+                              os.path.basename(plugin_out), appends, plugin_out)
         log(f'  Registered {len(all_manifests)} projects in '
             f'{os.path.relpath(path, plugin_out)}')
 

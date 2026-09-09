@@ -60,6 +60,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from tools.live.game_bridge import Bridge
 
 LOOKUP_BY_ID = 14617           # TESForm::LookupByID stable id
+#: TESObjectREFR vtable slot of Get3D(bool firstPerson).
+GET3D_SLOT = 0x6F
 NO_VALUE = -3.4028234663852886e+38
 STATES = {0: 'INACTIVE', 1: 'ANIMATING', 2: 'EASEIN', 3: 'EASEOUT',
           4: 'TRANSSOURCE', 5: 'TRANSDEST', 6: 'MORPHSOURCE'}
@@ -86,11 +88,16 @@ class Live:
         except Exception:
             return ''
 
-    # -- reference / tree --------------------------------------------------
-    def root_3d(self, formid):
+    def root_3d(self, formid, first_person=False):
         ptr = int(self.b.call(id=LOOKUP_BY_ID, args_=[formid])['result'])
         if not ptr:
             raise SystemExit(f'form {formid:08X} not found')
+        if first_person:
+            fn = self.u64(self.u64(ptr) + 8 * GET3D_SLOT)
+            root = int(self.b.call(address=fn, args_=[ptr, 1])['result'])
+            if not root:
+                raise SystemExit('reference has no first-person 3D')
+            return root
         loaded = self.u64(ptr + 0x68)
         if not loaded:
             raise SystemExit('reference has no loaded data (not in a loaded cell?)')
@@ -205,7 +212,7 @@ def _fmt_rot(rot):
 def cmd_tree(a):
     with Bridge() as b:
         L = Live(b)
-        root = L.root_3d(int(a.ref, 16))
+        root = L.root_3d(int(a.ref, 16), a.first_person)
         for node, nm, depth, _ in L.walk(root, max_depth=a.depth):
             rot, tr, sc = L.local(node)
             print(f"{'  ' * depth}{nm!r} t=({tr[0]:.2f},{tr[1]:.2f},{tr[2]:.2f}) "
@@ -217,7 +224,7 @@ def cmd_nodes(a):
     names = [n.strip() for n in a.names.split(',') if n.strip()]
     with Bridge() as b:
         L = Live(b)
-        root = L.root_3d(int(a.ref, 16))
+        root = L.root_3d(int(a.ref, 16), a.first_person)
         found = L.find_nodes(root, names)
         missing = [n for n in names if n not in found]
         if missing:
@@ -449,32 +456,58 @@ def cmd_sae(a):
     return 0
 
 
-def main(argv=None):
+def _ref_parser(sub, name, fn, first_person=False):
+    """A subcommand taking a reference FormID; `--first-person` optional."""
+    s = sub.add_parser(name)
+    s.add_argument('ref')
+    if first_person:
+        s.add_argument('--first-person', action='store_true',
+                       help="the player's first-person 3D (Get3D(true))")
+    s.set_defaults(fn=fn)
+    return s
+
+
+def _sampled(s, samples, interval=0.25):
+    """Add the --samples/--interval pair to a subcommand."""
+    s.add_argument('--samples', type=int, default=samples)
+    s.add_argument('--interval', type=float, default=interval)
+
+
+def _parser():
+    """The command-line parser."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest='cmd', required=True)
-    s = sub.add_parser('tree'); s.add_argument('ref'); s.add_argument('--depth', type=int, default=4); s.set_defaults(fn=cmd_tree)
-    s = sub.add_parser('nodes'); s.add_argument('ref'); s.add_argument('--names', required=True)
-    s.add_argument('--samples', type=int, default=1); s.add_argument('--interval', type=float, default=0.4); s.set_defaults(fn=cmd_nodes)
-    s = sub.add_parser('sequences'); s.add_argument('ref'); s.add_argument('--blocks', action='store_true')
+    _ref_parser(sub, 'tree', cmd_tree, True).add_argument('--depth', type=int, default=4)
+    s = _ref_parser(sub, 'nodes', cmd_nodes, True)
+    s.add_argument('--names', required=True)
+    _sampled(s, 1, 0.4)
+    s = _ref_parser(sub, 'sequences', cmd_sequences)
+    s.add_argument('--blocks', action='store_true')
     s.add_argument('--watch', action='store_true',
                    help='sample lastTime over time and report the REAL playback '
                         'rate (1.0 = correct, N = N times too fast)')
     s.add_argument('--sequence', help='with --watch: only this sequence')
-    s.add_argument('--samples', type=int, default=20)
-    s.add_argument('--interval', type=float, default=0.25)
-    s.set_defaults(fn=cmd_sequences)
-
-    s = sub.add_parser('particles'); s.add_argument('ref')
+    _sampled(s, 20)
+    s = _ref_parser(sub, 'particles', cmd_particles)
     s.add_argument('--names', help='comma-separated particle-system node names '
                                    '(default: find by NiParticleSystem vtable)')
-    s.add_argument('--samples', type=int, default=20)
-    s.add_argument('--interval', type=float, default=0.25)
-    s.set_defaults(fn=cmd_particles)
-    s = sub.add_parser('set-cycle'); s.add_argument('ref'); s.add_argument('sequence'); s.add_argument('cycle', type=int, choices=(0, 1, 2)); s.set_defaults(fn=cmd_set_cycle)
-    s = sub.add_parser('set-pose'); s.add_argument('ref'); s.add_argument('sequence'); s.add_argument('node')
-    g = s.add_mutually_exclusive_group(required=True); g.add_argument('--identity', action='store_true'); g.add_argument('--sentinel', action='store_true'); s.set_defaults(fn=cmd_set_pose)
-    s = sub.add_parser('sae'); s.add_argument('ref'); s.add_argument('event'); s.set_defaults(fn=cmd_sae)
-    a = p.parse_args(argv)
+    _sampled(s, 20)
+    s = _ref_parser(sub, 'set-cycle', cmd_set_cycle)
+    s.add_argument('sequence')
+    s.add_argument('cycle', type=int, choices=(0, 1, 2))
+    s = _ref_parser(sub, 'set-pose', cmd_set_pose)
+    s.add_argument('sequence')
+    s.add_argument('node')
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument('--identity', action='store_true')
+    g.add_argument('--sentinel', action='store_true')
+    _ref_parser(sub, 'sae', cmd_sae).add_argument('event')
+    return p
+
+
+def main(argv=None):
+    """Run the subcommand named on the command line; its exit code."""
+    a = _parser().parse_args(argv)
     return a.fn(a)
 
 

@@ -365,20 +365,26 @@ def _identity_matrix():
     return m
 
 
+def zero_fallout_root_rotation(root) -> None:
+    """Zero a FO3/FNV root's authored rotation (before the Prn seating).
+    See: docs/commentary/asset_convert_falloutnv.md#fnv-weapon-flip
+    """
+    if is_fallout_source() and hasattr(root, 'rotation'):
+        root.rotation = _identity_matrix()
+
+
 def wrap_root_transform(root, has_skin, furn_shift):
     """Move a static root's rotation onto an inner NiNode; True when wrapped.
 
     Skyrim ignores a root rotation Oblivion honoured, so it moves down one
     level; collision stays on the root and its body absorbs the transform.
-    The furniture origin shift rides the same wrapper.  FO3/FNV ignored the
-    rotation too, so for those sources it is zeroed instead.
+    The furniture origin shift rides the same wrapper.  On a FO3/FNV root
+    only the weapon flip survives to here (`zero_fallout_root_rotation`).
     See: docs/commentary/asset_convert_nif.md#root-rotation-wrapper
-    See: docs/commentary/asset_convert_falloutnv.md#root-rotation-ignored
+    See: docs/commentary/asset_convert_falloutnv.md#fnv-weapon-flip
     """
     if has_skin or not (hasattr(root, 'rotation') and hasattr(root, 'children')):
         return False
-    if is_fallout_source():
-        root.rotation = _identity_matrix()
     if _is_identity(root.rotation) and abs(furn_shift) <= 1e-4:
         return False
 

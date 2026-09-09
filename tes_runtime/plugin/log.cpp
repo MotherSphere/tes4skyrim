@@ -16,7 +16,12 @@ namespace {
 FILE*      g_file = nullptr;
 std::mutex g_mutex;
 
+// The cache-only build logs beside the full one, never over it.
+#ifdef TESRUNTIME_CACHE_ONLY
+constexpr const wchar_t* kLogName = L"TESRuntimeCacheOnly.log";
+#else
 constexpr const wchar_t* kLogName = L"TESRuntime.log";
+#endif
 }  // namespace
 
 std::wstring LogDir() {

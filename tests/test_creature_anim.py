@@ -382,10 +382,35 @@ class TestAnimCacheFragments:
         from asset_convert.havok.animation_data import compose_animationdata
         assert compose_animationdata(_base_ad(), []) == _base_ad()
 
+    def test_append_splices_into_an_existing_project(self):
+        """Append ops land inside the named project and rewrite its counts."""
+        from asset_convert.havok.animation_data import (
+            compose_animationdata, compose_animationsetdata)
+        frag = {'animdata_append': [
+                    {'project': 'wolfproject.txt',
+                     'clips': ['Gun', '0', '1', '0', '0', '0', ''],
+                     'motions': ['0', '2', '1', '2 0 0 0', '1',
+                                 '2 0 0 0 1', '']}],
+                'animsetdata_append': [
+                    {'entry': 'WolfProjectData\\WolfProject.txt',
+                     'set_file': '_gun.txt',
+                     'block': ['V3', '0', '1', 'iRightHandType', '10', '10',
+                               '0', '0']}]}
+        ad = compose_animationdata(_base_ad(), [frag])
+        assert ad[0] == '1'
+        assert ad[2] == str(11 + 7) and ad[3 + 11:3 + 18] == \
+            ['Gun', '0', '1', '0', '0', '0', '']
+        assert ad[3 + 18] == str(7 + 7) and ad[-7:] == \
+            frag['animdata_append'][0]['motions']
+        asd = compose_animationsetdata(_base_asd(), [frag])
+        assert asd[2] == '2' and asd[3:5] == ['FullCharacter.txt', '_gun.txt']
+        assert asd[-8:] == frag['animsetdata_append'][0]['block']
+
     def test_cpp_composer_matches_python(self, tmp_path):
         """tes_runtime/compose_test.exe (the DLL's composer, built by
         tes_runtime/build.bat) must produce byte-identical files to the
         Python reference over the same base and fragments."""
+        import json
         import subprocess
         from asset_convert.havok.animation_data import (
             compose_singlefiles, read_fragments, write_composed,
@@ -402,6 +427,18 @@ class TestAnimCacheFragments:
         write_fragment([_manifest('oblivion', 'scamp', 3),
                         _manifest('oblivion', 'dog')],
                        str(tmp_path / 'meshes'), 'Oblivion.esm')
+        (frag_dir / 'zz_append.json').write_text(json.dumps({
+            'version': 1, 'source': 't', 'animdata': [], 'animsetdata': [],
+            'animdata_append': [{'project': 'wolfproject.txt',
+                                 'clips': ['Gun', '0', '1', '0', '0', '0',
+                                           ''],
+                                 'motions': ['0', '2', '1', '2 0 0 0', '1',
+                                             '2 0 0 0 1', '']}],
+            'animsetdata_append': [{
+                'entry': 'WolfProjectData\\WolfProject.txt',
+                'set_file': '_gun.txt',
+                'block': ['V3', '0', '1', 'iRightHandType', '10', '10',
+                          '0', '0']}]}))
         py_dir, cpp_dir = tmp_path / 'py', tmp_path / 'cpp'
         py_dir.mkdir()
         cpp_dir.mkdir()

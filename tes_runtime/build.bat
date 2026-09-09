@@ -3,8 +3,12 @@ REM Build TESRuntime.dll (SKSE plugin, x64) and compose_test.exe.
 REM
 REM Standalone build, same as game_bridge: no SKSE source tree, no CMake.
 REM Everything the plugin needs from the game is resolved at runtime through
-REM the Address Library or a signature scan, so the only inputs are MSVC and
-REM the Windows SDK.
+REM the Address Library, so the only inputs are MSVC and the Windows SDK.
+REM
+REM Usage:  build.bat              full plugin -> TESRuntime.dll
+REM         build.bat cache-only   animation cache composition ONLY, with
+REM                                gun routing and limb severing not compiled
+REM                                in, -> TESRuntime_CacheOnly.dll
 
 setlocal
 
@@ -19,9 +23,12 @@ cd /d "%~dp0plugin"
 if not exist obj mkdir obj
 if not exist objt mkdir objt
 
+if /i "%~1"=="cache-only" goto cacheonly
+
 echo [build] compiling plugin...
 cl /nologo /c /EHa /std:c++17 /O2 /MD /W3 /DNDEBUG ^
    plugin.cpp addresses.cpp hook.cpp stream.cpp compose.cpp json.cpp log.cpp ^
+   engine.cpp guns.cpp sever.cpp ^
    /Fo:obj\
 if errorlevel 1 (
     echo [build] ERROR: compilation failed
@@ -35,6 +42,31 @@ if errorlevel 1 (
     exit /b 1
 )
 echo [build] OK -^> %~dp0TESRuntime.dll
+goto composetest
+
+:cacheonly
+REM engine/guns/sever are not compiled at all: the cache path needs three
+REM Address Library ids and no form, native or co-save.
+if not exist objc mkdir objc
+echo [build] compiling plugin (cache-only)...
+cl /nologo /c /EHa /std:c++17 /O2 /MD /W3 /DNDEBUG /DTESRUNTIME_CACHE_ONLY ^
+   plugin.cpp addresses.cpp hook.cpp stream.cpp compose.cpp json.cpp log.cpp ^
+   /Fo:objc\
+if errorlevel 1 (
+    echo [build] ERROR: compilation failed
+    exit /b 1
+)
+
+echo [build] linking plugin (cache-only)...
+link /nologo /DLL /OUT:..\TESRuntime_CacheOnly.dll objc\*.obj ^
+   kernel32.lib shell32.lib ole32.lib
+if errorlevel 1 (
+    echo [build] ERROR: link failed
+    exit /b 1
+)
+echo [build] OK -^> %~dp0TESRuntime_CacheOnly.dll
+
+:composetest
 
 echo [build] compiling compose_test...
 cl /nologo /EHa /std:c++17 /O2 /MD /W3 /DNDEBUG ^

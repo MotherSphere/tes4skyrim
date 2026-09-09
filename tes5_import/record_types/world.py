@@ -17,7 +17,7 @@ from .items import get_base_origin_shift
 from ..text_reader import get_hex_bytes, remap_formid
 from .common import (
     TES4_DEFAULT_MUSIC_ENUM,
-    _prefix_path,
+    prefix_path,
     get_float,
     get_formid,
     get_int,
@@ -279,7 +279,7 @@ def convert_LTEX(rec: dict, writer=None) -> tuple:
         txst_edid = f"TES4_{edid}_TXST" if edid else f"TES4_LTEX_{get_formid(rec, 'FormID'):08X}_TXST"
         txst_subs += pack_string_subrecord('EDID', txst_edid)
         txst_subs += pack_obnd()
-        diffuse = _prefix_path(_landscape_icon(icon_path))
+        diffuse = prefix_path(_landscape_icon(icon_path))
         base_no_ext = diffuse.rsplit('.', 1)[0] if '.' in diffuse else diffuse
         txst_subs += pack_string_subrecord('TX00', diffuse)
         # Normal map (TX01): derive from diffuse with _n suffix
@@ -575,7 +575,7 @@ def convert_CELL(rec: dict) -> bytes:
 
     xnam = get_str(rec, 'XNAM.WaterNoiseTexture')
     if xnam:
-        subs += pack_string_subrecord('XNAM', _prefix_path(xnam))
+        subs += pack_string_subrecord('XNAM', prefix_path(xnam))
 
     # XCLR — the cell's region list.  THIS is how region weather reaches the
     # sky: the engine activates a region's RDWT list only in cells whose XCLR
@@ -1423,7 +1423,7 @@ def convert_EFSH(rec: dict) -> bytes:
     def _tex(p):
         if not p:
             return ''
-        return p if borrowed else _prefix_path(p)
+        return p if borrowed else prefix_path(p)
 
     # ICON/ICO2 are SetRequired on the TES4 record and present on every vanilla
     # TES5 one; NAM7 (holes) has no TES4 source and stays empty.

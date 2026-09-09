@@ -76,10 +76,10 @@ BIG_OBND = (-900, -900, -900, 900, 900, 900)
 def big_mesh(monkeypatch):
     """Give a known model path large cached bounds, and hand back the record."""
     from tes5_import import mesh_bounds
-    from tes5_import.record_types.common import _prefix_path
+    from tes5_import.record_types.common import prefix_path
 
     model = 'Architecture' + chr(92) + 'HugeTestWall.nif'
-    key = _prefix_path(model).lower().replace(chr(92), '/')
+    key = prefix_path(model).lower().replace(chr(92), '/')
     monkeypatch.setitem(mesh_bounds._MESH_BOUNDS, key, BIG_OBND)
 
     def make(sig):

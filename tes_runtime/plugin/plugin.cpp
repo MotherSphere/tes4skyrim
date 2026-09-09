@@ -1,14 +1,22 @@
 // TESRuntime -- SKSE plugin entry point.
 //
-// One job: compose meshes\animationdatasinglefile.txt and
-// meshes\animationsetdatasinglefile.txt in memory, at the moment the engine
-// parses them, from the vanilla base plus every fragment under
-// Data\SKSE\Plugins\TESRuntime\animation\*.json
-// (docs/reference/tes_runtime_fragments.md).
+// Three jobs, one DLL:
+//   * composes meshes\animationdatasinglefile.txt and
+//     meshes\animationsetdatasinglefile.txt in memory, at the moment the
+//     engine parses them, from the vanilla base plus every fragment under
+//     Data\SKSE\Plugins\TESRuntime\animation\*.json
+//     (docs/reference/tes_runtime_fragments.md);
+//   * routes FO3/FNV guns to hand type 13 and the iGun* graph variables
+//     (guns.cpp), which the patched humanoid graphs branch on;
+//   * severs FO3/FNV limbs on killing blows and keeps them severed (sever.cpp).
 //
 // Both parsers open their file through one shared helper; the hook replaces
 // that single call in each parser. Everything else is the engine's own code.
-// The plugin resolves three addresses and touches no form, native or co-save.
+//
+// Building with TESRUNTIME_CACHE_ONLY keeps only the first job, so the cache
+// composition can be tested with nothing else patched into the game
+// (build.bat cache-only -> TESRuntime_CacheOnly.dll). That variant resolves
+// three addresses and touches no form, native or co-save.
 
 #define _CRT_SECURE_NO_WARNINGS
 
@@ -30,11 +38,20 @@
 #include "skse_abi.h"
 #include "stream.h"
 
+#ifndef TESRUNTIME_CACHE_ONLY
+#include "engine.h"
+#include "guns.h"
+#include "sever.h"
+#endif
+
 using namespace tesruntime;
 
 namespace {
 
 constexpr UInt32 kPluginVersion = 2;
+#ifndef TESRUNTIME_CACHE_ONLY
+constexpr UInt32 kSerializationId = 'TES4';
+#endif
 
 using OpenFn = int (*)(const char* path, EngineStream** out, std::uint8_t flag, void* r9);
 
@@ -42,6 +59,10 @@ OpenFn      g_originalOpen = nullptr;
 std::mutex  g_mutex;
 bool        g_fragmentsLoaded = false;
 std::vector<Json> g_fragments;
+#ifndef TESRUNTIME_CACHE_ONLY
+bool        g_severingInstalled = false;
+bool        g_gunsInstalled = false;
+#endif
 
 enum class Which { None, AnimData, AnimSetData };
 
@@ -81,9 +102,10 @@ void EnsureFragments() {
     Log("compose: %zu fragment(s) under %s", g_fragments.size(), dir.c_str());
 }
 
-// The text handed to the parser is kept beside the log, so a run can be
-// diffed against the Python composer's output.
+// The cache-only build writes the text it handed the parser beside the log,
+// so a run can be diffed against the Python composer's output.
 void DumpComposed(Which which, const std::string& text) {
+#ifdef TESRUNTIME_CACHE_ONLY
     const std::wstring path = LogDir() + (which == Which::AnimData
         ? L"TESRuntime_composed_animationdatasinglefile.txt"
         : L"TESRuntime_composed_animationsetdatasinglefile.txt");
@@ -91,6 +113,9 @@ void DumpComposed(Which which, const std::string& text) {
     if (!f) return;
     std::fwrite(text.data(), 1, text.size(), f);
     std::fclose(f);
+#else
+    (void)which; (void)text;
+#endif
 }
 
 // The replacement for the resource-open helper, reached only from the two
@@ -151,6 +176,43 @@ bool InstallHooks() {
     return ok1 && ok2;
 }
 
+#ifndef TESRUNTIME_CACHE_ONLY
+bool CaptureVm(void* vm) {
+    g_api.vm = vm;
+    Log("papyrus: VM %p", vm);
+    return true;
+}
+
+void OnMessage(SKSEMessagingInterface::Message* msg) {
+    if (!msg) return;
+    if (msg->type == SKSEMessagingInterface::kMessage_DataLoaded) {
+        if (g_gunsInstalled) ResolveGunForms();
+        if (g_severingInstalled) ResolveSeverForms();
+    } else if (msg->type == SKSEMessagingInterface::kMessage_PostLoadGame && g_severingInstalled) {
+        SeverReapplyAll();
+    }
+}
+
+void QueryInterfaces(const SKSEInterface* skse) {
+    const PluginHandle handle = skse->GetPluginHandle();
+    auto* msg = static_cast<SKSEMessagingInterface*>(skse->QueryInterface(kInterface_Messaging));
+    if (msg) msg->RegisterListener(handle, "SKSE", OnMessage);
+    auto* papyrus = static_cast<SKSEPapyrusInterface*>(skse->QueryInterface(kInterface_Papyrus));
+    if (papyrus) papyrus->Register(CaptureVm);
+    g_api.task = static_cast<SKSETaskInterface*>(skse->QueryInterface(kInterface_Task));
+    auto* ser = static_cast<SKSESerializationInterface*>(skse->QueryInterface(kInterface_Serialization));
+    if (ser) {
+        ser->SetUniqueID(handle, kSerializationId);
+        ser->SetSaveCallback(handle, SeverSave);
+        ser->SetLoadCallback(handle, SeverLoad);
+        ser->SetRevertCallback(handle, SeverRevert);
+    }
+    Log("interfaces: messaging %s, papyrus %s, task %s, serialization %s",
+        msg ? "ok" : "missing", papyrus ? "ok" : "missing",
+        g_api.task ? "ok" : "missing", ser ? "ok" : "missing");
+}
+#endif  // TESRUNTIME_CACHE_ONLY
+
 }  // namespace
 
 extern "C" {
@@ -161,7 +223,11 @@ extern "C" {
 __declspec(dllexport) SKSEPluginVersionData SKSEPlugin_Version = {
     SKSEPluginVersionData::kVersion,  // dataVersion
     kPluginVersion,                   // pluginVersion
+#ifdef TESRUNTIME_CACHE_ONLY
+    "TESRuntimeCacheOnly",            // name[256]
+#else
     "TESRuntime",                     // name[256]
+#endif
     "TESConversion",                  // author[256]
     "",                               // supportEmail[252]
     0,                                // versionIndependenceEx
@@ -196,9 +262,23 @@ __declspec(dllexport) bool SKSEPlugin_Load(const SKSEInterface* skse) {
         Log("addresses: loaded %s (%zu entries)", g_versionDb.path().c_str(),
             g_versionDb.count());
     }
+#ifndef TESRUNTIME_CACHE_ONLY
+    QueryInterfaces(skse);
+#endif
     // The parsers run lazily, well after plugin load, so the call sites can
     // be patched here without waiting for any SKSE message.
     Log("hooks: animation cache %s", InstallHooks() ? "installed" : "NOT installed");
+#ifndef TESRUNTIME_CACHE_ONLY
+    if (ResolveEngine()) {
+        g_gunsInstalled = InstallGuns();
+        g_severingInstalled = InstallSevering();
+    }
+    Log("hooks: gun routing %s, limb severing %s",
+        g_gunsInstalled ? "installed" : "NOT installed",
+        g_severingInstalled ? "installed" : "NOT installed");
+#else
+    Log("cache-only build: gun routing and limb severing are not compiled in");
+#endif
     return true;
 }
 

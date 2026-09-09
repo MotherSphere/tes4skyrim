@@ -635,7 +635,7 @@ for Oblivion but not for every game:
 | `Oblivion.esm` | `Oblivion - Meshes/Textures - Compressed/Sounds/Misc.bsa` |
 | `Knights.esp` | `Knights.bsa` (one archive, smaller DLCs) |
 | `Nehrim.esm` | `N - Meshes/Textures1/Textures2/Sounds/Misc.bsa`, `L - Voices/Misc.bsa` |
-| `FalloutNV.esm` | `Fallout - Meshes/Misc/Sound/Textures/Textures2/Voices1.bsa` |
+| `FalloutNV.esm` | `Fallout - Meshes/Meshes2/Misc/Sound/Textures/Textures2/Voices1.bsa`, `Update.bsa` |
 
 **FO3/FNV name their archives after the GAME, not the plugin.** The stem
 `FalloutNV` matches nothing, so discovery returned **0 of the 47 BSAs** in a
@@ -647,6 +647,14 @@ converted normally.
 `_EXTRA_BSA_BASES` is the fix for exactly this shape of problem: it maps a
 plugin stem to the extra prefixes its archives really use, and FalloutNV
 registers `Fallout` the way Nehrim registers `N` and `L`.
+
+<a id="update-bsa"></a>**`Update.bsa` is FNV's official patch archive** and
+the last entry of the game's `SArchiveList`; its 86 files override the base
+archives. It holds `characters\_1stperson\1hpaim.kf`, the only
+first-person pistol aim clip the game has (the base `Fallout - Meshes.bsa`
+has none), so the first-person gun graph had no pose to build on until
+`Update` joined the FalloutNV bases. Candidates are probed in base order and
+a later archive overwrites, which matches the engine's load order.
 
 Two pattern notes. FNV uses `Sound.bsa` (singular) where Oblivion and Nehrim
 use `Sounds.bsa`, so both spellings are probed. And the base is deliberately

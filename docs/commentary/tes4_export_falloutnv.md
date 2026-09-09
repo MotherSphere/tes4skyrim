@@ -199,6 +199,115 @@ every existing code path keeps working unchanged.
 A converted gun reloads with the crossbow's crank animation. Skyrim has no
 other ranged reload, and this is cosmetic — the weapon fires correctly.
 
+### <a id="ammo-is-a-bolt"></a>Ammo: rounds are bolts
+
+**Code:** `tes4_export/record_types/falloutnv.py` (`_emit_ammo_deltas`),
+`tes5_import/record_types/equipment_falloutnv.py` (`ammo_flags`).
+
+The FO3/FNV `AMMO.DATA` is 13 bytes (speed f32, flags u8 + 3 unused, value
+s32, clip rounds u8) and the weight moved to `DAT2` (+8, after projectiles
+per shot and the projectile form), so the shared exporter's `>= 18` byte
+guard dumped nothing: all 92 FalloutNV AMMO records exported with no DATA at
+all. The FNV flags share only bit 0 (Ignores Normal Weapon Resistance) with
+TES4; bit 1 is Non-Playable.
+
+The importer sets Non-Bolt (0x04) on every TES4 arrow, and a crossbow-type
+WEAP can only load bolts, so a converted gun could never equip its rounds
+and `arrowRelease` had nothing to spend. A Fallout-sourced AMMO leaves that
+bit clear.
+
+### <a id="projectiles"></a>Projectiles and the gun's fire fields
+
+**Code:** `tes4_export/record_types/falloutnv.py` (`_emit_weap_fire`,
+`_emit_proj_deltas`), `tes5_import/record_types/projectile_falloutnv.py`.
+
+FO3/FNV keep the shot on three records TES4 never had. `PROJ` (95 in
+FalloutNV.esm) is the bullet itself: an 84-byte `DATA` (flags u16, type u16,
+gravity, speed, range, light, muzzle-flash light, tracer chance, two
+alt-trigger floats, explosion, sound, muzzle-flash duration, fade, impact
+force, countdown/disable sounds, default weapon, rotation vec3, bouncy
+mult), the muzzle-flash model `NAM1` and the sound level `VNAM`. The gun's
+`DNAM` names its projectile at +36 (`DNAM.Projectile`), the rounds a shot
+spends at +14, the projectile count at +42, and its rate fields at +60
+(`AnimAttackMult`), +64 (`FireRate`) and +88 (`ShotsPerSec`); its sounds
+are `SNAM` (shoot 3D, the first of two), `XNAM` (2D), `NAM7` (loop),
+`TNAM` (dry fire), `UNAM` (idle), `NAM9`/`NAM8` (equip/unequip); `NAM0` is
+the ammo and `WNAM` the first-person model STAT. The AMMO's own
+`DAT2.Projectile` is usually null (Ammo9mm: 0), the gun's is not.
+
+<a id="formlists"></a>**`NAM0` is a FormList, not an AMMO.** The 9mm's
+`NAM0` is `AmmoList9mm` (FLST 001537E7: the round plus its two hand-load
+variants), and FLST was an unexported type, so the first version of the
+ammo index keyed 48 list ids that no AMMO ever matched and every round fell
+back to the arrow: the casing model, the 3,600 units/s flight and the
+arrow bounce were all the fallback. `export_FORMLIST` now dumps every FLST
+as `LNAM[i]` FormIDs and the index expands a `NAM0` that names a list to
+its members.
+
+Before this the importer synthesized one arrow PROJ per AMMO from the
+ammo's inventory model, so a 9mm shot was a flying brass casing that
+whooshed like an arrow at 3,600 units/s. Now each FNV PROJ converts to a
+TES5 PROJ with its FNV type and flags kept verbatim (the low bits agree in
+both games: 1 Missile, 2 Lobber, 4 Beam, 8 Flame; Hitscan 0x01, Muzzle
+Flash 0x08, Supersonic 0x80; FNV's Continuous Beam 0x10 becomes Beam),
+so a bullet is a Missile, which the CK documents as consumed on contact
+where an Arrow sticks or bounces, and carries the FNV model, gravity,
+speed, range, impact force, light and sound. No vanilla Skyrim PROJ sets
+Hitscan (census of 141: none), but the Skyrim CK still documents the flag
+as "immediately impacts its target", so the bullets keep it. The AMMO's
+TES5 projectile is its own `DAT2` projectile when set, else the projectile
+the guns firing that ammo name most often (both the plugin's and its
+masters' WEAPs), else the arrow fallback. The gun's shoot/dry-fire/idle
+sounds go to the TES5 `SNAM`, `XNAM`, `NAM7`, `TNAM`, `UNAM` through the
+SOUN's companion SNDR id.
+
+<a id="no-muzzle-flash-light"></a>**No muzzle-flash light on a converted
+PROJ.** Keeping FNV's Muzzle Flash flag with its `MuzzleFlashLight`
+(LIGH `MuzzleFlashOrange352`) crashed on the first shot: crash log
+2026-09-09 00:35, `SkyrimSE.exe+026F089` = id 17610+0x439 (the point-light
+creation, `mov ecx,[rsi+0x10]` with rsi = the reference argument = 0).
+The caller (id 44056+0x25B, the projectile's muzzle flash) passes a null
+reference by construction (`xor edx,edx` before the call), and the light
+routine's null-reference path dereferences it anyway. The six vanilla
+PROJs with a muzzle-flash light are all Cone/Flame spell projectiles, cast
+with a caster reference; no weapon-launched Missile or Arrow has one. The
+converter keeps the flag and the `NAM1` flash model and writes light 0.
+
+<a id="nocked-model"></a>**The AMMO's model is its bullet, not its box.**
+Skyrim attaches the AMMO's `MODL` to the hand at `arrowAttach` (the
+nocked arrow: different arrows look different in hand) and shows it in
+the inventory viewer. A FNV AMMO's model is a box of rounds
+(`ammo\9mmammo.nif`), so every shot would flash a carton at the hand for
+the 30 ms between attach and release. The converted AMMO therefore takes
+its projectile's model (`projectiles\9mmprojectile.nif`), which sits inside
+the gun; its own box model is used only when no projectile resolves.
+
+### <a id="impacts"></a>Impacts: the gun's own IPDS, not the arrow's
+
+**Code:** `tes4_export/record_types/falloutnv.py` (`export_IMPACT`,
+`export_IMPACTSET`), `tes5_import/record_types/impact_falloutnv.py`.
+
+A FNV gun names its impact data set on `INAM` (the 9mm: 00019083
+`BallisticImpactDataSet`) exactly as a Skyrim WEAP does, but IPDS and
+IPCT were unexported, so the converted WEAP kept the crossbow template's
+`WPNzArrowImpactSet`: every bullet hit thudded and sparked like a bolt.
+FNV's IPDS `DATA` is twelve IPCT ids in a fixed material order (stone,
+dirt, grass, glass, metal, wood, organic, cloth, water, hollow metal,
+organic bug, organic glow); Skyrim's is a list of `PNAM` (MATT, IPCT)
+pairs, so each slot maps to the vanilla material it names (`MaterialStone`,
+`MaterialDirt`, `MaterialGrass`, `MaterialGlass`, `MaterialSolidMetal`,
+`MaterialWoodHeavy`, `MaterialSkin`, `MaterialCloth`, `MaterialWater`,
+`MaterialHeavyMetal`, `MaterialInsect`, `MaterialOrganicLarge`) plus the
+near relatives vanilla's arrow set also lists (gravel, heavy and broken
+stone, light wood, light and chain metal, light armor) pointed at the same
+slots. FNV's IPCT `DATA` (24 bytes: duration, orientation, angle
+threshold, placement radius, sound level, flags u32) is byte-compatible
+with TES5's (flags u8, impact result u8, 2 pad), so it copies through with
+result Default; the model and both SOUN links (as SNDRs) carry over. FNV's
+decal texture sets are TXST records the pipeline does not convert, so the
+IPCT drops `DODT`/`DNAM` and sets No Decal Data: sound, impact effect and
+material response are the gun's, the bullet hole is not yet.
+
 ## Navmesh: authored, not generated
 
 **Code:** `tes4_export/record_types/falloutnv.py` (`_emit_navm_deltas`,
