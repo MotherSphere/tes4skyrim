@@ -18,7 +18,7 @@ Path keys are normalised: lowercase, forward slashes, relative to the mesh
 output directory root.  Example: "tes4/furniture/chairnoble01.nif".
 
 Records store raw TES4 model paths like "Furniture\\ChairNoble01.NIF"; after
-_prefix_path() and normalisation these map to the same key.
+prefix_path() and normalisation these map to the same key.
 """
 
 import json

@@ -35,7 +35,7 @@ from .common import (
     VENDOR_KYWD,
     _common_header_subs,
     _convert_biped_flags,
-    _prefix_path,
+    prefix_path,
     get_float,
     get_formid,
     get_int,
@@ -299,7 +299,7 @@ def convert_WEAP(rec: dict, writer=None) -> bytes:
     subs = _common_header_subs(rec, obnd_sig='WEAP')
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
 
     # EITM — Object Effect (enchantment)
     enam = get_formid(rec, 'ENAM')
@@ -331,7 +331,7 @@ def convert_WEAP(rec: dict, writer=None) -> bytes:
     if model and writer is not None:
         edid = get_str(rec, 'EditorID', '')
         wnam_fid = writer.derive_formid('WEAP_STAT', get_formid(rec, 'FormID'))
-        stat_bytes = _build_weapon_1stperson_stat(edid, _prefix_path(model), wnam_fid)
+        stat_bytes = _build_weapon_1stperson_stat(edid, prefix_path(model), wnam_fid)
         writer.add_record('STAT', stat_bytes)
     if wnam_fid:
         subs += pack_formid_subrecord('WNAM', wnam_fid)
@@ -417,12 +417,12 @@ def convert_ARMO(rec: dict, is_clothing: bool = False, writer=None) -> bytes:
     ground_model = (male_world or male_model
                     or get_str(rec, 'Female.WorldModel.MODL') or female_model)
     if ground_model:
-        subs += pack_string_subrecord('MOD2', _prefix_path(ground_model))
+        subs += pack_string_subrecord('MOD2', prefix_path(ground_model))
 
     # MOD4 — Female world model (if different)
     female_world = get_str(rec, 'Female.WorldModel.MODL')
     if female_world:
-        subs += pack_string_subrecord('MOD4', _prefix_path(female_world))
+        subs += pack_string_subrecord('MOD4', prefix_path(female_world))
 
     # BOD2 (Biped Object Data) replaces BMDT — shared with the override path
     tes4_biped = get_int(rec, 'BMDT.BipedFlags')
@@ -594,7 +594,7 @@ def _build_arma(rec: dict, arma_fid: int, tes5_biped: int, armor_type: int,
     subs += pack_subrecord('DNAM', dnam)
 
     def _weighted(path: str) -> str:
-        p = _prefix_path(path)
+        p = prefix_path(path)
         if not p.lower().endswith('.nif'):
             return p
         if beast_race:
@@ -698,7 +698,7 @@ def convert_AMMO(rec: dict, writer=None) -> bytes:
     subs = _common_header_subs(rec, obnd_sig='AMMO')
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
 
     damage = get_int(rec, 'DATA.Damage')
     value = get_int(rec, 'DATA.Value')
@@ -711,7 +711,7 @@ def convert_AMMO(rec: dict, writer=None) -> bytes:
     if writer is not None:
         edid = get_str(rec, 'EditorID', '')
         proj_fid = writer.derive_formid('PROJ', get_formid(rec, 'FormID'))
-        proj_model = _prefix_path(model) if model else _prefix_path('Weapons\\Iron\\Arrow.NIF')
+        proj_model = prefix_path(model) if model else prefix_path('Weapons\\Iron\\Arrow.NIF')
         proj_bytes = _build_arrow_proj(edid, proj_model, speed, proj_fid)
         writer.add_record('PROJ', proj_bytes)
     else:
@@ -823,7 +823,7 @@ def convert_BOOK(rec: dict, writer=None) -> bytes:
     subs = _common_header_subs(rec, obnd_sig='BOOK')
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
     desc = get_str(rec, 'DESC')
     if desc:
         desc = _fix_book_html(desc)
@@ -898,7 +898,7 @@ def convert_BOOK(rec: dict, writer=None) -> bytes:
                 inam_fid = writer.derive_formid('BOOK_INVART', model.lower())
                 inv_model = 'clutter\\books\\inv\\' + base + '.nif'
                 stat_bytes = _build_model_stat('InvArt_' + base,
-                                               _prefix_path(inv_model), inam_fid)
+                                               prefix_path(inv_model), inam_fid)
                 writer.add_record('STAT', stat_bytes)
                 cache[base] = inam_fid
     subs += pack_formid_subrecord('INAM', inam_fid)
@@ -1043,7 +1043,7 @@ def convert_ALCH(rec: dict) -> bytes:
 
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
 
     weight = get_float(rec, 'DATA.Weight')
     subs += pack_float_subrecord('DATA', weight)
@@ -1075,7 +1075,7 @@ def convert_INGR(rec: dict) -> bytes:
 
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
 
     value = get_int(rec, 'DATA.Value')
     weight = get_float(rec, 'DATA.Weight')
@@ -1120,7 +1120,7 @@ def _build_scrl(rec: dict, effect_src: dict, cost: int = 0,
 
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
 
     value = get_int(rec, 'DATA.Value')
     weight = get_float(rec, 'DATA.Weight')
@@ -1161,7 +1161,7 @@ def convert_APPA(rec: dict) -> bytes:
     subs = _common_header_subs(rec, obnd_sig='MISC')
     model = get_str(rec, 'Model.MODL')
     if model:
-        subs += pack_string_subrecord('MODL', _prefix_path(model))
+        subs += pack_string_subrecord('MODL', prefix_path(model))
     subs += pack_keywords([VENDOR_KYWD['Clutter']])
     value = get_int(rec, 'DATA.Value')
     weight = get_float(rec, 'DATA.Weight')

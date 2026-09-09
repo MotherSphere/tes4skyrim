@@ -1799,8 +1799,7 @@ def _build_one_topic(dial_rec, info_by_dial, writer, offset,
     service_kind = service_menu_kind(dial_rec)
     service_gate_bytes = b''
     if service_kind:
-        from .record_types.actors import (get_merchant_faction_fid,
-                                          get_trainer_faction_fid)
+        from .record_types.actor_common import (get_merchant_faction_fid, get_trainer_faction_fid)
         gate_fid = (get_merchant_faction_fid() if service_kind == 'barter'
                     else get_trainer_faction_fid())
         if gate_fid:
@@ -2523,15 +2522,7 @@ def _build_injected_ctdas(info_rec, is_bark, npc_to_vtyp, topic_vtyps,
     if quest_gate_bytes:
         stats['quest_gated'] += 1
 
-    # Plugin-origin gate. A single AND-ed GetInFaction, placed FIRST so it can
-    # never be swallowed by a following OR-chain, and left on RunOn=Subject so
-    # it tests the SPEAKER (on Target it would test the player, who is in no
-    # plugin's origin faction, and every gated line would die).
-    #
-    # Only for lines that positively name no plugin-owned audience themselves.
-    # Read from the actors module (per-run global, set only for root masters)
-    # rather than threaded through _build_one_topic's already-long signature.
-    from .record_types.actors import get_origin_faction_fid
+    from .record_types.actor_common import get_origin_faction_fid
     origin_faction_fid = get_origin_faction_fid()
     origin_bytes = b''
     if origin_faction_fid and needs_origin_gate(info_rec):

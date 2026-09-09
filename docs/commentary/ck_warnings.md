@@ -14,6 +14,7 @@
 - [Fixed in the 2026-07 sweep](#section)
 - [Reading the CK log while the CK holds it open](#reading-ck-log-while-ck)
 - [Capture method](#capture-method)
+- [Unable to find Leveled Object Form (00000000) — fixed](#leveled-list-null-entries)
 
 ## CK warnings: WONTFIX verdicts and dead ends
 <a id="ck-warnings-wontfix-verdicts-dead"></a>
@@ -301,3 +302,20 @@ Warnings are tagged `[MASTERFILE]`, `[FORMS]`, `[EDITOR]`, `[SCRIPTS]`,
 prefix: `01......` is Oblivion.esm, `00......` is Skyrim.esm.
 
 ---
+
+## Unable to find Leveled Object Form (00000000)
+<a id="leveled-list-null-entries"></a>
+
+**Code:** `tes5_import/record_types/items.py` `_convert_leveled_list`
+
+A TES4 leveled list may carry an entry whose FormID is null — an unresolved or
+deliberately blank slot. Written through to TES5 the CK rejects the record with
+`Unable to find Leveled Object Form (00000000)`.
+
+Null entries are therefore dropped, and `LLCT` (a U8 in TES5, against TES4's
+count field) is derived from the entries that SURVIVE rather than from
+`EntryCount`. Deriving it first and filtering after leaves a count that
+overruns the LVLO array.
+
+Negative TES4 entry counts carry restock semantics TES5 has no field for; they
+are normalized to their magnitude, the same way inventory counts are.

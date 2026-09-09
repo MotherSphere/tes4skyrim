@@ -620,6 +620,48 @@ CREA `DATA` is mis-sized the same way: 17 bytes in FO3/FNV against TES4's 20,
 with no `Soul` and seven attributes instead of eight. The shared exporter
 guards on `len >= 20`, so it silently emitted no creature stats whatsoever.
 
+## <a id="lvln-is-a-native-type"></a>LVLN is a native FO3/FNV type
+
+TES4 has one leveled-actor list, `LVLC`. FO3/FNV adds `LVLN` "Leveled NPC"
+(`wbDefinitionsFNV.pas:6686`), structurally identical to LVLI — EDID, OBND,
+LVLD chance-none, LVLF flags and an LVLO entry array — whose entries point at
+`[LVLN, NPC_]`.
+
+It exported as an unparsed stub, so its entries could not be walked. That
+matters because an FNV spawn stub's TPLT commonly points at an LVLN rather than
+an LVLC: `LvlWastelander` → `0002E2A4 VarWastelander`, `LvlBrotherhoodOfSteelGun`
+→ `00000A87`. With the entries missing, the template chain dead-ended and
+**258 spawn stubs kept inheriting nothing**, so they shipped nameless.
+
+Skyrim has LVLN natively and the importer already converts TES4's LVLC into
+one, so the entries only have to be read.
+
+## <a id="aidt-gained-a-mood-byte"></a>AIDT gained a Mood byte
+
+**Code:** `tes4_export/record_types/falloutnv.py` `_emit_actor_aidt`
+
+TES4's AIDT is 12 bytes and puts the service bitmask at offset 4. FO3/FNV's is
+20: `Mood` takes byte 4 followed by 3 unused (xEdit notes it is stored as a
+DWord but truncated to a byte on load), pushing services to 8 and the trainer
+pair to 12-13. Bytes 14-19 — `Assistance`, `Aggro Radius Behavior` and a s32
+`Aggro Radius` — have no TES4 counterpart.
+
+Offsets 0-3 (Aggression, Confidence, Energy Level, Responsibility) are shared,
+so the delta emitter re-emits only the tail and leaves those to the shared
+exporter in `record_types/actors.py`.
+
+Unlike the ACBS shift, this one produces visible garbage rather than a
+plausible neighbour, because the mis-read straddles the aggro radius. Across
+`FalloutNV.esm`'s 5,394 actors the TES4 layout exported `AIDT.Services` values
+like 1885586944 and 757935360, and `Teaches` of 127/126/124 against a
+`wbSkillEnum` that stops well short of those.
+
+The values at 0-3 are *not* interchangeable even though the offsets are:
+FO3/FNV Aggression is `wbAggressionEnum` (0-3) and Confidence is
+`wbConfidenceEnum` (0-4), where TES4 uses 0-100 scalars for both. That is an
+import-side concern — see
+[tes5_import_falloutnv_actors.md](tes5_import_falloutnv_actors.md#aggression-is-already-a-tier).
+
 ## <a id="tplt-carries-the-whole-actor"></a>TPLT carries the whole actor
 
 **Code:** `tes4_export/record_types/falloutnv.py` `_emit_actor_template`

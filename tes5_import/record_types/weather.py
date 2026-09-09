@@ -10,7 +10,7 @@ import struct
 
 from ..text_reader import get_hex_bytes
 from .common import (
-    _prefix_path,
+    prefix_path,
     get_float,
     get_formid,
     get_int,
@@ -856,7 +856,7 @@ def _wthr_cloud_textures(layer_plan) -> tuple:
     subs = b''
     used = []
     for layer, path, _alphas in layer_plan:
-        path_bytes = _prefix_path(path).encode('utf-8') + b'\x00'
+        path_bytes = prefix_path(path).encode('utf-8') + b'\x00'
         subs += (_wthr_cloud_sig(layer)
                  + struct.pack('<H', len(path_bytes)) + path_bytes)
         used.append(layer)
@@ -998,13 +998,13 @@ def convert_CLMT(rec: dict) -> bytes:
     else:
         sun = get_str(rec, 'FNAM.SunTexture')
         if sun:
-            subs += pack_string_subrecord('FNAM', _prefix_path(sun))
+            subs += pack_string_subrecord('FNAM', prefix_path(sun))
         glare = get_str(rec, 'GNAM.GlareTexture')
         if glare:
-            subs += pack_string_subrecord('GNAM', _prefix_path(glare))
+            subs += pack_string_subrecord('GNAM', prefix_path(glare))
 
     model = get_str(rec, 'Model.MODL') or _DEFAULT_STARS_MODEL
-    subs += pack_string_subrecord('MODL', _prefix_path(model))
+    subs += pack_string_subrecord('MODL', prefix_path(model))
     subs += pack_subrecord('MODT', struct.pack('<III', 2, 0, 0))
 
     subs += pack_subrecord('TNAM', bytes((

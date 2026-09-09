@@ -143,9 +143,6 @@ _INEXPRESSIBLE = frozenset({
     ('CREA', 'RNAM.AttackReach'), # attack reach is race-level in Skyrim
     ('CREA', 'NIFZ[]'),           # creature geometry is converted asset-side
     ('SPEL', 'SPIT.Level'),       # TES5 SPIT has no spell level
-    # TES4 attributes with no TES5 field and no derived subrecord: _npc_acbs
-    # reads Endurance/Intelligence/Strength, _npc_skills_dnam reads
-    # Intelligence/Strength — the rest are dropped.
     ('NPC_', 'DATA.Luck'),
     ('NPC_', 'DATA.Willpower'),
     ('NPC_', 'DATA.Speed'),
@@ -167,7 +164,7 @@ _INEXPRESSIBLE = frozenset({
     ('INFO', 'PNAM.PrevInfo'),
 })
 
-# TES4 NPC_ skill fields — all feed the DNAM rebuild (_npc_skills_dnam).
+#: TES4 NPC_ skill fields; all feed the DNAM rebuild (npc_skills_dnam).
 _NPC_SKILL_KEYS = tuple(
     f'DATA.{name}' for name in (
         'Armorer', 'Athletics', 'Blade', 'Block', 'Blunt', 'HandToHand',
@@ -217,23 +214,23 @@ def _encode_string(value: str) -> bytes:
 # --------------------------------------------------------------------------
 
 def _build_npc_dnam(rec):
-    from .record_types.actors import _npc_skills_dnam
-    return _npc_skills_dnam(rec)
+    from .record_types.npc import npc_skills_dnam
+    return npc_skills_dnam(rec)
 
 
 def _build_npc_acbs(rec):
-    from .record_types.actors import _npc_acbs
-    return _npc_acbs(rec)
+    from .record_types.npc import npc_acbs
+    return npc_acbs(rec)
 
 
 def _build_crea_acbs(rec):
-    from .record_types.actors import _crea_acbs
-    return _crea_acbs(rec)
+    from .record_types.creature import crea_acbs
+    return crea_acbs(rec)
 
 
 def _build_crea_nam6(rec):
-    from .record_types.actors import _crea_nam6
-    return _crea_nam6(rec)
+    from .record_types.creature import crea_nam6
+    return crea_nam6(rec)
 
 
 def _build_bod2(rec):
@@ -707,8 +704,8 @@ _PATCHERS[('PACK', 'PKDT.Flags')] = (b'PKDT', _patch_pkdt_flags)
 # --------------------------------------------------------------------------
 
 def _read_export_items(rec):
-    from .record_types.actors import _read_items
-    return _read_items(rec)
+    from .record_types.actor_common import read_items
+    return read_items(rec)
 
 
 def _rebuild_inventory(plugin_rec, master_rec, old_subs):
@@ -802,7 +799,7 @@ def _rebuild_barter_gold(plugin_rec, master_rec, old_subs):
     master's run (vendor factions), so only an EXISTING gold entry is patched
     — the rest of the run passes through unchanged.
     """
-    from .record_types.actors import GOLD001_FID
+    from .record_types.actor_common import GOLD001_FID
     gold = get_int(plugin_rec, 'ACBS.BarterGold')
     out = []
     for s, payload in old_subs:

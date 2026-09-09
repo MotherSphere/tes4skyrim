@@ -17,7 +17,7 @@ from .items import get_base_origin_shift
 from ..text_reader import get_hex_bytes, remap_formid
 from .common import (
     TES4_DEFAULT_MUSIC_ENUM,
-    _prefix_path,
+    prefix_path,
     get_float,
     get_formid,
     get_int,
@@ -279,7 +279,7 @@ def convert_LTEX(rec: dict, writer=None) -> tuple:
         txst_edid = f"TES4_{edid}_TXST" if edid else f"TES4_LTEX_{get_formid(rec, 'FormID'):08X}_TXST"
         txst_subs += pack_string_subrecord('EDID', txst_edid)
         txst_subs += pack_obnd()
-        diffuse = _prefix_path(_landscape_icon(icon_path))
+        diffuse = prefix_path(_landscape_icon(icon_path))
         base_no_ext = diffuse.rsplit('.', 1)[0] if '.' in diffuse else diffuse
         txst_subs += pack_string_subrecord('TX00', diffuse)
         # Normal map (TX01): derive from diffuse with _n suffix
@@ -575,7 +575,7 @@ def convert_CELL(rec: dict) -> bytes:
 
     xnam = get_str(rec, 'XNAM.WaterNoiseTexture')
     if xnam:
-        subs += pack_string_subrecord('XNAM', _prefix_path(xnam))
+        subs += pack_string_subrecord('XNAM', prefix_path(xnam))
 
     # XCLR — the cell's region list.  THIS is how region weather reaches the
     # sky: the engine activates a region's RDWT list only in cells whose XCLR
@@ -854,6 +854,11 @@ def convert_REFR(rec: dict) -> bytes:
     TES5 order (from wbDefinitionsTES5.pas):
     EDID VMAD NAME XMBO XPRM ... XTEL XLOC XEZN ... XOWN XESP XLKR
     ... XSCL ... XMRK/FNAM/FULL/TNAM ... XLRT ... DATA
+
+    A keyless barrier door with no authored owner is owned to the
+    plugin-origin faction, which is what lets converted AI walk through it.
+
+    See: docs/commentary/tes5_import_actors.md#barrier-door-ownership
     """
     subs = b''
     edid = get_str(rec, 'EditorID')
@@ -960,17 +965,7 @@ def convert_REFR(rec: dict) -> bytes:
     # Ownership (XOWN)
     xown = get_formid(rec, 'XOWN.Owner')
     if not xown and barrier_door:
-        # Requires-Key keyless barrier door with a consume script: Skyrim's
-        # AI only passes a locked door it OWNS or holds the key for (vanilla
-        # 255 doors NPCs path through are exactly those — guards with gate
-        # keys, homeowners), while Oblivion's AI ignored locks entirely, so
-        # the CharacterGen back gate stranded Glenroy.  Owning these doors to
-        # the plugin-origin faction — which every converted actor of a root
-        # master already joins, and which carries no crime data — grants all
-        # of them the engine's own owner exemption.  The player is not a
-        # member: the lock reads Requires Key and activation stays blocked.
-        # The OnActivate preamble restores the lock after each AI passage.
-        from .actors import get_origin_faction_fid
+        from .actor_common import get_origin_faction_fid
         xown = get_origin_faction_fid()
     if xown:
         subs += pack_formid_subrecord('XOWN', xown)
@@ -1423,7 +1418,7 @@ def convert_EFSH(rec: dict) -> bytes:
     def _tex(p):
         if not p:
             return ''
-        return p if borrowed else _prefix_path(p)
+        return p if borrowed else prefix_path(p)
 
     # ICON/ICO2 are SetRequired on the TES4 record and present on every vanilla
     # TES5 one; NAM7 (holes) has no TES4 source and stays empty.

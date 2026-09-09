@@ -77,6 +77,8 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [tes4_export_falloutnv.md](commentary/tes4_export_falloutnv.md) | tes4_export/record_types/falloutnv.py - FO3/FNV export deltas |
 | [tes4_export_morrowind.md](commentary/tes4_export_morrowind.md) | tes4_export/tes3_reader.py, export_morrowind.py - TES3 export and Morroblivion compatibility |
 | [tes5_import_dialogue.md](commentary/tes5_import_dialogue.md) | tes5_import/dialog_converter.py - dialogue and voice |
+| [tes5_import_actors.md](commentary/tes5_import_actors.md) | tes5_import/record_types/actor_common.py, npc.py, creature.py - actor conversion |
+| [tes5_import_falloutnv_actors.md](commentary/tes5_import_falloutnv_actors.md) | tes5_import/record_types/actors_falloutnv.py - FO3/FNV actor templates |
 | [tes5_import_landscape.md](commentary/tes5_import_landscape.md) | tes5_import/record_types/region.py - REGN, LSCR and WATR |
 | [tes5_import_magic.md](commentary/tes5_import_magic.md) | tes5_import/record_types/magic.py - magic conversion |
 | [tes5_import_mod_merge.md](commentary/tes5_import_mod_merge.md) | tes5_import/master_manifest.py - merging a mod stack |

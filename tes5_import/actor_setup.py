@@ -51,7 +51,7 @@ def build_actor_indexes(by_type: dict, writer, export_dir: str, ctx,
     n_tplt = flatten_actor_templates(by_type, master_export)
     if n_tplt:
         print(f'  FO3/FNV actor templates: {n_tplt} stub(s) took their '
-              f'model from TPLT')
+              f'model, name or AI data from TPLT')
 
     build_creature_races(by_type, writer, export_dir, master_export)
     n_piles = build_creature_death_piles(writer)

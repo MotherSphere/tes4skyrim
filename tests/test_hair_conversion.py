@@ -295,7 +295,7 @@ def test_generated_clfm_carries_the_authored_rgb_exactly():
     Snapping to one of vanilla's 15 dark swatches measured a mean RGB error of
     26.9 (max 274.5) across Oblivion.esm's 2,482 haired NPCs.
     """
-    from tes5_import.record_types.actors import hair_color_formid
+    from tes5_import.record_types.npc import hair_color_formid
 
     writer = _FakeWriter()
     hair_color_formid(writer, 75, 50, 25)
@@ -308,7 +308,7 @@ def test_generated_clfm_carries_the_authored_rgb_exactly():
 
 
 def test_clfm_is_generated_once_per_distinct_color():
-    from tes5_import.record_types.actors import hair_color_formid
+    from tes5_import.record_types.npc import hair_color_formid
 
     writer = _FakeWriter()
     first = hair_color_formid(writer, 75, 50, 25)
@@ -322,7 +322,7 @@ def test_clfm_is_generated_once_per_distinct_color():
 
 def test_clfm_ids_are_a_pure_function_of_the_color():
     """Authored RGB is the key, so ids are stable across runs and machines."""
-    from tes5_import.record_types.actors import hair_color_formid
+    from tes5_import.record_types.npc import hair_color_formid
 
     a, b = _FakeWriter(), _FakeWriter()
     assert (hair_color_formid(a, 12, 34, 56)
@@ -330,7 +330,7 @@ def test_clfm_ids_are_a_pure_function_of_the_color():
 
 
 def test_clfm_clamps_out_of_range_channels():
-    from tes5_import.record_types.actors import hair_color_formid
+    from tes5_import.record_types.npc import hair_color_formid
 
     writer = _FakeWriter()
     hair_color_formid(writer, -20, 300, 128)
@@ -631,7 +631,7 @@ def test_hair_variant_formid_contract():
     """Base (bucket 0, base gender) keeps the SOURCE FormID; every other
     variant derives from (masked id, bucket[, 'F']) so male ids predating
     the gender split never move, and female ids can never collide."""
-    from tes5_import.record_types.actors import hair_variant_formid
+    from tes5_import.record_types.npc import hair_variant_formid
 
     w = _FakeWriter()
     src = 0x010C4821
@@ -1000,10 +1000,7 @@ def test_race_lists_route_beast_hair_to_beast_races():
     only, despite the constant's old name -- so Argonian/Khajiit/Orc/Elf hair
     was invisible for those races and only the human races saw new hairstyles.
     """
-    from tes5_import.record_types.actors import (
-        HDPT_RNAM_ALL_MINUS_BEAST, HDPT_RNAM_ARGONIAN, HDPT_RNAM_DREMORA,
-        HDPT_RNAM_ELVES, HDPT_RNAM_HUMANS, HDPT_RNAM_KHAJIIT, HDPT_RNAM_ORC,
-        HDPT_RNAM_REDGUARD, _hdpt_valid_races)
+    from tes5_import.record_types.npc import (HDPT_RNAM_ALL_MINUS_BEAST, HDPT_RNAM_ARGONIAN, HDPT_RNAM_DREMORA, HDPT_RNAM_ELVES, HDPT_RNAM_HUMANS, HDPT_RNAM_KHAJIIT, HDPT_RNAM_ORC, HDPT_RNAM_REDGUARD, _hdpt_valid_races)
 
     assert _hdpt_valid_races('ArgonianSpikes') == HDPT_RNAM_ARGONIAN
     assert _hdpt_valid_races('KhajiitMane') == HDPT_RNAM_KHAJIIT
