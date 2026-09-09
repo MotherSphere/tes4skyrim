@@ -274,15 +274,11 @@ baked into the collision because FNV, like Skyrim, already placed the root
 body at REFR ∘ bodyT. Root translations occur only on VATS camera rigs.
 
 <a id="fnv-weapon-flip"></a>The zeroing happens in `_convert_one_root`
-BEFORE the Prn seating, not inside `wrap_root_transform`. It used to sit in
-the wrapper, which runs after `convert_prn` has applied the weapon flip
-(`_apply_axe_flip`, [why](asset_convert_armor.md#weapon-attachment)), so a
-FNV gun's flip was zeroed with the authored rotation and every FNV weapon
-was held pointing at its holder; the retarget kept the hand's frame
-verbatim and the level aim was fixed and the gun still faced backwards,
-because the mesh itself was 180° from where the same pass puts an Oblivion
-weapon. Zeroing first lets the flip survive, and the wrapper then bakes it
-into the inner NiNode exactly as for an Oblivion blade.
+BEFORE the Prn seating, not inside `wrap_root_transform`, so a seating
+transform applied by `convert_prn` survives to be wrapped into the inner
+NiNode. The Oblivion weapon flip itself is skipped for FO3/FNV sources
+([why](#weapon-track-rename)): it briefly shipped on FNV guns and only
+looked right because the weapon track was not playing.
 
 ### <a id="two-sided-welding"></a>Random winding, repaired from the render mesh
 
@@ -574,9 +570,25 @@ clip with no keys), and `_fill_clip` and the locomotion stand-ins fall
 back to the same clip. The pitch blender then has a real level child, and
 its neighbours are only 90° away.
 
-Also checked and ruled out: the mesh converter's 180° weapon flip
-(`_apply_axe_flip`) never reaches a FNV gun, because `wrap_root_transform`
-zeroes a FO3/FNV root rotation; the shipped `9mm.nif` root is identity.
+<a id="weapon-track-rename"></a>**The weapon track never reached the file.**
+With the level aim fixed the pistol still pointed backwards, and flipping
+the mesh 180° (`_apply_axe_flip`, [below](#fnv-weapon-flip)) "fixed" the
+pistol while the shotgun sat pitched into the ground, off the hands
+(screenshot 114, first person). Offline every class agrees, in both views:
+the retargeted `Weapon` X axis (the barrel) is (0, 1, 0), and the node sits
+where FNV's hand held it (2hraim: 8 units from the right hand, as
+authored). So the game was not playing the track. `clip_to_animation_data`
+renames every track bone through `BONE_RENAMES`, the Oblivion-creature
+table, which maps `Weapon` to `WEAPON`; the Skyrim `skeleton.hkx` bone is
+spelled `Weapon`, so the renamed track matched nothing and the writer
+emitted the skeleton's reference pose for it: Skyrim's rest offset under
+the hand, whatever the hand does. For the pistol that rest offset is 180°
+about the bone's Y from FNV's frame (hence the flip looked right); for a
+rifle it is a different rotation, hence the pitch. A track already named
+for a skeleton bone now keeps its name (`_merged_tracks`); the rename
+applies only to names the skeleton lacks. The flip is skipped for FO3/FNV
+sources: FNV attaches the weapon NIF to `Weapon` with identity, and the
+barrel is the mesh's +X, which is the bone's X.
 
 **A declared reload letter need not exist for the class.** All 12 `2hh`
 handle weapons (minigun, flamer, gatling laser, plasma caster) declare

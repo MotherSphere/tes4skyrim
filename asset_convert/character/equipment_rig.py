@@ -51,6 +51,7 @@ from asset_convert.character.skyrim_overrides import (
     WEAPON_INV_MARKER_ZOOM,
 )
 from asset_convert.collision.collision import convert_all_collisions
+from asset_convert.collision.collision_falloutnv import is_fallout_source
 from asset_convert.collision.collision_constraints import (
     enforce_ragdoll_tree, scale_constraint_pivots,
     strip_marker_collision_bodies)
@@ -247,10 +248,14 @@ def _apply_shield_transform(fade):
 
 
 def _apply_axe_flip(fade):
-    """Rotate a side-carried weapon 180 degrees about the handle-blade axis.
+    """Rotate an Oblivion side-carried weapon 180 degrees about the
+    handle-blade axis; a FO3/FNV weapon is authored in its bone's frame.
 
     See: docs/commentary/asset_convert_armor.md#weapon-attachment
+    See: docs/commentary/asset_convert_falloutnv.md#weapon-track-rename
     """
+    if is_fallout_source():
+        return
     fade.rotation.m_11, fade.rotation.m_12, fade.rotation.m_13 = -1.0, 0.0, 0.0
     fade.rotation.m_21, fade.rotation.m_22, fade.rotation.m_23 = 0.0, 1.0, 0.0
     fade.rotation.m_31, fade.rotation.m_32, fade.rotation.m_33 = 0.0, 0.0, -1.0
