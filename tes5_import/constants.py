@@ -247,19 +247,12 @@ SKIP_TYPES = set()
 
 def _init_dispatch():
     """Initialize dispatch tables. Called after record_types are imported."""
-    from .record_types.actors import (
-        convert_CLAS,
-        convert_CREA,
-        convert_EYES,
-        convert_FACT,
-        convert_GLOB,
-        convert_GMST,
-        convert_HAIR,
-        convert_LVLC,
-        convert_LVLI,
-        convert_LVSP,
-        convert_NPC_,
-    )
+    from .record_types.actor_common import (convert_CLAS, convert_FACT)
+    from .record_types.common import (convert_GLOB, convert_GMST)
+    from .record_types.creature import convert_CREA
+    from .record_types.items import (convert_LVLC, convert_LVLI,
+                                 convert_LVLN, convert_LVSP)
+    from .record_types.npc import (convert_EYES, convert_HAIR, convert_NPC_)
     from .dialog_converter import (
         convert_DIAL,
         convert_INFO,
@@ -360,6 +353,7 @@ def _init_dispatch():
         'GMST': convert_GMST,
         # Leveled lists
         'LVLI': convert_LVLI,
+        'LVLN': convert_LVLN,
         'LVLC': convert_LVLC,
         'LVSP': convert_LVSP,
         # World

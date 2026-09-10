@@ -52,6 +52,57 @@ that happens to share a mesh with its template, which is what it is. Only the
 categories the flags actually claim are copied, so a stub that overrides its
 own model keeps it.
 
-The engine still resolves the remaining categories through TPLT at spawn time,
-exactly as `tes5_import/leveled_actors.py` relies on for Oblivion's placed-LVLC
-shells; flattening the model does not change that contract.
+## Flattening is the only channel
+
+An early version of this note claimed the engine still resolves the remaining
+categories through TPLT at spawn time, the way `tes5_import/leveled_actors.py`
+relies on for Oblivion's placed-LVLC shells. That is wrong, and measuring the
+built ESM settles it: **0 of 5,394 output NPC_ records carry a TPLT**, because
+neither `convert_CREA` nor `convert_NPC_` ever emits one — TPLT appeared only
+inside a subrecord-order comment. The LVLNs are converted but orphaned; nothing
+points at them.
+
+So every category the flags claim is lost unless it is flattened here. Two
+besides the model matter in-game, and both were measured against the shipped
+`output/FalloutNV.esm`:
+
+* **Base Data (bit 7) carries `FULL`.** 836 output NPC_ shipped with no name.
+  The names are not missing at the source — of the 248 actors reachable from a
+  leveled list, 247 have their own FULL — they are one link away, on the
+  template.
+* **AI Data (bit 4) carries `AIDT`.** 1,775 of the 1,880 placed refs whose base
+  templates onto a leveled list set this bit, so the stub's own aggression and
+  confidence are placeholders the engine would have overwritten.
+
+Flattening all three categories takes the nameless count from **836 to 14**,
+and the 14 that remain author no FULL anywhere in the chain (Player,
+`AudioTemplate*`, `DocAATEMPLATE` and other placeholders). 879 stubs inherit at
+least one category on a FalloutNV.esm run.
+
+The chain must also index **LVLN**, not just LVLC: 258 of the stubs template
+onto one, and until its entries were exported the walk dead-ended there. See
+[the export side](tes4_export_falloutnv.md#lvln-is-a-native-type).
+
+## <a id="aggression-is-already-a-tier"></a>Aggression is already a tier
+
+`build_aidt` in `record_types/actor_common.py` maps TES4's **0-100** scalar
+onto TES5's 0-3 tier, and TES4's 0-100 confidence onto TES5's 0-4. That mapping
+is correct for Oblivion and must stay.
+
+FO3/FNV does not use scalars. Its Aggression is `wbAggressionEnum` (0-3) and
+its Confidence is `wbConfidenceEnum` (0-4) — the *same* enums TES5 uses
+(wbDefinitionsFNV.pas:4303, wbDefinitionsCommon.pas:6533). Running an enum
+through a scalar bucketer collapses it: every FNV value fell into
+`aggr <= 5 → tier 0` and `conf < 15 → tier 0`.
+
+Measured on `FalloutNV.esm`, source against shipped output:
+
+| | source distribution | shipped (before) | shipped (after) |
+|---|---|---|---|
+| Aggression | 1:2429, 0:1942, 2:1023 | **0 × 5394** | matches source |
+| Confidence | 4:1704, 2:1645, 3:1291, 0:597, 1:157 | **0 × 5394** | matches source |
+
+Tier 0 confidence is Cowardly, the one tier that flees on sight, and tier 0
+aggression never initiates — which is exactly the reported symptom, leveled
+creatures that only ever flee. The fix is a passthrough, not a remap: identical
+enums need no translation.

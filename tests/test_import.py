@@ -10,13 +10,10 @@ import tempfile
 
 import pytest
 
-from tes5_import.record_types.actors import (
-    convert_CREA,
-    convert_GLOB,
-    convert_LVLC,
-    convert_LVLI,
-    convert_NPC_,
-)
+from tes5_import.record_types.common import convert_GLOB
+from tes5_import.record_types.creature import convert_CREA
+from tes5_import.record_types.items import (convert_LVLC, convert_LVLI)
+from tes5_import.record_types.npc import convert_NPC_
 from tes5_import.record_types.common import _convert_biped_flags
 from tes5_import.record_types.equipment import (
     convert_ARMO,
@@ -1379,7 +1376,7 @@ class TestIntegration:
         # Add a GLOB
         glob_rec = {'Signature': 'GLOB', 'FormID': '00012346', 'RecordFlags': '0',
                     'EditorID': 'TestGlobal', 'FNAM.Type': 'f', 'FLTV.Value': '1.0'}
-        from tes5_import.record_types.actors import convert_GLOB
+        from tes5_import.record_types.common import convert_GLOB
         glob_bytes = convert_GLOB(glob_rec)
         w.add_record('GLOB', glob_bytes)
 
@@ -1728,9 +1725,7 @@ class TestServiceConversion:
                 'DATA.MaxTraining': '0'}
 
     def test_trainer_class_and_faction(self):
-        from tes5_import.record_types.actors import (
-            create_trainer_records, create_vendor_factions,
-            get_trainer_class_fid, get_trainer_faction_fid)
+        from tes5_import.record_types.actor_common import (create_trainer_records, create_vendor_factions, get_trainer_class_fid, get_trainer_faction_fid)
         from tes5_import.constants import TES5_SKILL_ORDER
         writer = PluginWriter(masters=['Skyrim.esm'])
         npc = self._trainer_npc()   # Teaches=7 (Alchemy), max 70
@@ -1767,9 +1762,7 @@ class TestServiceConversion:
     def test_every_merchant_joins_one_marker_faction(self):
         """The Barter topic gates on ONE faction, so every merchant — whatever
         its service bitmask, chest-backed or not — must be a member of it."""
-        from tes5_import.record_types.actors import (
-            create_vendor_factions, get_merchant_faction_fid,
-            get_vendor_faction_fids_for_actor)
+        from tes5_import.record_types.actor_common import (create_vendor_factions, get_merchant_faction_fid, get_vendor_faction_fids_for_actor)
         writer = PluginWriter(masters=['Skyrim.esm'])
         a = self._merchant_npc(fid='00000501', services='132227')
         b = self._merchant_npc(fid='00000502', services='9216')
@@ -1784,8 +1777,7 @@ class TestServiceConversion:
         """The marker is a membership tag only. Giving it the Vendor flag would
         make it compete with the real vendor faction the engine resolves for the
         barter menu (VEND keyword filter / VENC chest)."""
-        from tes5_import.record_types.actors import (create_vendor_factions,
-                                                     get_merchant_faction_fid)
+        from tes5_import.record_types.actor_common import (create_vendor_factions, get_merchant_faction_fid)
         writer = PluginWriter(masters=['Skyrim.esm'])
         create_vendor_factions({'NPC_': [self._merchant_npc()]}, writer)
         marker = get_merchant_faction_fid()
@@ -1805,8 +1797,7 @@ class TestServiceConversion:
         from tes5_import.dialog_conditions import (FUNC_GET_IN_FACTION,
                                                    build_ctda)
         from tes5_import.dialog_converter import _build_service_fallback_info
-        from tes5_import.record_types.actors import (create_vendor_factions,
-                                                     get_merchant_faction_fid)
+        from tes5_import.record_types.actor_common import (create_vendor_factions, get_merchant_faction_fid)
         writer = PluginWriter(masters=['Skyrim.esm'])
         # Many distinct service bitmasks => many vendor factions. The gate must
         # stay at one condition regardless of how many exist.
@@ -1822,8 +1813,7 @@ class TestServiceConversion:
         assert struct.unpack_from('<I', n_ctda[0], 12)[0] == get_merchant_faction_fid()
 
     def test_trainer_unmappable_skill_skipped(self):
-        from tes5_import.record_types.actors import (
-            create_trainer_records, get_trainer_class_fid)
+        from tes5_import.record_types.actor_common import (create_trainer_records, get_trainer_class_fid)
         writer = PluginWriter(masters=['Skyrim.esm'])
         # Teaches=1 (Athletics) has no Skyrim skill -> not a trainer
         npc = self._trainer_npc(teaches='1')
@@ -1908,16 +1898,14 @@ class TestServiceConversion:
                              'DATA.Value': '2', 'DATA.Weight': '1'})
         assert VENDOR_KYWD['Clutter'] in kwda_fids(misc)
 
-        # Every emitted keyword must be tradable at the matching TES4 vendor
-        from tes5_import.record_types.actors import _keywords_for_services
+        from tes5_import.record_types.actor_common import _keywords_for_services
         assert VENDOR_KYWD['Arrow'] in _keywords_for_services(1 << 0)
         assert VENDOR_KYWD['Clutter'] in _keywords_for_services(1 << 10)
 
     def test_barter_topic_dialogue(self):
         """End-to-end: Barter topic converts with prompt, gate and fragment."""
         from tes5_import.dialog_converter import build_dialog_groups
-        from tes5_import.record_types.actors import (
-            create_trainer_records, create_vendor_factions)
+        from tes5_import.record_types.actor_common import (create_trainer_records, create_vendor_factions)
         writer = PluginWriter(masters=['Skyrim.esm'])
         npc = self._trainer_npc()
         qust = {'Signature': 'QUST', 'FormID': '00010602',
@@ -6183,10 +6171,10 @@ class TestAidtConfidenceTiers:
 
     @staticmethod
     def _conf(raw):
-        from tes5_import.record_types.actors import _npc_aidt
+        from tes5_import.record_types.actor_common import build_aidt
         rec = {'AIDT.Aggression': '5', 'AIDT.Confidence': str(raw),
                'AIDT.Responsibility': '50', 'DATA.Personality': '50'}
-        return _npc_aidt(rec)[1]
+        return build_aidt(rec)[1]
 
     def test_fearless_maps_to_foolhardy(self):
         assert self._conf(100) == 4
@@ -6224,20 +6212,20 @@ class TestAggressionTierTargeting:
     PREY_FID = '0005D556'
 
     def setup_method(self):
-        from tes5_import.record_types.actors import load_faction_player_reactions
+        from tes5_import.record_types.actor_common import load_faction_player_reactions
         load_faction_player_reactions({'FACT': [
             {'FormID': self.PREY_FID, 'EditorID': 'Prey', 'RelationCount': '0'},
         ]})
 
     @staticmethod
     def _aggr(aggression, personality, factions=()):
-        from tes5_import.record_types.actors import _npc_aidt
+        from tes5_import.record_types.actor_common import build_aidt
         rec = {'AIDT.Aggression': str(aggression), 'AIDT.Confidence': '50',
                'AIDT.Responsibility': '50', 'DATA.Personality': str(personality),
                'FactionCount': str(len(factions))}
         for i, f in enumerate(factions):
             rec[f'Faction[{i}].FormID'] = f
-        return _npc_aidt(rec, is_creature=True)[0]
+        return build_aidt(rec)[0]
 
     def test_marauder_pet_dog_not_hostile_on_sight(self):
         """Nehrim's Benno: aggr=30, Personality=10, Marauder+Bandit factions.
@@ -6295,7 +6283,7 @@ class TestFactionRelationReaction:
     def _fact(self, self_fid, relations):
         """Convert one FACT and return {target_fid: (modifier, reaction)}."""
         import struct
-        from tes5_import.record_types.actors import convert_FACT
+        from tes5_import.record_types.actor_common import convert_FACT
 
         rec = {'FormID': f'{self_fid:08X}', 'EditorID': 'TestFaction',
                'RelationCount': str(len(relations))}
@@ -6846,3 +6834,71 @@ class TestFalloutActorTemplates:
              'TPLT.Template': '00000003'}
         assert flatten_actor_templates({'CREA': [a, b]}) == 0
         assert 'Model.MODL' not in a
+
+    def test_stub_inherits_its_name_and_ai_data(self):
+        """Base Data carries FULL and AI Data carries AIDT, like Model does."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        stub, by_type = self._chain()
+        root = by_type['CREA'][-1]
+        root['FULL'] = 'Giant Radscorpion'
+        root['AIDT.Aggression'] = '2'
+        root['AIDT.Confidence'] = '4'
+        flatten_actor_templates(by_type)
+        assert stub['FULL'] == 'Giant Radscorpion'
+        assert stub['AIDT.Aggression'] == '2'
+        assert stub['AIDT.Confidence'] == '4'
+
+    def test_a_stub_that_owns_its_name_keeps_it(self):
+        """An overridden category is never replaced by the template's."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        stub, by_type = self._chain()
+        by_type['CREA'][-1]['FULL'] = 'Giant Radscorpion'
+        stub['FULL'] = 'Its Own Name'
+        flatten_actor_templates(by_type)
+        assert stub['FULL'] == 'Its Own Name'
+
+    def test_the_chain_resolves_through_an_lvln(self):
+        """FO3/FNV points spawn stubs at LVLN as often as at LVLC."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        stub = {'Signature': 'NPC_', 'FormID': '0002E2A5',
+                'EditorID': 'LvlWastelander',
+                'ACBS.TemplateFlags': str(0x01DF),
+                'TPLT.Template': '0002E2A4'}
+        lvln = {'Signature': 'LVLN', 'FormID': '0002E2A4',
+                'EntryCount': '1', 'Entry[0].FormID': '0002E29B'}
+        root = {'Signature': 'NPC_', 'FormID': '0002E29B',
+                'FULL': 'Wastelander'}
+        flatten_actor_templates({'NPC_': [stub, root], 'LVLN': [lvln]})
+        assert stub['FULL'] == 'Wastelander'
+
+
+class TestFalloutAidtTiers:
+    """FO3/FNV stores Aggression and Confidence in the TES5 enums already.
+
+    See docs/commentary/tes5_import_falloutnv_actors.md#aggression-is-already-a-tier.
+    """
+
+    def test_tiers_pass_through_unscaled(self):
+        """Every legal FNV (aggression, confidence) pair survives verbatim."""
+        from tes5_import.record_types.actors_falloutnv import aidt_tiers
+        for aggr in range(4):
+            for conf in range(5):
+                rec = {'AIDT.Aggression': str(aggr),
+                       'AIDT.Confidence': str(conf)}
+                assert aidt_tiers(rec) == (aggr, conf)
+
+    def test_out_of_range_bytes_clamp_to_the_enum(self):
+        """A plugin may author a byte the enum has no name for."""
+        from tes5_import.record_types.actors_falloutnv import aidt_tiers
+        rec = {'AIDT.Aggression': '200', 'AIDT.Confidence': '200'}
+        assert aidt_tiers(rec) == (3, 4)
+
+    def test_oblivion_scalars_still_bucket(self):
+        """The TES4 path must keep its 0-100 mapping: 100 confidence is tier 4."""
+        from tes5_import.record_types.actor_common import build_aidt
+        rec = {'AIDT.Aggression': '5', 'AIDT.Confidence': '100',
+               'AIDT.Responsibility': '50', 'DATA.Personality': '50'}
+        assert build_aidt(rec)[1] == 4

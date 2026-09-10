@@ -620,60 +620,6 @@ Child likewise: FNV children are a 0.8-scale variant with `DATA.Flags` bit 2 and
 child head/body meshes, and Skyrim's child races carry their own skeleton and
 armor-race handling.
 
-## <a id="humanoid-races"></a>Humanoid races map onto Skyrim playable races
-
-**Code:** 
-
-FNV ships 22 RACE records and shares no FormID with Oblivion, so
- missed on every one and all 3,816 FalloutNV.esm NPCs
-resolved to a single race. Two paths produced that: FNV  is
-, which Oblivion's table already spends on ,
-so 1,815 actors hit it by collision; the other 2,001 fell to
- (Nord). The collision is why FNV needs its own dict rather than
-extra entries in the Oblivion one.
-
-The miss also silently emptied every downstream race-keyed table:  was
-written 0 times, and  returned 2 head parts for all 3,816
-actors. Hair was unaffected --  keys on the source FormID, so
-2,767 converted FNV hairstyles resolved correctly throughout.
-
-Measured population (, 3,816 NPCs):
-
-| Race | NPCs | Race | NPCs |
-|---|---:|---|---:|
-| Caucasian | 1,815 | Ghoul | 55 |
-| AfricanAmerican | 509 | Old (4 races) | 145 |
-| Hispanic | 412 | OldAged (4 races) | 31 |
-| Asian | 274 | Child (4 races) | 37 |
-| Raider (4 races) | 538 | | |
-
-The four ethnicities plus their Raider variants are 3,548 of 3,816 (93%).
-
-Ethnicity choice is by skin tone, the only axis Skyrim races vary on that FNV
-also authors ( in ): Nord (234,162,145)
-is the lightest human race, Redguard (118,60,35) by far the darkest, Imperial
-(186,120,80) the mid-brown between. Skyrim has no Asian race; Breton
-(224,164,120) is chosen to keep four ethnicities on four distinct tints rather
-than collapsing Asian and Hispanic onto Imperial together (686 actors).
-
-Skyrim's human races differ in tint and head texture, not bone geometry, so
-this restores variety and tone, not facial structure. Only converted FNV head
-meshes would do that, and FNV  does not decode yet (exported as
-, 61 records, sizes only).
-
-Raider/Old/OldAged resolve to their base ethnicity: they differ from it by
-texture paths and FaceGen coefficients, not skeleton or head structure, and the
-per-actor face already rides on  -> , which needs no race
-table (3,027 FNV actors already carried non-neutral morphs before this change).
-
-Ghoul is deliberately left unmapped -- it falls through to the Oblivion default.
-Aliasing it to a human race makes ghouls look human, which is worse than a wrong
-ethnicity; it needs  registered as a  race pack.
-Child likewise: FNV children are a 0.8-scale variant with  bit 2 and
-child head/body meshes, and Skyrim's child races carry their own skeleton and
-armor-race handling.
-
-
 ## <a id="voice-files"></a>Voice files: no gender level, Ogg Vorbis
 
 **Code:** `asset_convert/audio/audio_falloutnv.py`
@@ -730,6 +676,48 @@ text parser never sees a duplicate key, which it would turn into a list.
 CREA `DATA` is mis-sized the same way: 17 bytes in FO3/FNV against TES4's 20,
 with no `Soul` and seven attributes instead of eight. The shared exporter
 guards on `len >= 20`, so it silently emitted no creature stats whatsoever.
+
+## <a id="lvln-is-a-native-type"></a>LVLN is a native FO3/FNV type
+
+TES4 has one leveled-actor list, `LVLC`. FO3/FNV adds `LVLN` "Leveled NPC"
+(`wbDefinitionsFNV.pas:6686`), structurally identical to LVLI — EDID, OBND,
+LVLD chance-none, LVLF flags and an LVLO entry array — whose entries point at
+`[LVLN, NPC_]`.
+
+It exported as an unparsed stub, so its entries could not be walked. That
+matters because an FNV spawn stub's TPLT commonly points at an LVLN rather than
+an LVLC: `LvlWastelander` → `0002E2A4 VarWastelander`, `LvlBrotherhoodOfSteelGun`
+→ `00000A87`. With the entries missing, the template chain dead-ended and
+**258 spawn stubs kept inheriting nothing**, so they shipped nameless.
+
+Skyrim has LVLN natively and the importer already converts TES4's LVLC into
+one, so the entries only have to be read.
+
+## <a id="aidt-gained-a-mood-byte"></a>AIDT gained a Mood byte
+
+**Code:** `tes4_export/record_types/falloutnv.py` `_emit_actor_aidt`
+
+TES4's AIDT is 12 bytes and puts the service bitmask at offset 4. FO3/FNV's is
+20: `Mood` takes byte 4 followed by 3 unused (xEdit notes it is stored as a
+DWord but truncated to a byte on load), pushing services to 8 and the trainer
+pair to 12-13. Bytes 14-19 — `Assistance`, `Aggro Radius Behavior` and a s32
+`Aggro Radius` — have no TES4 counterpart.
+
+Offsets 0-3 (Aggression, Confidence, Energy Level, Responsibility) are shared,
+so the delta emitter re-emits only the tail and leaves those to the shared
+exporter in `record_types/actors.py`.
+
+Unlike the ACBS shift, this one produces visible garbage rather than a
+plausible neighbour, because the mis-read straddles the aggro radius. Across
+`FalloutNV.esm`'s 5,394 actors the TES4 layout exported `AIDT.Services` values
+like 1885586944 and 757935360, and `Teaches` of 127/126/124 against a
+`wbSkillEnum` that stops well short of those.
+
+The values at 0-3 are *not* interchangeable even though the offsets are:
+FO3/FNV Aggression is `wbAggressionEnum` (0-3) and Confidence is
+`wbConfidenceEnum` (0-4), where TES4 uses 0-100 scalars for both. That is an
+import-side concern — see
+[tes5_import_falloutnv_actors.md](tes5_import_falloutnv_actors.md#aggression-is-already-a-tier).
 
 ## <a id="tplt-carries-the-whole-actor"></a>TPLT carries the whole actor
 

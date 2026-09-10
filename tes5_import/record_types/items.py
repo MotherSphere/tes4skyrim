@@ -735,5 +735,65 @@ def convert_CONT(rec: dict) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Equipment converters
+# Leveled list converters
 # ---------------------------------------------------------------------------
+
+
+def _leveled_entries(rec: dict) -> list:
+    """(level, FormID, count) per entry, skipping the null-FormID slots.
+
+    LVLO is `Level(U16) pad(U16) FormID(U32) Count(U16) pad(U16)`, 12 bytes.
+
+    See: docs/commentary/ck_warnings.md#leveled-list-null-entries
+    """
+    entries = []
+    for i in range(get_int(rec, 'EntryCount')):
+        fid = get_formid(rec, f'Entry[{i}].FormID')
+        if not fid:
+            continue
+        level = get_int(rec, f'Entry[{i}].Level', 1)
+        count = abs(get_int(rec, f'Entry[{i}].Count', 1)) or 1
+        entries.append((max(1, level), fid, count))
+    return entries
+
+
+def _convert_leveled_list(rec: dict, tes5_sig: str) -> bytes:
+    """Pack a TES4 leveled list as `tes5_sig`, LLCT counting surviving entries."""
+    subs = b''
+    edid = get_str(rec, 'EditorID')
+    if edid:
+        subs += pack_string_subrecord('EDID', edid)
+    subs += pack_obnd()
+
+    chance = get_int(rec, 'LVLD.ChanceNone')
+    subs += pack_uint8_subrecord('LVLD', chance)
+    flags = get_int(rec, 'LVLF.Flags')
+    subs += pack_uint8_subrecord('LVLF', flags)
+
+    entries = _leveled_entries(rec)
+    if entries:
+        subs += pack_subrecord('LLCT', struct.pack('<B', min(len(entries), 255)))
+    for level, fid, count in entries:
+        subs += pack_subrecord('LVLO', struct.pack('<HxxIHxx', level, fid, count))
+
+    return pack_record(tes5_sig, get_formid(rec, 'FormID'), get_int(rec, 'RecordFlags'), subs)
+
+
+def convert_LVLI(rec: dict) -> bytes:
+    """LVLI → LVLI (Leveled Item)."""
+    return _convert_leveled_list(rec, 'LVLI')
+
+
+def convert_LVLC(rec: dict) -> bytes:
+    """LVLC → LVLN (Leveled NPC)."""
+    return _convert_leveled_list(rec, 'LVLN')
+
+
+def convert_LVLN(rec: dict) -> bytes:
+    """LVLN → LVLN; FO3/FNV has the type natively and Skyrim shares it."""
+    return _convert_leveled_list(rec, 'LVLN')
+
+
+def convert_LVSP(rec: dict) -> bytes:
+    """LVSP → LVSP (Leveled Spell)."""
+    return _convert_leveled_list(rec, 'LVSP')

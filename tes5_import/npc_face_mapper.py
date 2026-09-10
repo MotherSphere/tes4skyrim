@@ -399,7 +399,7 @@ def _resolve_hair_part(rec: dict, hair_fid: int, race_edid: str,
     the generic load-order remap rewrites like any other reference.
     """
     from . import hair_variants
-    from .record_types.actors import hair_variant_formid
+    from .record_types.npc import hair_variant_formid
 
     bucket = hair_variants.bucket_for_npc(rec)
     if writer is None:

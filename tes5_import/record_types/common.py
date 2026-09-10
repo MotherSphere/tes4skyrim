@@ -19,6 +19,11 @@ from ..writer import (
 )
 
 
+# ---------------------------------------------------------------------------
+#   Shared subrecord helpers
+# ---------------------------------------------------------------------------
+
+
 def prefix_path(path: str) -> str:
     """Prefix asset path with tes4\\ namespace.
     Strips leading 'textures\\' if present since Skyrim auto-prefixes it."""
@@ -247,3 +252,52 @@ def note_emitted_region(fid):
 def region_was_emitted(fid) -> bool:
     """True when convert_REGN emitted `fid`."""
     return fid in _EMITTED_REGION_FIDS
+
+
+# ---------------------------------------------------------------------------
+#   Game settings and globals
+# ---------------------------------------------------------------------------
+
+#: TES4 globals Skyrim already ships at the SAME FormIDs; never re-emitted.
+_ENGINE_GLOBALS = {'gamehour', 'gamedayspassed', 'gameday', 'gamemonth',
+                   'gameyear', 'timescale'}
+
+
+def convert_GLOB(rec: dict) -> bytes:
+    """GLOB → GLOB, dropping the globals Skyrim's engine already defines.
+
+    See: docs/commentary/tes5_import_quest.md#engine-globals
+    """
+    subs = b''
+    edid = get_str(rec, 'EditorID')
+    if edid and edid.lower() in _ENGINE_GLOBALS:
+        return b''
+    if edid:
+        subs += pack_string_subrecord('EDID', edid)
+    type_char = get_str(rec, 'FNAM.Type', 'f')
+    subs += pack_uint8_subrecord('FNAM', ord(type_char[0]) if type_char else ord('f'))
+    value = get_float(rec, 'FLTV.Value')
+    subs += pack_float_subrecord('FLTV', value)
+    return pack_record('GLOB', get_formid(rec, 'FormID'), get_int(rec, 'RecordFlags'), subs)
+
+
+def convert_GMST(rec: dict) -> bytes:
+    """GMST → GMST; the EditorID's leading s/f/i prefix types the DATA value."""
+    subs = b''
+    edid = get_str(rec, 'EditorID')
+    if edid:
+        subs += pack_string_subrecord('EDID', edid)
+    value_str = get_str(rec, 'DATA.Value')
+    if edid and edid.startswith('s'):
+        subs += pack_string_subrecord('DATA', value_str)
+    elif edid and edid.startswith('f'):
+        try:
+            subs += pack_float_subrecord('DATA', float(value_str))
+        except ValueError:
+            subs += pack_uint32_subrecord('DATA', 0)
+    else:
+        try:
+            subs += pack_uint32_subrecord('DATA', int(value_str))
+        except ValueError:
+            subs += pack_uint32_subrecord('DATA', 0)
+    return pack_record('GMST', get_formid(rec, 'FormID'), get_int(rec, 'RecordFlags'), subs)

@@ -583,8 +583,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     # plugin duplicates master content — 27 spurious VTYP, 35 GLOB, 27 FACT —
     # and the duplicates then compete with the originals the overrides use.
     _step_t = time.time()
-    from .record_types.actors import (create_origin_faction,
-                                      reset_origin_faction)
+    from .record_types.actor_common import (create_origin_faction, reset_origin_faction)
     reset_origin_faction()
     if not ctx:
         create_vtyp_records(writer, export_dir, by_type)
@@ -637,7 +636,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     # master's NPCs, and a speaker with no VTYP falls back to a default voice.
     npc_to_vtyp = build_npc_to_vtyp_map(_vtyp_by_type, num_new_masters,
                                         ctx.master_export if ctx else None)
-    from .record_types.actors import set_npc_voice_map
+    from .record_types.actor_common import set_npc_voice_map
     set_npc_voice_map(npc_to_vtyp)
 
     # TES4 `Say <topic> <flag> <speak-as NPC> <flag>` names the identity the
@@ -988,8 +987,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     # --- Phase 0c: Create vendor factions for merchant NPCs, plus the
     # trainer faction + per-trainer CLAS clones for the training service ---
     if not ctx:
-        from .record_types.actors import (create_trainer_records,
-                                          create_vendor_factions)
+        from .record_types.actor_common import (create_trainer_records, create_vendor_factions)
         create_vendor_factions(by_type, writer)
         create_trainer_records(by_type, writer)
     _step_done('vendor/trainer records')
@@ -1146,12 +1144,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     from .outfits import load_item_index
     load_item_index(by_type, ctx.master_export if ctx else None)
 
-    # Aggression conversion needs each faction's reaction toward the player:
-    # TES4 gates combat on disposition (Personality + faction reactions) vs
-    # aggression, so without this index every actor falls back to Personality
-    # alone and tame creatures read as hostile. See _npc_aidt in
-    # record_types/actors.py.
-    from .record_types.actors import load_faction_player_reactions
+    from .record_types.actor_common import load_faction_player_reactions
     load_faction_player_reactions(by_type)
 
     # --- Phase 0j: index hair-length variants ---
@@ -1840,12 +1833,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     n_fg = patch_forcegreet_topics(writer)
     if n_fg:
         print(f"  ForceGreet packages bound to a greeting topic: {n_fg}")
-    # Actor CSDI still holds TES4 SOUN ids; Phase 3 has now built the SNDRs.
-    # THE MERGE OF `creature-sound-fix-attempt` DROPPED THIS CALL: every actor
-    # sound entry pointed at a SOUN (wrong record type — CSDI is an SNDR
-    # slot), and CSCR inheritance chains shipped unflattened. Also flattens
-    # CSCR (see actors._flatten_cscr).
-    from .record_types.actors import patch_actor_sounds
+    from .record_types.creature import patch_actor_sounds
     n_snd = patch_actor_sounds(writer)
     if n_snd:
         print(f"  Actor sound entries bound/flattened: {n_snd} actors")

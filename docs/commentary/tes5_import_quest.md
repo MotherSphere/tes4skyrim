@@ -1746,9 +1746,21 @@ would bind an `Actor Property Player` to a BASE record the VM refuses. The
 declared-name pass binds whichever spelling the script uses to `PlayerRef`
 instead.
 
-Engine globals are shared with Skyrim at the same FormID and are never
-re-emitted, so they must not be shifted into our index -- see
-`object_scripts.ENGINE_GLOBAL_FORMIDS`.
+### <a id="engine-globals"></a>Engine globals: dropping the record is half the contract
+
+**Code:** `tes5_import/record_types/common.py` `convert_GLOB`
+
+Skyrim already ships `gamehour`, `gamedayspassed`, `gameday`, `gamemonth`,
+`gameyear` and `timescale` at the SAME FormIDs Oblivion uses, so `convert_GLOB`
+emits no record for them -- our own copies would only be duplicate EditorIDs.
+
+That is only half of it. VMAD properties naming those globals must also be
+bound UNSHIFTED, via `constants.ENGINE_GLOBAL_FORMIDS`; they must not be
+shifted into our index. For a long time only the record-dropping half existed,
+which left every such property bound to a nonexistent form.
+
+An earlier comment credited `script_convert._GLOBAL_CANONICAL` with fixing the
+references. It does not -- it only canonicalizes the NAME.
 
 One converter runs for all stages: `convert_fragment` deliberately accumulates
 `_property_refs` across calls, which is how the QF_ generator collects the union

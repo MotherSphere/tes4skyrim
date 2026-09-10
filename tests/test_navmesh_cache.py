@@ -960,7 +960,7 @@ def test_auto_install_skips_a_cache_below_its_range(tmp_path, monkeypatch):
 
 
 def test_no_download_env_var_is_shared_not_duplicated():
-    """The GUI menu item and convert.py must read the SAME variable name.
+    """The GUI checkbox and convert.py must read the SAME variable name.
 
     Both used to spell 'TESCONV_NO_CACHE_DOWNLOAD' as a literal; a typo in
     either would silently disable the opt-out (the checkbox would appear to do
@@ -968,7 +968,7 @@ def test_no_download_env_var_is_shared_not_duplicated():
     """
     assert nc.NO_DOWNLOAD_ENV_VAR == 'TESCONV_NO_CACHE_DOWNLOAD'
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for name in ('gui.py', 'convert.py'):
+    for name in ('core/gui/runner.py', 'convert.py'):
         with open(os.path.join(root, name), encoding='utf-8') as fh:
             src = fh.read()
         assert 'NO_DOWNLOAD_ENV_VAR' in src, name

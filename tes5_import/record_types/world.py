@@ -854,6 +854,11 @@ def convert_REFR(rec: dict) -> bytes:
     TES5 order (from wbDefinitionsTES5.pas):
     EDID VMAD NAME XMBO XPRM ... XTEL XLOC XEZN ... XOWN XESP XLKR
     ... XSCL ... XMRK/FNAM/FULL/TNAM ... XLRT ... DATA
+
+    A keyless barrier door with no authored owner is owned to the
+    plugin-origin faction, which is what lets converted AI walk through it.
+
+    See: docs/commentary/tes5_import_actors.md#barrier-door-ownership
     """
     subs = b''
     edid = get_str(rec, 'EditorID')
@@ -960,17 +965,7 @@ def convert_REFR(rec: dict) -> bytes:
     # Ownership (XOWN)
     xown = get_formid(rec, 'XOWN.Owner')
     if not xown and barrier_door:
-        # Requires-Key keyless barrier door with a consume script: Skyrim's
-        # AI only passes a locked door it OWNS or holds the key for (vanilla
-        # 255 doors NPCs path through are exactly those — guards with gate
-        # keys, homeowners), while Oblivion's AI ignored locks entirely, so
-        # the CharacterGen back gate stranded Glenroy.  Owning these doors to
-        # the plugin-origin faction — which every converted actor of a root
-        # master already joins, and which carries no crime data — grants all
-        # of them the engine's own owner exemption.  The player is not a
-        # member: the lock reads Requires Key and activation stays blocked.
-        # The OnActivate preamble restores the lock after each AI passage.
-        from .actors import get_origin_faction_fid
+        from .actor_common import get_origin_faction_fid
         xown = get_origin_faction_fid()
     if xown:
         subs += pack_formid_subrecord('XOWN', xown)

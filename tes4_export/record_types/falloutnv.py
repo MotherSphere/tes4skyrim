@@ -14,7 +14,7 @@ from ..tes4_reader import (Record, get_all_subrecords,
                            get_formid_str, get_string,
                            get_subrecord)
 from .common import (emit_float, emit_formid, emit_model, emit_raw_hex,
-                     emit_script, emit_string, emit_u16, emit_u32)
+                     emit_script, emit_string, emit_u8, emit_u16, emit_u32)
 
 #: HEDR.Version reported by FO3/FNV plugins; Oblivion reports 0.8 or 1.0.
 FALLOUT_HEDR_MIN = 1.2
@@ -264,10 +264,11 @@ def _emit_navi_deltas(lines: list, rec: Record):
     lines.append(f"NVMI.Count={index}")
 
 
-#: TES4-layout actor keys the FO3/FNV ACBS/DATA emitters below supersede.
+#: TES4-layout actor keys the FO3/FNV ACBS/AIDT/DATA emitters below supersede.
 SUPERSEDED_ACTOR_KEYS = (
     "ACBS.SpellPoints=", "ACBS.Fatigue=", "ACBS.BarterGold=", "ACBS.Level=",
     "ACBS.CalcMin=", "ACBS.CalcMax=",
+    "AIDT.Services=", "AIDT.Teaches=", "AIDT.MaxTraining=",
     "DATA.Soul=", "DATA.Health=", "DATA.AttackDamage=",
 )
 
@@ -310,6 +311,32 @@ def _emit_actor_acbs(lines: list, rec: Record):
     lines.append(f"ACBS.TemplateFlags={template_flags}")
 
 
+#: FO3/FNV AIDT is 20 bytes: Mood at 4 pushes services to 8; TES4's is 12.
+_FALLOUT_AIDT_SIZE = 20
+
+
+def _emit_actor_aidt(lines: list, rec: Record):
+    """FO3/FNV AIDT, whose services and trainer fields sit four bytes later.
+
+    Offsets 0-3 are shared with TES4 and stay with the shared exporter; this
+    emits Mood (4) and everything after the padding it introduces.
+
+    See: docs/commentary/tes4_export_falloutnv.md#aidt-gained-a-mood-byte
+    """
+    aidt = get_subrecord(rec, "AIDT")
+    if not aidt or len(aidt.data) < _FALLOUT_AIDT_SIZE:
+        return
+    d = aidt.data
+    teaches, max_training, assistance = struct.unpack_from("<bBb", d, 12)
+    lines.append(f"AIDT.Mood={d[4]}")
+    lines.append(f"AIDT.Services={struct.unpack_from('<I', d, 8)[0]}")
+    lines.append(f"AIDT.Teaches={teaches}")
+    lines.append(f"AIDT.MaxTraining={max_training}")
+    lines.append(f"AIDT.Assistance={assistance}")
+    lines.append(f"AIDT.AggroRadiusBehavior={d[15]}")
+    lines.append(f"AIDT.AggroRadius={struct.unpack_from('<i', d, 16)[0]}")
+
+
 def _emit_actor_template(lines: list, rec: Record):
     """TPLT, the actor this record inherits its unowned categories from.
 
@@ -328,6 +355,7 @@ def _emit_crea_deltas(lines: list, rec: Record):
     with neither, so the shared exporter's >= 20 guard silently emits nothing.
     """
     _emit_actor_acbs(lines, rec)
+    _emit_actor_aidt(lines, rec)
     _emit_actor_template(lines, rec)
     data = get_subrecord(rec, "DATA")
     if not data or len(data.data) < 17:
@@ -340,8 +368,9 @@ def _emit_crea_deltas(lines: list, rec: Record):
 
 
 def _emit_npc_deltas(lines: list, rec: Record):
-    """FO3/FNV NPC_: the same shifted ACBS and template pointer as CREA."""
+    """FO3/FNV NPC_: the same shifted ACBS, AIDT and template pointer as CREA."""
     _emit_actor_acbs(lines, rec)
+    _emit_actor_aidt(lines, rec)
     _emit_actor_template(lines, rec)
 
 
@@ -487,7 +516,34 @@ def export_IMPACTSET(rec: Record) -> list:
     return lines
 
 
+def export_LEVELED_NPC(rec: Record) -> list:
+    """A FO3/FNV LVLN, which Skyrim carries as the same record type.
+
+    Structurally LVLI: chance-none, flags and an LVLO array whose entries are
+    Level(u16) pad(2) FormID(4) Count(s16), the count tail optional.
+
+    See: docs/commentary/tes4_export_falloutnv.md#lvln-is-a-native-type
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    emit_u8(lines, "LVLD.ChanceNone", get_subrecord(rec, "LVLD"))
+    emit_u8(lines, "LVLF.Flags", get_subrecord(rec, "LVLF"))
+    lvlos = get_all_subrecords(rec, "LVLO")
+    lines.append(f"EntryCount={len(lvlos)}")
+    for i, lvlo in enumerate(lvlos):
+        d = lvlo.data
+        if len(d) < 8:
+            continue
+        lines.append(f"Entry[{i}].Level={struct.unpack_from('<H', d, 0)[0]}")
+        lines.append(
+            f"Entry[{i}].FormID={get_formid_str(struct.unpack_from('<I', d, 4)[0])}")
+        count = struct.unpack_from('<h', d, 8)[0] if len(d) >= 10 else 1
+        lines.append(f"Entry[{i}].Count={count}")
+    return lines
+
+
 FALLOUT_BASE_EXPORTERS = {
+    "LVLN": export_LEVELED_NPC,
     "MESG": export_MESSAGE,
     "PROJ": export_PROJECTILE,
     "FLST": export_FORMLIST,

@@ -22,8 +22,8 @@ So the ban is enforced here rather than remembered. A new call site that joins
 a plugin name onto a root fails this test with the file and line, and the fix
 is always the same: call the resolver.
 
-If a genuinely new site needs an exception, add it to ALLOWED with a comment
-saying why the plain join is correct there.
+If a genuinely new site needs an exception, add it to ALLOWED mapped to a
+short reason saying why the plain join is correct there.
 """
 import ast
 import os
@@ -68,41 +68,46 @@ SKIP_DIRS = {'__pycache__', 'references', '.git', 'temp', 'external',
              'node_modules', 'navmesh_cache', 'build', 'dist', 'tests',
              'output', 'export', 'TESGameSelect'}
 
-# (file, symbol) pairs where joining a name onto a root IS correct.
+#: {(file, symbol): why the plain join is correct there}
 ALLOWED = {
-    # The resolvers themselves -- they ARE the fallback for a plugin with no
-    # registry entry, which is every game-Data plugin.
-    ('output_layout.py', 'plugin_out_root'),
-    ('output_layout.py', 'asset_root'),
-    ('output_layout.py', 'record_dir'),
-    ('asset_convert/sources/source_registry.py', 'asset_root'),
-    ('asset_convert/sources/source_registry.py', 'record_dir'),
-    ('asset_convert/sources/source_registry.py', 'source_dir'),
-    ('asset_convert/sources/source_registry.py', 'plugin_binary'),
-    ('asset_convert/lod/sibling_lod.py', 'record_dir'),
-    ('asset_convert/lod/sibling_lod.py', 'out_root'),
-    ('asset_convert/asset_pipeline.py', '_asset_root'),
-    ('asset_convert/asset_pipeline.py', 'record_dir'),
-    ('asset_convert/asset_pipeline.py', 'out_root'),
-    ('asset_convert/audio/audio_converter.py', '_asset_root'),
-    ('asset_convert/audio/audio_converter.py', 'out_root'),
-    ('asset_convert/ui/book_inam.py', 'record_dir'),
-    ('asset_convert/ui/book_inam.py', '_asset_root'),
-    ('asset_convert/ui/book_inam.py', 'out_root'),
-    ('asset_convert/sources/bsa_pack.py', 'out_root'),
-    ('asset_convert/lod/terrain_lod.py', '_master_record_dir'),
-    ('tes5_import/overrides.py', '_master_export_dir'),
-    ('tes5_import/master_manifest.py', '_master_export_dir'),
-    ('convert.py', 'record_dir'),
-    ('convert.py', 'plugin_out_root'),
-
-    # mod_ingest BUILDS the group folder, so it necessarily joins a name it
-    # computed itself onto the export root.
-    ('asset_convert/sources/mod_ingest.py', 'ingest'),
-    ('asset_convert/sources/mod_ingest.py', 'remove'),
-
-    # The migration tool's whole job is walking the OLD per-plugin folders.
-    ('tools/esm/migrate_group_layout.py', 'migrate'),
+    ('output_layout.py', 'plugin_out_root'): 'resolver',
+    ('output_layout.py', 'asset_root'): 'resolver',
+    ('output_layout.py', 'record_dir'): 'resolver',
+    ('asset_convert/sources/source_registry.py', 'asset_root'): 'resolver',
+    ('asset_convert/sources/source_registry.py', 'record_dir'): 'resolver',
+    ('asset_convert/sources/source_registry.py', 'source_dir'): 'resolver',
+    ('asset_convert/sources/source_registry.py', 'plugin_binary'): 'resolver',
+    ('asset_convert/lod/sibling_lod.py', 'record_dir'): 'resolver fallback',
+    ('asset_convert/lod/sibling_lod.py', '_out_root'): 'resolver fallback',
+    ('asset_convert/asset_pipeline.py', '_asset_root'): 'resolver fallback',
+    ('asset_convert/asset_pipeline.py', 'record_dir'): 'resolver fallback',
+    ('asset_convert/asset_pipeline.py', 'out_root'): 'resolver fallback',
+    ('asset_convert/audio/audio_converter.py', '_asset_root'): 'resolver fallback',
+    ('asset_convert/audio/audio_converter.py', 'out_root'): 'resolver fallback',
+    ('asset_convert/ui/book_inam.py', 'record_dir'): 'resolver fallback',
+    ('asset_convert/ui/book_inam.py', '_asset_root'): 'resolver fallback',
+    ('asset_convert/ui/book_inam.py', '_out_root'): 'resolver fallback',
+    ('asset_convert/sources/bsa_pack.py', '_out_root'): 'resolver fallback',
+    ('asset_convert/lod/terrain_lod.py', '_master_record_dir'): 'resolver fallback',
+    ('tes5_import/overrides.py', '_master_export_dir'): 'resolver fallback',
+    ('tes5_import/master_manifest.py', '_master_export_dir'): 'resolver fallback',
+    ('convert.py', 'record_dir'): 'resolver fallback',
+    ('convert.py', 'plugin_out_root'): 'resolver fallback',
+    ('asset_convert/sources/mod_ingest.py', 'ingest'): 'builds the group folder',
+    ('asset_convert/sources/mod_ingest.py', 'remove'): 'builds the group folder',
+    ('convert.py', '_write_base_plugins'): 'builds the group folder',
+    ('asset_convert/sources/mod_ingest.py', 'seed_from_export'):
+        'both sides are group folder names it was handed',
+    ('tools/esm/migrate_group_layout.py', 'migrate'):
+        'its job is walking the OLD per-plugin folders',
+    ('asset_convert/sources/base_plugins.py', 'export_dirs'):
+        'name came OUT of the root, so the folder exists',
+    ('tools/validate/objective_completion_audit.py', 'sweep'):
+        'name came OUT of the root, so the folder exists',
+    ('script_convert/pipeline.py', 'build_script_context'):
+        'root is already one plugin folder; name is a .psc filename',
+    ('tes4_export/export_morrowind.py', 'write_export'):
+        'root is already one plugin folder; name is a .txt filename',
 }
 
 
