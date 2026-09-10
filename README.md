@@ -206,6 +206,32 @@ If you'd like to use any modded Oblivion assets such as models or textures, firs
 
 **IMPORTANT NOTE** This project is still under rapid development and it's possible that Formids can change from underneath you. Updates WILL likely break your save file and you'll have to start anew
 
+
+### TESRuntime (SKSE plugin)
+
+`TESRuntime.dll` is the converter's own required SKSE plugin. It currently composes the animation cache singleton for converted creatures, so that multiple mods can edit it and add creatures as well as runs the fallout gun handling that Skyrim has no equivalent for. Its log is
+`Documents\My Games\Skyrim Special Edition\SKSE\TESRuntime.log`.
+See [tes_runtime/README.md](tes_runtime/README.md) for the details and for
+building it yourself.
+
+#### Changing the gun reload key
+
+The reload key defaults to **mouse button 4** and the iron-sight (zoom) key to
+**right mouse**. To change either, create
+`Data\SKSE\Plugins\TESRuntime\TESRuntime.ini` and give it a `[Guns]`
+section with the [virtual-key code](https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes)
+of the key you want, in decimal:
+
+```ini
+[Guns]
+ReloadKey=82
+ZoomKey=2
+```
+
+`82` is 0x52, so that example moves reload onto the **R** key and
+leaves zoom on right mouse. The file is read once at startup, so restart the
+game after editing it. Omit a key, or the file entirely, to keep the default.
+
 ---
 
 ## Command line
