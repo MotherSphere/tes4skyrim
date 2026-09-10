@@ -374,6 +374,68 @@ def _emit_npc_deltas(lines: list, rec: Record):
     _emit_actor_template(lines, rec)
 
 
+#: MGEF FormID -> EditorID, rebuilt per source file by export_falloutnv.
+MGEF_EDITOR_IDS = {}
+
+#: FO3/FNV EFIT is 20 bytes; TES4's is 24 and repeats the 4-char code first.
+_FALLOUT_EFIT_SIZE = 20
+
+#: TES4 effect-type enum, matching common.emit_effects.
+_EFFECT_TYPE_NAMES = {0: "Self", 1: "Touch", 2: "Target"}
+
+
+def _add_effect_subrecord(groups: list, sub):
+    """Attach one subrecord to the effect group it belongs to, by POSITION.
+
+    A CTDA guards the effect it FOLLOWS, which is how a FO3/FNV consumable
+    gates itself on hardcore mode; gathering per signature loses that pairing.
+    """
+    if sub.type == "EFID" and len(sub.data) >= 4:
+        groups.append([struct.unpack_from("<I", sub.data, 0)[0], b"", []])
+    elif not groups:
+        return
+    elif sub.type == "EFIT":
+        groups[-1][1] = sub.data
+    elif sub.type == "CTDA":
+        groups[-1][2].append(sub.data)
+
+
+def _emit_effect_deltas(lines: list, rec: Record):
+    """FO3/FNV effects: EFID as a FormID, the 20-byte EFIT, and per-effect CTDA.
+
+    The EFID resolves to its MGEF EditorID, which is what the import keys its
+    effect registry on; a raw FormID would match nothing there.
+
+    See: docs/commentary/tes4_export_falloutnv.md#effects-are-a-different-shape
+    """
+    groups = []
+    for sub in rec.subrecords:
+        _add_effect_subrecord(groups, sub)
+    if not groups:
+        return
+    lines.append(f"EffectCount={len(groups)}")
+    for i, (fid, efit, ctdas) in enumerate(groups):
+        pfx = f"Effect[{i}]"
+        lines.append(f"{pfx}.EFID={MGEF_EDITOR_IDS.get(fid, '')}")
+        if len(efit) >= _FALLOUT_EFIT_SIZE:
+            mag, area, dur, etype, av = struct.unpack_from("<IIIIi", efit, 0)
+            lines.append(f"{pfx}.Magnitude={mag}")
+            lines.append(f"{pfx}.Area={area}")
+            lines.append(f"{pfx}.Duration={dur}")
+            lines.append(f"{pfx}.Type={_EFFECT_TYPE_NAMES.get(etype, etype)}")
+            lines.append(f"{pfx}.ActorValue={av}")
+        lines.append(f"{pfx}.ConditionCount={len(ctdas)}")
+        for j, raw in enumerate(ctdas):
+            lines.append(f"{pfx}.Condition[{j}].Raw={raw.hex().upper()}")
+
+
+#: Effect lines the TES4 emit_effects writes from a layout FO3/FNV does not use.
+SUPERSEDED_EFFECT_KEYS = ("EffectCount=", "Effect[")
+
+#: Effect-bearing types FO3/FNV lays out differently; SGST is Oblivion-only.
+EFFECT_TYPES = frozenset({"SPEL", "ALCH", "ENCH", "INGR"})
+
+
 #: Per-type delta emitters, consulted by format_record only for FO3/FNV sources.
 _DELTA_DISPATCH = {
     "CELL": _emit_cell_deltas,
@@ -385,6 +447,10 @@ _DELTA_DISPATCH = {
     "WRLD": _emit_wrld_deltas,
     "CREA": _emit_crea_deltas,
     "NPC_": _emit_npc_deltas,
+    "SPEL": _emit_effect_deltas,
+    "ALCH": _emit_effect_deltas,
+    "ENCH": _emit_effect_deltas,
+    "INGR": _emit_effect_deltas,
 }
 
 #: Types carrying an OBND that TES4 has no field for; Skyrim reads it natively.

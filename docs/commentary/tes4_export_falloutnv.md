@@ -742,3 +742,45 @@ already builds that shape for Oblivion's placed-LVLC case in
 `tes5_import/leveled_actors.py` — an actor whose TPLT and Template Flags make
 it a pure indirection. An FNV stub is that record already, so carrying TPLT and
 `TemplateFlags` through is the whole conversion.
+
+## <a id="effects-are-a-different-shape"></a>Effects are a different shape, and carry conditions
+
+**Code:** `tes4_export/record_types/falloutnv.py` `_emit_effect_deltas`
+
+Both games write EFID/EFIT pairs, so `common.emit_effects` looked shared. It is
+not, and the mismatch was total: **all 1,312 FO3/FNV EFIT blocks were dropped**
+(ENCH 251, SPEL 446, ALCH 614, INGR 1), leaving every spell, enchantment and
+consumable with an effect count and no effects.
+
+Two independent differences, both fatal to the TES4 reader:
+
+| | EFID | EFIT |
+|---|---|---|
+| TES4 (measured, Nehrim) | 4-char code | **24 B**, repeating the code first |
+| FO3/FNV (measured) | **FormID** | **20 B**, no code prefix |
+
+`emit_effects` decodes EFID as ASCII and gates EFIT behind `len >= 24`, so on
+FO3/FNV the guard never passes and the EFID prints as mojibake. The FO3/FNV
+reader takes the 20-byte layout and resolves the FormID to its MGEF EditorID —
+which is what `tes5_import` keys `_code_to_fid` on, so the existing import path
+then works unchanged.
+
+### A CTDA belongs to the effect it follows
+
+FO3/FNV conditions an INDIVIDUAL effect; TES4 has no such field. **508 effect
+conditions** exist (ALCH 341, SPEL 85, ENCH 82), and the most common function by
+far is **586 `IsHardcore`, at 191 occurrences** — the switch a consumable uses to
+do nothing outside hardcore mode.
+
+Attribution is positional: the CTDAs after an EFIT belong to that effect, so the
+subrecords are walked in order. Gathering them per signature, as the other
+emitters do, cannot say which effect a condition guards.
+
+Dropping them is not neutral. `PreordVault13CanteenQuest` polls
+`If player.GetItemCount PreordVaultCanteen > 0 / ShowMessage / player.cios`
+with **no guard of its own** — `IsHardcore` on the cast spell is the only thing
+that makes it a no-op, so without the condition the sip message repeats forever.
+
+🛑 Skyrim has **no function 586** (580, 584, 589 are assigned; 586 is not), and
+`convert_ctda` passes unknown indices through. An FO3/FNV-only function must be
+resolved at import, never emitted.

@@ -12,9 +12,9 @@ See: docs/commentary/tes4_export_falloutnv.md#ltex-moved-its-texture-to-a-txst
 import struct
 
 from .record_types.common import escape_value
-from .record_types.falloutnv import (FALLOUT_BASE_EXPORTERS,
-                                     SUPERSEDED_ACTOR_KEYS,
-                                     export_deltas)
+from .record_types.falloutnv import (EFFECT_TYPES, FALLOUT_BASE_EXPORTERS,
+                                     MGEF_EDITOR_IDS, SUPERSEDED_ACTOR_KEYS,
+                                     SUPERSEDED_EFFECT_KEYS, export_deltas)
 from .tes4_reader import Record, get_string, get_subrecord, read_group_records
 
 #: TXST FormID -> its TX00 diffuse path, rebuilt per source file.
@@ -36,6 +36,8 @@ def superseded_keys(rec: Record) -> tuple:
     """KEY= prefixes format_record drops, this game re-emitting them itself."""
     if rec.type in ("CREA", "NPC_"):
         return SUPERSEDED_ACTOR_KEYS
+    if rec.type in EFFECT_TYPES:
+        return SUPERSEDED_EFFECT_KEYS
     return ()
 
 
@@ -54,7 +56,9 @@ def prepare_source(mm, size: int, hdr_size: int, source_path: str) -> None:
     """Index this file's TXST records once per process, from its own mmap.
 
     Export workers are spawned with no initializer and never receive the
-    parent's globals, so each builds the index itself.
+    parent's globals, so each builds the index itself.  MGEF is indexed here
+    too: an FO3/FNV effect names its MGEF by FormID, and the import keys its
+    effect registry on the EditorID.
     """
     if _INDEXED_SOURCE[0] == source_path:
         return
@@ -63,6 +67,11 @@ def prepare_source(mm, size: int, hdr_size: int, source_path: str) -> None:
         tx00 = get_subrecord(rec, 'TX00')
         if tx00:
             _TEXTURE_SETS[rec.form_id] = get_string(tx00)
+    MGEF_EDITOR_IDS.clear()
+    for rec in read_group_records(mm, size, hdr_size, b'MGEF'):
+        edid = get_subrecord(rec, 'EDID')
+        if edid:
+            MGEF_EDITOR_IDS[rec.form_id] = get_string(edid)
     _INDEXED_SOURCE[0] = source_path
 
 
