@@ -199,6 +199,117 @@ every existing code path keeps working unchanged.
 A converted gun reloads with the crossbow's crank animation. Skyrim has no
 other ranged reload, and this is cosmetic — the weapon fires correctly.
 
+### <a id="ammo-is-a-bolt"></a>Ammo: rounds are bolts
+
+**Code:** `tes4_export/record_types/falloutnv.py` (`_emit_ammo_deltas`),
+`tes5_import/record_types/equipment_falloutnv.py` (`ammo_flags`).
+
+The FO3/FNV `AMMO.DATA` is 13 bytes (speed f32, flags u8 + 3 unused, value
+s32, clip rounds u8) and the weight moved to `DAT2` (+8, after projectiles
+per shot and the projectile form), so the shared exporter's `>= 18` byte
+guard dumped nothing: all 92 FalloutNV AMMO records exported with no DATA at
+all. The FNV flags share only bit 0 (Ignores Normal Weapon Resistance) with
+TES4; bit 1 is Non-Playable.
+
+The importer sets Non-Bolt (0x04) on every TES4 arrow, and a crossbow-type
+WEAP can only load bolts, so a converted gun could never equip its rounds
+and `arrowRelease` had nothing to spend. A Fallout-sourced AMMO leaves that
+bit clear.
+
+### <a id="projectiles"></a>Projectiles and the gun's fire fields
+
+**Code:** `tes4_export/record_types/falloutnv.py` (`_emit_weap_fire`,
+`_emit_proj_deltas`), `tes5_import/record_types/projectile_falloutnv.py`.
+
+FO3/FNV keep the shot on three records TES4 never had. `PROJ` (95 in
+FalloutNV.esm) is the bullet itself: an 84-byte `DATA` (flags u16, type u16,
+gravity, speed, range, light, muzzle-flash light, tracer chance, two
+alt-trigger floats, explosion, sound, muzzle-flash duration, fade, impact
+force, countdown/disable sounds, default weapon, rotation vec3, bouncy
+mult), the muzzle-flash model `NAM1` and the sound level `VNAM`. The gun's
+`DNAM` names its projectile at +36 (`DNAM.Projectile`), the rounds a shot
+spends at +14, the projectile count at +42, and its rate fields at +60
+(`AnimAttackMult`), +64 (`FireRate`) and +88 (`ShotsPerSec`); its sounds
+are `SNAM` (shoot 3D, the first of two), `XNAM` (2D), `NAM7` (loop),
+`TNAM` (dry fire), `UNAM` (idle), `NAM9`/`NAM8` (equip/unequip); `NAM0` is
+the ammo and `WNAM` the first-person model STAT. The AMMO's own
+`DAT2.Projectile` is usually null (Ammo9mm: 0), the gun's is not.
+
+<a id="formlists"></a>**`NAM0` is a FormList, not an AMMO.** The 9mm's
+`NAM0` is `AmmoList9mm` (FLST 001537E7: the round plus its two hand-load
+variants), and FLST was an unexported type, so the first version of the
+ammo index keyed 48 list ids that no AMMO ever matched and every round fell
+back to the arrow: the casing model, the 3,600 units/s flight and the
+arrow bounce were all the fallback. `export_FORMLIST` now dumps every FLST
+as `LNAM[i]` FormIDs and the index expands a `NAM0` that names a list to
+its members.
+
+Before this the importer synthesized one arrow PROJ per AMMO from the
+ammo's inventory model, so a 9mm shot was a flying brass casing that
+whooshed like an arrow at 3,600 units/s. Now each FNV PROJ converts to a
+TES5 PROJ with its FNV type and flags kept verbatim (the low bits agree in
+both games: 1 Missile, 2 Lobber, 4 Beam, 8 Flame; Hitscan 0x01, Muzzle
+Flash 0x08, Supersonic 0x80; FNV's Continuous Beam 0x10 becomes Beam),
+so a bullet is a Missile, which the CK documents as consumed on contact
+where an Arrow sticks or bounces, and carries the FNV model, gravity,
+speed, range, impact force, light and sound. No vanilla Skyrim PROJ sets
+Hitscan (census of 141: none), but the Skyrim CK still documents the flag
+as "immediately impacts its target", so the bullets keep it. The AMMO's
+TES5 projectile is its own `DAT2` projectile when set, else the projectile
+the guns firing that ammo name most often (both the plugin's and its
+masters' WEAPs), else the arrow fallback. The gun's shoot/dry-fire/idle
+sounds go to the TES5 `SNAM`, `XNAM`, `NAM7`, `TNAM`, `UNAM` through the
+SOUN's companion SNDR id.
+
+<a id="no-muzzle-flash-light"></a>**No muzzle-flash light on a converted
+PROJ.** Keeping FNV's Muzzle Flash flag with its `MuzzleFlashLight`
+(LIGH `MuzzleFlashOrange352`) crashed on the first shot: crash log
+2026-09-09 00:35, `SkyrimSE.exe+026F089` = id 17610+0x439 (the point-light
+creation, `mov ecx,[rsi+0x10]` with rsi = the reference argument = 0).
+The caller (id 44056+0x25B, the projectile's muzzle flash) passes a null
+reference by construction (`xor edx,edx` before the call), and the light
+routine's null-reference path dereferences it anyway. The six vanilla
+PROJs with a muzzle-flash light are all Cone/Flame spell projectiles, cast
+with a caster reference; no weapon-launched Missile or Arrow has one. The
+converter keeps the flag and the `NAM1` flash model and writes light 0.
+
+<a id="nocked-model"></a>**The AMMO's model is its box; nothing is
+attached to the actor.** Skyrim attaches the AMMO's `MODL` to the hand at
+`arrowAttach` and to the actor's `QUIVER` node while equipped, and shows
+it in the inventory viewer and on the ground. A gun clip never raises
+`arrowAttach`, so the earlier bullet-model substitution (a carton at the
+hand for 30 ms) is moot and the FNV box model (`ammo\9mmammo.nif`) is
+kept for the inventory and the world; the flying round is the PROJ's own
+model. The quiver attachment (which sat at a gun holder's feet) is
+culled by TESRuntime on every gun draw and ammo equip, and restored on a
+non-gun draw (docs/commentary/tes_runtime_guns.md#quiver).
+
+### <a id="impacts"></a>Impacts: the gun's own IPDS, not the arrow's
+
+**Code:** `tes4_export/record_types/falloutnv.py` (`export_IMPACT`,
+`export_IMPACTSET`), `tes5_import/record_types/impact_falloutnv.py`.
+
+A FNV gun names its impact data set on `INAM` (the 9mm: 00019083
+`BallisticImpactDataSet`) exactly as a Skyrim WEAP does, but IPDS and
+IPCT were unexported, so the converted WEAP kept the crossbow template's
+`WPNzArrowImpactSet`: every bullet hit thudded and sparked like a bolt.
+FNV's IPDS `DATA` is twelve IPCT ids in a fixed material order (stone,
+dirt, grass, glass, metal, wood, organic, cloth, water, hollow metal,
+organic bug, organic glow); Skyrim's is a list of `PNAM` (MATT, IPCT)
+pairs, so each slot maps to the vanilla material it names (`MaterialStone`,
+`MaterialDirt`, `MaterialGrass`, `MaterialGlass`, `MaterialSolidMetal`,
+`MaterialWoodHeavy`, `MaterialSkin`, `MaterialCloth`, `MaterialWater`,
+`MaterialHeavyMetal`, `MaterialInsect`, `MaterialOrganicLarge`) plus the
+near relatives vanilla's arrow set also lists (gravel, heavy and broken
+stone, light wood, light and chain metal, light armor) pointed at the same
+slots. FNV's IPCT `DATA` (24 bytes: duration, orientation, angle
+threshold, placement radius, sound level, flags u32) is byte-compatible
+with TES5's (flags u8, impact result u8, 2 pad), so it copies through with
+result Default; the model and both SOUN links (as SNDRs) carry over. FNV's
+decal texture sets are TXST records the pipeline does not convert, so the
+IPCT drops `DODT`/`DNAM` and sets No Decal Data: sound, impact effect and
+material response are the gun's, the bullet hole is not yet.
+
 ## Navmesh: authored, not generated
 
 **Code:** `tes4_export/record_types/falloutnv.py` (`_emit_navm_deltas`,
@@ -508,60 +619,6 @@ ethnicity; it needs `HeadGhoul.NIF` registered as a `head_fit.py` race pack.
 Child likewise: FNV children are a 0.8-scale variant with `DATA.Flags` bit 2 and
 child head/body meshes, and Skyrim's child races carry their own skeleton and
 armor-race handling.
-
-## <a id="humanoid-races"></a>Humanoid races map onto Skyrim playable races
-
-**Code:** 
-
-FNV ships 22 RACE records and shares no FormID with Oblivion, so
- missed on every one and all 3,816 FalloutNV.esm NPCs
-resolved to a single race. Two paths produced that: FNV  is
-, which Oblivion's table already spends on ,
-so 1,815 actors hit it by collision; the other 2,001 fell to
- (Nord). The collision is why FNV needs its own dict rather than
-extra entries in the Oblivion one.
-
-The miss also silently emptied every downstream race-keyed table:  was
-written 0 times, and  returned 2 head parts for all 3,816
-actors. Hair was unaffected --  keys on the source FormID, so
-2,767 converted FNV hairstyles resolved correctly throughout.
-
-Measured population (, 3,816 NPCs):
-
-| Race | NPCs | Race | NPCs |
-|---|---:|---|---:|
-| Caucasian | 1,815 | Ghoul | 55 |
-| AfricanAmerican | 509 | Old (4 races) | 145 |
-| Hispanic | 412 | OldAged (4 races) | 31 |
-| Asian | 274 | Child (4 races) | 37 |
-| Raider (4 races) | 538 | | |
-
-The four ethnicities plus their Raider variants are 3,548 of 3,816 (93%).
-
-Ethnicity choice is by skin tone, the only axis Skyrim races vary on that FNV
-also authors ( in ): Nord (234,162,145)
-is the lightest human race, Redguard (118,60,35) by far the darkest, Imperial
-(186,120,80) the mid-brown between. Skyrim has no Asian race; Breton
-(224,164,120) is chosen to keep four ethnicities on four distinct tints rather
-than collapsing Asian and Hispanic onto Imperial together (686 actors).
-
-Skyrim's human races differ in tint and head texture, not bone geometry, so
-this restores variety and tone, not facial structure. Only converted FNV head
-meshes would do that, and FNV  does not decode yet (exported as
-, 61 records, sizes only).
-
-Raider/Old/OldAged resolve to their base ethnicity: they differ from it by
-texture paths and FaceGen coefficients, not skeleton or head structure, and the
-per-actor face already rides on  -> , which needs no race
-table (3,027 FNV actors already carried non-neutral morphs before this change).
-
-Ghoul is deliberately left unmapped -- it falls through to the Oblivion default.
-Aliasing it to a human race makes ghouls look human, which is worse than a wrong
-ethnicity; it needs  registered as a  race pack.
-Child likewise: FNV children are a 0.8-scale variant with  bit 2 and
-child head/body meshes, and Skyrim's child races carry their own skeleton and
-armor-race handling.
-
 
 ## <a id="voice-files"></a>Voice files: no gender level, Ogg Vorbis
 

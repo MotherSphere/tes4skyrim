@@ -3,7 +3,8 @@
 The DLL is not a plugin asset: one copy serves every converted mod, so it
 ships alone rather than beside any plugin's meshes. Each converted mod
 contributes only its own data — the animation cache fragment under
-SKSE/Plugins/TESRuntime/animation — which this DLL reads at load.
+SKSE/Plugins/TESRuntime/animation and, for FO3/FNV, the bodyparts/guns
+sidecars under SKSE/Plugins/TESRuntime — which this DLL reads at load.
 
 The archive mirrors what `convert.py --pack-zip-only` produces — output/
 Finished Mods/<name>.zip, contents rooted as a Data folder — so a user

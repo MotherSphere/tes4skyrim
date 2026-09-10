@@ -88,6 +88,7 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [tes5_import_quest.md](commentary/tes5_import_quest.md) | tes5_import/object_scripts.py - quests and quest scripts |
 | [tes5_import_sound.md](commentary/tes5_import_sound.md) | tes5_import/record_types/sound.py - SOUN, SNDR and SOPM |
 | [tes5_import_weather.md](commentary/tes5_import_weather.md) | tes5_import/record_types/world.py - weather and climate |
+| [tes_runtime_guns.md](commentary/tes_runtime_guns.md) | tes_runtime/plugin/fire.cpp - the gun shot, reload key and ammo restriction in the SKSE plugin |
 | [version_upgrade_planning.md](commentary/version_upgrade_planning.md) | version.py - which steps a new release owes |
 
 ## `plans/`

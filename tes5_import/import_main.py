@@ -37,6 +37,7 @@ from .dialog_converter import (
     build_npc_to_vtyp_map,
 )
 from .quest_converter import compute_quest_priorities, convert_QUST
+from .record_types.bodypart_falloutnv import write_falloutnv_sidecars
 from .record_types.sound import convert_SOUN
 from .synth_records import (
     WELL_KNOWN_PROPERTIES,
@@ -1276,17 +1277,14 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     # HAIR side-emits one HDPT per extra hair length its NPCs wear (Skyrim has
     # no per-NPC hair-length field, so NPC_.LNAM is baked per variant).
     _WRITER_TYPES = {'ARMO', 'CLOT', 'WEAP', 'AMMO', 'NPC_', 'CREA', 'BOOK',
-                     'ENCH', 'SPEL', 'SGST', 'HAIR'}
+                     'ENCH', 'SPEL', 'SGST', 'HAIR', 'PROJ', 'IPCT', 'IPDS'}
 
     converted = 0
     errors = 0
 
-    # Build work items: list of (sig, target_sig, rec) tuples
-    work_items = []
-    for sig in sorted(simple_types):
-        target_sig = TYPE_MAP.get(sig, sig)
-        for rec in by_type[sig]:
-            work_items.append((sig, target_sig, rec))
+    work_items = [(sig, TYPE_MAP.get(sig, sig), rec)
+                  for sig in sorted(simple_types)
+                  for rec in by_type[sig]]
 
     from .record_types.weather import record_sunless_climate, reset_sunless_climates
     reset_sunless_climates()
@@ -1352,6 +1350,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
             edid = get_str(rec, 'EditorID', '?')
             print(f"  ERROR converting {sig} '{edid}': {e}")
             errors += 1
+    write_falloutnv_sidecars(by_type, writer, output_path)
     _phase_done(f'phase 1 simple records ({len(work_items)})')
 
     # --- Phase 2: LTEX (creates TXST companion records) ---

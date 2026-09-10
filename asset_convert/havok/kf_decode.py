@@ -493,66 +493,60 @@ def _decode_sequence(seq, fps: float) -> DecodedClip:
     return clip
 
 
+#: Accum-bone spans below these are no motion: game units, radians of yaw.
+MIN_ROOT_DISPLACEMENT, MIN_ROOT_ROTATION = 0.5, 0.02
+
+
+def _trans_span(tr) -> float:
+    """Extent of a track's translation box, 0 without translations."""
+    if tr.translations is None:
+        return 0.0
+    return float(np.linalg.norm(
+        tr.translations.max(axis=0) - tr.translations.min(axis=0)))
+
+
+def _rot_span(tr) -> float:
+    """Largest angle between a track's first and any later orientation."""
+    if tr.rotations is None:
+        return 0.0
+    dots = np.clip(np.abs(tr.rotations @ tr.rotations[0]), -1.0, 1.0)
+    return float((2 * np.arccos(dots)).max())
+
+
 def split_root_motion(clip: DecodedClip,
                       accum_bones=('Bip01 NonAccum', 'Bip01',
-                                   'Bip02 NonAccum', 'Bip02')) -> Optional[dict]:
-    """Extract root motion from the accumulation bone and make it in-place.
+                                   'Bip02 NonAccum', 'Bip02'),
+                      flatten_to_first: bool = False) -> Optional[dict]:
+    """Extract root motion from the accum bone (`Bip01` or NonAccum) in place.
 
-    Oblivion accumulates locomotion on the sequence accum root — usually
-    `Bip01` itself (dog forward.kf: Bip01 y 0→74.6 while NonAccum is static),
-    sometimes `Bip01 NonAccum`. Skyrim clips are in-place with motion delivered
-    via animationdata (boundanims). Picks the candidate track with the largest
-    actual displacement. Returns {'bone', 'times', 'translations',
-    'rotations'} with motion RELATIVE to the first sample, or None when no
-    candidate moves more than `min_displacement`. The chosen track is
-    flattened to its first-sample transform in place.
+    Returns {'bone', 'times', 'translations', 'rotations'} RELATIVE to the
+    first sample of the candidate that moves most, or None when none moves.
+    The track's translation is flattened to its first sample; its rotation
+    to identity, or to the first sample when `flatten_to_first`.
+    See: docs/commentary/asset_convert_falloutnv.md#accum-root-identity
     """
-    min_displacement = 0.5   # game units; below this = no linear motion
-    min_rotation = 0.02      # radians of root yaw; below this = no turning
-
-    def _trans_span(tr):
-        if tr.translations is None:
-            return 0.0
-        return float(np.linalg.norm(
-            tr.translations.max(axis=0) - tr.translations.min(axis=0)))
-
-    def _rot_span(tr):
-        if tr.rotations is None:
-            return 0.0
-        # angle between first and each subsequent orientation
-        q0 = tr.rotations[0]
-        dots = np.clip(np.abs(tr.rotations @ q0), -1.0, 1.0)
-        return float((2 * np.arccos(dots)).max())
-
-    best = None
-    best_score = 0.0
-    for tr in clip.tracks:
-        if tr.bone in accum_bones:
-            score = _trans_span(tr) + _rot_span(tr) * 50.0
-            if score > best_score:
-                best_score = score
-                best = tr
-
-    if best is None:
+    candidates = [tr for tr in clip.tracks if tr.bone in accum_bones]
+    if not candidates:
         return None
-    has_trans = _trans_span(best) >= min_displacement
-    has_rot = _rot_span(best) >= min_rotation
+    best = max(candidates, key=lambda tr: _trans_span(tr) + _rot_span(tr) * 50.0)
+    has_trans = _trans_span(best) >= MIN_ROOT_DISPLACEMENT
+    has_rot = _rot_span(best) >= MIN_ROOT_ROTATION
     if not has_trans and not has_rot:
         return None
 
+    n = len(clip.times)
     motion = {'bone': best.bone, 'times': clip.times.copy(),
               'translations': None, 'rotations': None}
     if has_trans:
         motion['translations'] = best.translations - best.translations[0]
-        best.translations = np.tile(best.translations[0],
-                                    (len(clip.times), 1))
+        best.translations = np.tile(best.translations[0], (n, 1))
     if has_rot:
-        # rotation relative to the first sample: q_rel = conj(q0) * q_t
         q0 = best.rotations[0]
         conj = np.array([q0[0], -q0[1], -q0[2], -q0[3]])
         motion['rotations'] = np.array(
             [_quat_mul(conj, q) for q in best.rotations])
-    best.rotations = np.tile(IDENTITY_QUAT, (len(clip.times), 1))
+    flat = best.rotations[0] if flatten_to_first else IDENTITY_QUAT
+    best.rotations = np.tile(flat, (n, 1))
     return motion
 
 

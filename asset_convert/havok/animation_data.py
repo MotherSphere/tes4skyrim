@@ -276,12 +276,14 @@ def fragment_path(plugin_out_dir: str, plugin_name: str) -> str:
 
 
 def write_fragment(manifests: list, out_meshes_dir: str,
-                   plugin_name: str, plugin_out_dir: str = None) -> str:
+                   plugin_name: str, appends: dict = None,
+                   plugin_out_dir: str = None) -> str:
     """Write the plugin's fragment from its OWN project manifests.
 
     Goes in `plugin_out_dir`'s SKSE/Plugins/TESRuntime/animation (defaulting
     to the parent of `out_meshes_dir`). Entries are ordered by project name
-    so composition is deterministic. Returns the fragment path.
+    so composition is deterministic; `appends` carries the entries that
+    extend a VANILLA project. Returns the fragment path.
     See: docs/reference/tes_runtime_fragments.md#the-runtime-composer
     """
     manifests = sorted(manifests, key=lambda m: m['project_txt'].lower())
@@ -294,6 +296,7 @@ def write_fragment(manifests: list, out_meshes_dir: str,
             'source': os.path.basename(plugin_name),
             'animdata': animdata,
             'animsetdata': animsetdata}
+    frag.update(appends or {})
     root = plugin_out_dir or os.path.dirname(os.path.normpath(out_meshes_dir))
     path = fragment_path(root, plugin_name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -364,11 +367,34 @@ def _wrapped(block: list) -> list:
     return [str(len(block))] + list(block)
 
 
+def _project_block_spans(names: list, body: list) -> dict:
+    """{project name lower: (start, end)} of each project's wrapped blocks.
+
+    A project's span covers its clip wrapper and, when the has-clip-data
+    flag is set, its motion wrapper.
+    """
+    spans, pos = {}, 0
+    for name in names:
+        start = pos
+        count = int(body[pos])
+        flag_at = pos + 2
+        if body[pos + 1] == '1':
+            flag_at += 1 + int(body[pos + 2])
+        has_cache = flag_at < pos + 1 + count and body[flag_at] == '1'
+        pos += 1 + count
+        if has_cache:
+            pos += 1 + int(body[pos])
+        spans[name.lower()] = (start, pos)
+    return spans
+
+
 def compose_animationdata(base_lines: list, fragments: list) -> list:
     """Base singlefile + every fragment's `animdata` entries appended.
 
     A project the base already registers is skipped: one extra name with no
-    matching data block desyncs the whole database.
+    matching data block desyncs the whole database. `animdata_append`
+    entries add clip and motion blocks to an EXISTING project (the humanoid
+    gun clips ride on the vanilla defaultmale project).
     """
     names, body = _split_registry(base_lines)
     have = {x.lower() for x in names}
@@ -382,12 +408,44 @@ def compose_animationdata(base_lines: list, fragments: list) -> list:
             new_body += _wrapped(e['clip_block'])
             if e.get('motion_block') is not None:
                 new_body += _wrapped(e['motion_block'])
+    appends = [e for frag in fragments
+               for e in frag.get('animdata_append', [])]
+    if appends:
+        body = _append_animdata(names, body, appends)
     return [str(len(names) + len(new_names))] + names + new_names \
         + body + new_body
 
 
+def _append_animdata(names: list, body: list, appends: list) -> list:
+    """Splice appended clip/motion lines into their existing project blocks."""
+    spans = _project_block_spans(names, body)
+    out = list(body)
+    for e in sorted(appends, key=lambda a: spans.get(a['project'].lower(),
+                                                     (0, 0))[0],
+                    reverse=True):
+        span = spans.get(e['project'].lower())
+        if not span:
+            continue
+        start, end = span
+        clip_count = int(out[start])
+        clip_end = start + 1 + clip_count
+        motion = list(e.get('motions') or [])
+        clips = list(e.get('clips') or [])
+        if clip_end < end and motion:
+            m_count = int(out[clip_end])
+            out[clip_end] = str(m_count + len(motion))
+            out[end:end] = motion
+        out[clip_end:clip_end] = clips
+        out[start] = str(clip_count + len(clips))
+    return out
+
+
 def compose_animationsetdata(base_lines: list, fragments: list) -> list:
-    """Base setdata singlefile + every fragment's `animsetdata` entries."""
+    """Base setdata singlefile + every fragment's `animsetdata` entries.
+
+    `animsetdata_append` entries add one set file (name + V3 block) to an
+    EXISTING project's section.
+    """
     names, body = _split_registry(base_lines)
     have = {x.lower() for x in names}
     new_names, new_body = [], []
@@ -398,8 +456,62 @@ def compose_animationsetdata(base_lines: list, fragments: list) -> list:
             have.add(e['entry'].lower())
             new_names.append(e['entry'])
             new_body += list(e['block'])
+    appends = [e for frag in fragments
+               for e in frag.get('animsetdata_append', [])]
+    if appends:
+        body = _append_animsetdata(names, body, appends)
     return [str(len(names) + len(new_names))] + names + new_names \
         + body + new_body
+
+
+def _v3_block_end(body: list, pos: int) -> int:
+    """Index just past the V3 block starting at `pos` (set-file grammar).
+
+    Walks it in order: the 'V3' tag, swap events, hand variables (3 lines
+    each), then per attack an event + mirrored flag and its clip names, and
+    finally the crc triples.
+    """
+    pos += 1
+    pos += 1 + int(body[pos])
+    pos += 1 + 3 * int(body[pos])
+    n_attacks = int(body[pos])
+    pos += 1
+    for _ in range(n_attacks):
+        pos += 2
+        pos += 1 + int(body[pos])
+    pos += 1 + 3 * int(body[pos])
+    return pos
+
+
+def _setdata_spans(names: list, body: list) -> dict:
+    """{entry lower: (start, names_end, end)} of each project's section."""
+    spans, pos = {}, 0
+    for name in names:
+        start = pos
+        n_sets = int(body[pos])
+        pos += 1 + n_sets
+        names_end = pos
+        for _ in range(n_sets):
+            pos = _v3_block_end(body, pos)
+        spans[name.lower()] = (start, names_end, pos)
+    return spans
+
+
+def _append_animsetdata(names: list, body: list, appends: list) -> list:
+    """Splice appended set files into their existing project sections."""
+    spans = _setdata_spans(names, body)
+    out = list(body)
+    for e in sorted(appends, key=lambda a: spans.get(a['entry'].lower(),
+                                                     (0, 0, 0))[0],
+                    reverse=True):
+        span = spans.get(e['entry'].lower())
+        if not span:
+            continue
+        start, names_end, end = span
+        out[end:end] = list(e['block'])
+        out[names_end:names_end] = [e['set_file']]
+        out[start] = str(int(out[start]) + 1)
+    return out
 
 
 def compose_singlefiles(base: dict, fragments: list) -> dict:

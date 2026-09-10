@@ -29,48 +29,24 @@ from external.pynifly_hkx.anim_fo4 import (Annotation,
 from external.pynifly_hkx.anim_skyrim import (
     load_skyrim_animation)
 
-from asset_convert.havok.kf_decode import (DecodedClip, decode_kf,
-                                     split_root_motion)
+from asset_convert.havok.hkx_skeleton import BONE_RENAMES
+from asset_convert.havok.kf_decode import (BoneTrack, DecodedClip, decode_kf,
+                                           split_root_motion)
 
 
-def clip_to_animation_data(clip: DecodedClip, bone_names: list,
-                           reference_pose=None,
-                           annotations=None) -> AnimationData:
-    """Build a pynifly AnimationData with one track per skeleton bone.
+def _merged_tracks(clip: DecodedClip, bone_names: list) -> dict:
+    """{skeleton bone: merged BoneTrack copy} for the clip's tracks.
 
-    bone_names: skeleton bone order (from hkx_skeleton.load_skeleton_bones).
-    reference_pose: optional {bone: (trans(3), quat_wxyz(4), scale)} used for
-    bones the clip does not animate; defaults to identity (the engine blends
-    against the skeleton reference pose anyway, but vanilla files carry real
-    values, so pass the skeleton pose when available).
-    annotations: [(time, text)] SKYRIM events to embed in the animation —
-    this is the channel the engine actually dispatches at runtime (vanilla:
-    58/74 wolf animations carry SoundPlay.<SNDR>/FootFront/FootBack/HitFrame
-    annotations inside the .hkx). Oblivion's raw text keys ('Sound: X',
-    'Enum: Left') mean nothing to Skyrim and are NOT carried over — translate
-    them first (parse_kf_events/event_annotations); embedding them verbatim
-    was exactly what left every converted creature silent.
+    A track already named for a skeleton bone keeps its name; any other is
+    an Oblivion name and goes through BONE_RENAMES. Tracks targeting one
+    bone merge channel-wise (a NiVisController scale beside a transform),
+    into copies, so the caller's clip is untouched.
+    See: docs/commentary/asset_convert_falloutnv.md#weapon-track-rename
     """
-    n_frames = len(clip.times)
-    # KF tracks carry Oblivion bone names; the skeleton bone list has the
-    # engine-contract root rename applied (Bip01 -> 'NPC Root [Root]').
-    from asset_convert.havok.hkx_skeleton import BONE_RENAMES
-    # MERGE tracks that target the same bone -- never overwrite.  One
-    # sequence can drive a node from several controlled blocks, and the
-    # channels are disjoint: Oblivion's ghost death.kf gives
-    # AttachmentsShrink and AttachmentsBip a NiTransformController
-    # (translation/rotation) AND a NiVisController, which kf_decode
-    # converts to a SCALE channel.  A dict comprehension keeps only the
-    # last block per bone, which dropped the visibility scale on exactly
-    # the two bones that reveal the ectoplasm (the shrink blob never
-    # appeared and the body never hid).
-    # Merged COPIES, never in-place mutation: a decoded clip can be
-    # written more than once (cast splits reuse one decode), so the
-    # caller's tracks must come back out untouched.
-    from asset_convert.havok.kf_decode import BoneTrack
+    known = set(bone_names)
     track_map = {}
     for t in clip.tracks:
-        name = BONE_RENAMES.get(t.bone, t.bone)
+        name = t.bone if t.bone in known else BONE_RENAMES.get(t.bone, t.bone)
         prev = track_map.get(name)
         if prev is None:
             track_map[name] = BoneTrack(
@@ -80,7 +56,23 @@ def clip_to_animation_data(clip: DecodedClip, bone_names: list,
         for chan in ('translations', 'rotations', 'scales'):
             if getattr(prev, chan) is None and getattr(t, chan) is not None:
                 setattr(prev, chan, getattr(t, chan))
+    return track_map
 
+
+def clip_to_animation_data(clip: DecodedClip, bone_names: list,
+                           reference_pose=None,
+                           annotations=None) -> AnimationData:
+    """Build a pynifly AnimationData with one track per skeleton bone.
+
+    bone_names: skeleton bone order (from hkx_skeleton.load_skeleton_bones).
+    reference_pose: optional {bone: (trans(3), quat_wxyz(4), scale)} for
+    bones the clip does not animate; defaults to identity.
+    annotations: [(time, text)] SKYRIM events embedded in the animation,
+    the channel the engine dispatches at runtime; translate Oblivion text
+    keys first (parse_kf_events/event_annotations).
+    """
+    n_frames = len(clip.times)
+    track_map = _merged_tracks(clip, bone_names)
     anim = AnimationData()
     anim.duration = float(clip.duration)
     anim.num_frames = n_frames
@@ -313,13 +305,18 @@ def build_animation_xml(anim: 'AnimationData', skeleton_root: str) -> str:
 
 
 def decode_clip(ob_kf_path: str, fps: float = 30.0,
-                extract_motion: bool = True):
-    """Decode an Oblivion .kf. Returns (DecodedClip, motion_or_None)."""
+                extract_motion: bool = True, flatten_to_first: bool = False):
+    """Decode an Oblivion .kf. Returns (DecodedClip, motion_or_None).
+
+    `flatten_to_first` is `split_root_motion`'s: the accum bone keeps its
+    first-sample rotation instead of identity.
+    """
     clips = decode_kf(ob_kf_path, fps)
     if not clips:
         raise ValueError(f'no NiControllerSequence in {ob_kf_path}')
     clip = clips[0]
-    motion = split_root_motion(clip) if extract_motion else None
+    motion = (split_root_motion(clip, flatten_to_first=flatten_to_first)
+              if extract_motion else None)
     return clip, motion
 
 

@@ -70,7 +70,8 @@ from asset_convert.nif.nif_passes import (add_animobject_bged, wrap_root_transfo
                                           convert_sound_text_keys,
                                           fix_controller_flags,
                                           resolve_palette_strings,
-                                          strip_empty_text_keys)
+                                          strip_empty_text_keys,
+    zero_fallout_root_rotation)
 from asset_convert.nif.morphs import (emulate_morphs,
                                       normalize_blend_interpolators)
 from asset_convert.nif.sequences import (apply_rest_visibility,
@@ -86,6 +87,7 @@ from asset_convert.havok.hkx_skeleton import BONE_RENAMES
 from asset_convert.character import wearable_plan as wp
 from asset_convert.character.body_wrap import morph_converted_to_weight1
 from asset_convert.havok.hkx_animobject import generate_animobject_project
+from asset_convert.nif.gun_parts_falloutnv import add_gun_part_sequences
 from asset_convert.nif.particles import (convert_particle_system,
                                         skyrimize_billboard,
                                         wrap_in_billboard)
@@ -1021,6 +1023,7 @@ def _convert_one_root(data, i, root, stats, fix_textures, src_path, creature,
     """
     root = _wrap_geometry_root(data, i, root, stats)
     root = _normalise_billboard_root(data, i, root)
+    zero_fallout_root_rotation(root)
 
     is_sky = stats.get('_sky_type') is not None
     if type(root).__name__ == 'NiNode' and not is_worn_armor and not is_sky:
@@ -1247,7 +1250,7 @@ def _authored_wear(src_path, src_meshes_dir, wearable_plan, creature, hair):
     """
     plan = (wearable_plan if src_meshes_dir is not None and not creature
             and not hair else None)
-    wp.latch_female(plan, src_path, src_meshes_dir)
+    wp.latch_variants(plan, src_path, src_meshes_dir)
     if plan is None:
         return bool(hair), 0x02 if hair else 0
     return (wp.is_worn(plan, src_path, src_meshes_dir),
@@ -1405,7 +1408,8 @@ def _build_animobject_graph(data, stats, result, dst_path):
     """Give an animated object the behaviour graph PlayAnimation needs.
 
     Runs AFTER the conversion so stripped sequences cannot become dead states,
-    and before the write so the BGED ships in the file.
+    and before the write so the BGED ships in the file. A gun's part
+    sequences never earn one: TESRuntime starts them itself.
     See: docs/commentary/asset_convert_nif.md#animated-object-graphs
     """
     seq_names = collect_sequence_names(data)
@@ -1450,6 +1454,9 @@ def _run_post_passes(data, stats, result, src_path, dst_path, textures_only):
     _build_flip_atlases(stats, dst_path)
     _build_height_maps(stats, dst_path)
     if not textures_only:
+        parts = add_gun_part_sequences(data, src_path) if is_fallout_source() else []
+        if parts:
+            stats['gun_part_sequences'] = len(parts)
         _build_animobject_graph(data, stats, result, dst_path)
     _add_tangent_space(data)
 

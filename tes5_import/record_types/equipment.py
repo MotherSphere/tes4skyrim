@@ -30,7 +30,10 @@ from ..skyrim_overrides import (
     WEAPON_ANIM_STAGGER,
     WEAPON_ANIM_VNAM,
 )
+from .equipment_falloutnv import ammo_flags, gun_speed
 from .equipment_falloutnv import refine_anim_type as refine_fallout_anim_type
+from .projectile_falloutnv import (ammo_projectile, gun_sheathe_sounds,
+                                   gun_sound_subs)
 from .common import (
     VENDOR_KYWD,
     _common_header_subs,
@@ -291,10 +294,41 @@ def _weapon_anim_type(rec: dict, tes4_type: int, model: str) -> int:
     return refine_fallout_anim_type(rec, anim_type)
 
 
+def _weapon_model_and_sounds(rec: dict, writer, anim_type: int,
+                             model: str) -> bytes:
+    """WNAM and the sound links, in TES5 order, before DATA.
+
+    WNAM is the record's own 1st-person STAT (FO3/FNV) or a companion STAT
+    holding the world model (Oblivion has no 1st-person weapon meshes).
+    SNAM..UNAM are a FO3/FNV gun's shoot/dry-fire/idle sounds; NAM9/NAM8
+    (draw/sheathe) prefer the record's own, else the per-type vanilla ones.
+    See: docs/commentary/tes4_export_falloutnv.md#projectiles
+    """
+    subs = b''
+    wnam_fid = get_formid(rec, 'WNAM')
+    if not wnam_fid and model and writer is not None:
+        edid = get_str(rec, 'EditorID', '')
+        wnam_fid = writer.derive_formid('WEAP_STAT', get_formid(rec, 'FormID'))
+        writer.add_record('STAT', _build_weapon_1stperson_stat(
+            edid, prefix_path(model), wnam_fid))
+    if wnam_fid:
+        subs += pack_formid_subrecord('WNAM', wnam_fid)
+    draw, sheathe = 0, 0
+    if writer is not None:
+        subs += gun_sound_subs(rec, writer)
+        draw, sheathe = gun_sheathe_sounds(rec, writer)
+    subs += pack_formid_subrecord(
+        'NAM9', draw or WEAPON_ANIM_NAM9.get(anim_type, 0x0003C72E))
+    subs += pack_formid_subrecord(
+        'NAM8', sheathe or WEAPON_ANIM_NAM8.get(anim_type, 0x0003C72F))
+    return subs
+
+
 def convert_WEAP(rec: dict, writer=None) -> bytes:
     """Convert WEAP.
 
-    TES5 order: EDID OBND FULL MODL EITM ETYP BIDS BAMT INAM WNAM NAM9 NAM8 DATA DNAM CRDT VNAM
+    TES5 order: EDID OBND FULL MODL EITM ETYP BIDS BAMT INAM WNAM SNAM XNAM
+    NAM7 TNAM UNAM NAM9 NAM8 DATA DNAM CRDT VNAM
     """
     subs = _common_header_subs(rec, obnd_sig='WEAP')
     model = get_str(rec, 'Model.MODL')
@@ -321,29 +355,13 @@ def convert_WEAP(rec: dict, writer=None) -> bytes:
     # KSIZ/KWDA — vendor keyword (TES4 type 4 = Staff)
     subs += pack_keywords([VENDOR_KYWD['Staff' if tes4_type == 4 else 'Weapon']])
 
-    # INAM — Impact Data Set (hit effects/particles)
-    subs += pack_formid_subrecord('INAM', WEAPON_ANIM_INAM.get(anim_type, 0x00013CAC))
+    subs += pack_formid_subrecord(
+        'INAM', get_formid(rec, 'INAM')
+        or WEAPON_ANIM_INAM.get(anim_type, 0x00013CAC))
 
-    # WNAM — 1st-person model STAT reference.
-    # We create a companion STAT record containing the same mesh as the world model.
-    # Oblivion has no separate hi-poly 1st-person weapon meshes.
-    wnam_fid = 0
-    if model and writer is not None:
-        edid = get_str(rec, 'EditorID', '')
-        wnam_fid = writer.derive_formid('WEAP_STAT', get_formid(rec, 'FormID'))
-        stat_bytes = _build_weapon_1stperson_stat(edid, prefix_path(model), wnam_fid)
-        writer.add_record('STAT', stat_bytes)
-    if wnam_fid:
-        subs += pack_formid_subrecord('WNAM', wnam_fid)
+    subs += _weapon_model_and_sounds(rec, writer, anim_type, model)
 
-    # NAM9 — Draw sound descriptor FormID (must come BEFORE DATA)
-    subs += pack_formid_subrecord('NAM9', WEAPON_ANIM_NAM9.get(anim_type, 0x0003C72E))
-
-    # NAM8 — Sheathe sound descriptor FormID (must come BEFORE DATA)
-    subs += pack_formid_subrecord('NAM8', WEAPON_ANIM_NAM8.get(anim_type, 0x0003C72F))
-
-    # TES5 WEAP DATA: Value(4) + Weight(4) + Damage(2) = 10 bytes
-    speed = get_float(rec, 'DATA.Speed', 1.0)
+    speed = gun_speed(rec, get_float(rec, 'DATA.Speed', 1.0))
     reach = get_float(rec, 'DATA.Reach', 1.0)
     value = get_int(rec, 'DATA.Value')
     weight = get_float(rec, 'DATA.Weight')
@@ -353,10 +371,11 @@ def convert_WEAP(rec: dict, writer=None) -> bytes:
     # DNAM — weapon parameters (100 bytes)
     dnam = bytearray(100)
     struct.pack_into('<B', dnam, 0, anim_type)
-    struct.pack_into('<f', dnam, 4, WEAPON_ANIM_MULT.get(anim_type, 1.0))   # animationMultiplier
-    struct.pack_into('<f', dnam, 8, reach if reach > 0.0 else 1.0)             # Reach (0.0 is invalid; default to 1.0)
-    struct.pack_into('<I', dnam, 12, WEAPON_ANIM_FLAGS.get(anim_type, 0))   # Flags
-    struct.pack_into('<f', dnam, 44, speed)                                  # Speed (animationAttackMult slot)
+    struct.pack_into('<f', dnam, 4, gun_speed(rec, WEAPON_ANIM_MULT.get(anim_type, 1.0)))
+    struct.pack_into('<f', dnam, 8, reach if reach > 0.0 else 1.0)
+    struct.pack_into('<I', dnam, 12, WEAPON_ANIM_FLAGS.get(anim_type, 0))
+    struct.pack_into('<B', dnam, 26, max(1, get_int(rec, 'DNAM.ProjectileCount', 1)))
+    struct.pack_into('<f', dnam, 44, speed)
     struct.pack_into('<B', dnam, 76, WEAPON_ANIM_STAGGER.get(anim_type, 0)) # Stagger
     subs += pack_subrecord('DNAM', bytes(dnam))
 
@@ -706,16 +725,13 @@ def convert_AMMO(rec: dict, writer=None) -> bytes:
     weight = get_float(rec, 'DATA.Weight')
     speed = get_float(rec, 'DATA.Speed', 1.0)
 
-    # Build a companion PROJ record so this arrow has its own projectile.
-    # TES4 has no separate PROJ records; we synthesise one per AMMO.
-    if writer is not None:
+    proj_fid = ammo_projectile(rec) or DEFAULT_ARROW_PROJECTILE
+    if proj_fid == DEFAULT_ARROW_PROJECTILE and writer is not None:
         edid = get_str(rec, 'EditorID', '')
         proj_fid = writer.derive_formid('PROJ', get_formid(rec, 'FormID'))
         proj_model = prefix_path(model) if model else prefix_path('Weapons\\Iron\\Arrow.NIF')
         proj_bytes = _build_arrow_proj(edid, proj_model, speed, proj_fid)
         writer.add_record('PROJ', proj_bytes)
-    else:
-        proj_fid = DEFAULT_ARROW_PROJECTILE
 
     # YNAM/ZNAM — pickup/putdown sounds (as vanilla arrows: ITMGenericWeaponUp/Down)
     subs += pack_formid_subrecord('YNAM', 0x0003E7B7)
@@ -724,12 +740,8 @@ def convert_AMMO(rec: dict, writer=None) -> bytes:
     # KSIZ/KWDA — vendor keyword (weapon vendors' list includes Arrow)
     subs += pack_keywords([VENDOR_KYWD['Arrow']])
 
-    # TES5 AMMO DATA (SSE, 20 bytes): Projectile(FormID) Flags(U32) Damage(float) Value(U32) Weight(float)
-    # Flags: bit 0 = Ignores Normal Weapon Resistance (carried over from TES4),
-    # bit 2 = Non-Bolt — REQUIRED or the engine classifies the ammo as a
-    # crossbow bolt (TES4 has no bolts; everything converts as an arrow).
-    tes5_flags = (flags & 0x01) | 0x04
-    data = struct.pack('<IIfIf', proj_fid, tes5_flags, float(damage), value, weight)
+    data = struct.pack('<IIfIf', proj_fid, ammo_flags(flags), float(damage),
+                       value, weight)
     subs += pack_subrecord('DATA', data)
     subs += pack_string_subrecord('ONAM', '')  # Short name
 

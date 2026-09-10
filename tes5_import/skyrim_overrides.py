@@ -712,11 +712,12 @@ WEAPON_ANIM_EQUP: dict[int, int] = {
     5: EQUP_BOTH_HANDS,   # GreatSword
     6: EQUP_BOTH_HANDS,   # Battleaxe/Warhammer
     7: EQUP_BOTH_HANDS,   # Bow
+    9: EQUP_BOTH_HANDS,   # Crossbow (as Bow)
     8: EQUP_RIGHT_HAND,   # Staff
 }
 
-#: Runtime DNAM anim type for a crossbow; Skyrim.esm uses 6=Bow, 7=Crossbow.
-WEAPON_ANIM_CROSSBOW = 7
+#: DNAM anim type of a crossbow (wbWeaponAnimTypeEnum: 7 Bow, 8 Staff, 9 Crossbow).
+WEAPON_ANIM_CROSSBOW = 9
 
 # ---------------------------------------------------------------------------
 # Per-anim-type weapon defaults — sourced from vanilla Skyrim iron/steel weapons
@@ -728,6 +729,7 @@ WEAPON_ANIM_INAM: dict[int, int] = {
     5: 0x000949D5,   # GreatSword → WPNzBlade2HandImpactSet
     6: 0x00036A5B,   # Battleaxe  → WPNzAxeLargeImpactSet
     7: 0x000193B9,   # Bow     → WPNzArrowImpactSet
+    9: 0x000193B9,   # Crossbow (as Bow)
     8: 0x000193B9,   # Staff   → WPNzArrowImpactSet (no staff-specific set)
 }
 
@@ -740,6 +742,7 @@ WEAPON_ANIM_BIDS: dict[int, int] = {
     5: 0x000183FF,   # GreatSword → WPNBashBladeImpactSet
     6: 0x000193C7,   # Battleaxe  → WPNBashBluntImpactSet
     7: 0x000193C6,   # Bow     → WPNBashBowImpactSet
+    9: 0x000193C6,   # Crossbow (as Bow)
     8: 0x000193C6,   # Staff   → WPNBashBowImpactSet
 }
 
@@ -752,6 +755,7 @@ WEAPON_ANIM_BAMT: dict[int, int] = {
     5: 0x00097786,   # GreatSword → MaterialBlockBlade2Hand
     6: 0x000E64A9,   # Battleaxe  → MaterialBlockBlunt2Hand
     7: 0x000774B6,   # Bow     → MaterialBlockBowsStaves
+    9: 0x000774B6,   # Crossbow (as Bow)
     8: 0x000774B6,   # Staff   → MaterialBlockBowsStaves
 }
 
@@ -764,6 +768,7 @@ WEAPON_ANIM_NAM8: dict[int, int] = {
     5: 0x0003C8AA,   # GreatSword → WPNBlade2HandSheatheSD
     6: 0x000605D3,   # Battleaxe  → WPNAxe2HandSheatheSD
     7: 0x0003D882,   # Bow     → WPNBowSheatheSD
+    9: 0x0003D882,   # Crossbow (as Bow)
     8: 0x0003DE2D,   # Staff   → WPNStaffHandSheatheSD
 }
 
@@ -776,6 +781,7 @@ WEAPON_ANIM_NAM9: dict[int, int] = {
     5: 0x0003C8A9,   # GreatSword → WPNBlade2HandDrawSD
     6: 0x0006036A,   # Battleaxe  → WPNAxe2HandDrawSD
     7: 0x0003D78C,   # Bow     → WPNBowDrawSD
+    9: 0x0003D78C,   # Crossbow (as Bow)
     8: 0x0003DE2C,   # Staff   → WPNStaffHandDrawSD
 }
 
@@ -788,6 +794,7 @@ WEAPON_ANIM_VNAM: dict[int, int] = {
     5: 0,   # GreatSword
     6: 0,   # Battleaxe
     7: 2,   # Bow
+    9: 2,   # Crossbow (as Bow)
     8: 1,   # Staff
 }
 
@@ -800,6 +807,7 @@ WEAPON_ANIM_MULT: dict[int, float] = {
     5: 0.7,   # GreatSword
     6: 0.7,   # Battleaxe
     7: 1.0,   # Bow
+    9: 1.0,   # Crossbow (as Bow)
     8: 1.0,   # Staff
 }
 
@@ -812,6 +820,7 @@ WEAPON_ANIM_STAGGER: dict[int, int] = {
     5: 7,   # GreatSword — Large Ragdoll
     6: 7,   # Battleaxe  — Large Ragdoll
     7: 0,   # Bow       — None
+    9: 0,   # Crossbow (as Bow)
     8: 0,   # Staff     — None
 }
 
@@ -825,6 +834,7 @@ WEAPON_ANIM_FLAGS: dict[int, int] = {
     5: 0x40,   # GreatSword
     6: 0x40,   # Battleaxe
     7: 0x00,   # Bow
+    9: 0x00,   # Crossbow (as Bow)
     8: 0x00,   # Staff
 }
 

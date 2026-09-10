@@ -803,7 +803,7 @@ it returns the original stream untouched.
 already pure append, order-independent and dedupe-by-name; the Python
 `compose_*` is the DLL's spec and `test_cpp_composer_matches_python` runs
 `tes_runtime/compose_test.exe` (the DLL's own composer) against it byte for
-byte. Measured against the last build-time merge
+byte, append splices included. Measured against the last build-time merge
 (256 projects across every output plugin, composed in the old sorted-union
 order): the animationdata file is byte-identical through line 174,278 of
 327,590, where the first divergence is a project whose manifest on disk had

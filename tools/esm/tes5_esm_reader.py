@@ -283,9 +283,10 @@ def _dec_weap_data(data: bytes) -> list:
     return [f'DATA.Value={val}', f'DATA.Weight={weight:.4f}', f'DATA.Damage={damage}']
 
 
-_WEAP_ANIM = {0:'HandToHand',1:'Sword',2:'Dagger',3:'WarAxe',4:'Mace',
-              5:'Battleaxe',6:'Bow',7:'Crossbow',8:'Staff',9:'Greatsword',
-              10:'TwoHandMelee',11:'Shield'}
+#: wbWeaponAnimTypeEnum (xEdit wbDefinitionsTES5), verified on Skyrim.esm HuntingBow = 7.
+_WEAP_ANIM = {0:'HandToHand', 1:'OneHandSword', 2:'OneHandDagger', 3:'OneHandAxe',
+              4:'OneHandMace', 5:'TwoHandSword', 6:'TwoHandAxe', 7:'Bow',
+              8:'Staff', 9:'Crossbow'}
 _WEAP_STAGGER = {0:'None',1:'Small',2:'Medium',3:'Large',4:'ExtraLarge',5:'Knockdown',6:'Ragdoll'}
 
 

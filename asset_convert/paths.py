@@ -21,6 +21,7 @@ OUTPUT = REPO / 'output'
 #: Third-party executables committed under `external/`.
 EXTERNAL = REPO / 'external'
 HKXCMD = REPO / 'external' / 'hkxcmd' / 'hkxcmd.exe'
+HKXCONV = REPO / 'external' / 'hkxconv' / 'hkxconv.exe'
 BSARCH = REPO / 'external' / 'bsarch' / 'BSArch.exe'
 LODGEN = REPO / 'external' / 'lodgen' / 'LODGenx64.exe'
 MOPP_BRIDGE = REPO / 'external' / 'mopp_bridge' / 'dovah_hkp_mesh_mopp_bridge.exe'

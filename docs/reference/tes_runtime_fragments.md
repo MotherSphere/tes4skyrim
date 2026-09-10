@@ -33,6 +33,16 @@ mod is the convention; the converter names it after the plugin
   "animsetdata": [
     { "entry": "tes4oblivion_ratprojectData\\tes4oblivion_ratproject.txt",
       "block": ["1", "FullCharacter.txt", "V3", "0", "0", "0", "3", "..."] }
+  ],
+  "animdata_append": [
+    { "project": "DefaultMale.txt",
+      "clips":   ["<clip block lines>"],
+      "motions": ["<motion block lines>"] }
+  ],
+  "animsetdata_append": [
+    { "entry": "DefaultMaleData\\DefaultMale.txt",
+      "set_file": "TES4Guns.txt",
+      "block": ["V3", "4", "MagicWeap_ForceEquip", "...", "3", "iLeftHandType", "13", "13", "..."] }
   ]
 }
 ```
@@ -51,6 +61,8 @@ no root-motion simplification; it only splices lines and rewrites counts.
 | `animdata[].motion_block` | the boundanims block, without its count; `null` when the project has no clip data (`HasMotionData == 0`), in which case no count+block pair is emitted |
 | `animsetdata[].entry` | the `<Project>Data\<Project>.txt` name registered in the setdata name list |
 | `animsetdata[].block` | the project's whole setdata section: set-file count, set-file names, then one V3 block per set file |
+| `animdata_append[]` | clip blocks (and motion blocks) spliced INTO an existing project's block; the wrapper counts are rewritten. The FO3/FNV gun clips ride on `DefaultMale.txt` / `DefaultFemale.txt` this way, their animation indices being the positions the build appended to each character file's `animationNames` ([asset_convert_falloutnv.md#gun-graph](../commentary/asset_convert_falloutnv.md#gun-graph)) |
+| `animsetdata_append[]` | one set file (name + V3 block) added to an existing project's section; its set-file count is rewritten |
 
 ## Composition rules
 
@@ -66,8 +78,10 @@ no root-motion simplification; it only splices lines and rewrites counts.
 3. A name the base (or an earlier fragment) already registers is **skipped**.
    One extra name with no matching block desyncs every later project, so the
    first registration always wins and nothing is ever merged into it.
-4. The composed text is CRLF, latin-1 — what the vanilla files use.
-5. With no fragments present the DLL hands the engine the original stream
+4. `*_append` entries splice into the named existing project. Missing targets
+   are ignored.
+5. The composed text is CRLF, latin-1 — what the vanilla files use.
+6. With no fragments present the DLL hands the engine the original stream
    untouched.
 
 `asset_convert.havok.animation_data.compose_animationdata` /

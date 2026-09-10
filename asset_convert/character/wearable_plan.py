@@ -40,6 +40,8 @@ W1 = 4          # <name>_1.nif
 WORN = 8        # named as an ARMA worn (biped) model by some ARMO/CLOT record
 FEMALE = 16
 MALE = 32
+#: Named as an AMMO model: hangs on the QUIVER node when its NIF carries no Prn.
+QUIVER = 64
 
 # TES4 BMDT biped bit -> the Skyrim body part the geometry belongs in.  This is
 # the plugin's OWN statement of what the item is, so it replaces guessing the
@@ -176,6 +178,12 @@ def body_parts_for_flags(biped_flags: int) -> list:
     return out
 
 
+def _want_ammo(export_dir: Path, want):
+    """Flag every AMMO record's model as a QUIVER attachment."""
+    for rec in iter_records(export_dir / 'AMMO.txt'):
+        want(rec.get('Model.MODL', ''), QUIVER | BASE)
+
+
 def build_plan(export_dir, _seen=None) -> dict:
     """Map mesh-relative NIF path -> bitmask of the variants the plugin uses.
 
@@ -248,6 +256,7 @@ def build_plan(export_dir, _seen=None) -> dict:
             want(male_world or male_biped or female_world or female_biped, BASE)
             want(female_world, BASE)
 
+    _want_ammo(export_dir, want)
     # Carry the authored slot data alongside, so callers that need to know what
     # a mesh IS (not just which variants to write) do not re-parse the export.
     # Merged, not assigned: an inherited base's flags are already in here
@@ -270,18 +279,26 @@ def variants_for(plan: dict, src_path, meshes_root) -> int:
     return plan.get(_norm(rel), BASE)
 
 
-_FEMALE_LATCH = [False]
+_LATCH = [0]
 
 
-def latch_female(plan: dict, src_path, meshes_root):
-    """Record whether the NIF about to convert is worn by women only."""
-    v = variants_for(plan, src_path, meshes_root) if plan else 0
-    _FEMALE_LATCH[0] = bool(v & FEMALE) and not v & MALE
+def latch_variants(plan: dict, src_path, meshes_root):
+    """Record the plugin's variant flags for the NIF about to convert."""
+    _LATCH[0] = variants_for(plan, src_path, meshes_root) if plan else 0
 
 
 def mesh_is_female(src_path) -> bool:
     """Fitted to the female body: a Female.BipedModel, else Oblivion's f/ folder."""
-    return _FEMALE_LATCH[0] or '/f/' in str(src_path).replace(chr(92), '/').lower()
+    v = _LATCH[0]
+    female = bool(v & FEMALE) and not v & MALE
+    return female or '/f/' in str(src_path).replace(chr(92), '/').lower()
+
+
+def mesh_is_ammo() -> bool:
+    """True if some AMMO record names the NIF being converted as its model.
+    See: docs/commentary/asset_convert_falloutnv.md#ammo-prn
+    """
+    return bool(_LATCH[0] & QUIVER)
 
 
 def is_worn(plan: dict, src_path, meshes_root) -> bool:
