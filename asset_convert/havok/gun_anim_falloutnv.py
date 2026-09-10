@@ -34,6 +34,7 @@ from asset_convert.havok.creature_pipeline import foot_enum_map
 from asset_convert.havok.gun_vocabulary_falloutnv import (ANIM_TYPE_CLASS,
                                                           ATTACK_ACTIONS,
                                                           ATTACK_ANIMS,
+                                                          PART_PREFIX,
                                                           RELOAD_LETTERS)
 from asset_convert.havok.hkx_anim import (decode_clip, event_annotations,
                                           parse_kf_events, verify_hkx,
@@ -140,9 +141,11 @@ def weapon_bindings(export_dir: str) -> list:
 
 def _wanted(c: dict, classes, reloads, attacks, any_default) -> bool:
     """Whether one classified stem belongs to the selected set."""
-    if c['prefix'].startswith('pa') or c['iron'] or c['cls'] not in classes:
+    if c['prefix'].startswith('pa') or c['cls'] not in classes:
         return False
     act = c['action']
+    if c['iron'] and not (act == 'aim' or act.startswith('attack')):
+        return False
     if act in SHARED_ACTIONS or act in LOCO_ACTIONS:
         return True
     if act == 'reload':
@@ -154,9 +157,10 @@ def _wanted(c: dict, classes, reloads, attacks, any_default) -> bool:
 def select_stems(bindings: list, stems) -> list:
     """The clip stems the exported guns actually name (sneak set included).
 
-    Power-armor (`pa`) sets are skipped: Skyrim has no power armor, and so
-    are iron-sight (`is`) variants: the graph has no zoom variable to blend
-    them on. A gun whose attack is DEFAULT takes every attack of its class;
+    Power-armor (`pa`) sets are skipped: Skyrim has no power armor; of the
+    iron-sight (`is`) variants the aim poses and the attacks come, for the
+    zoom key.
+    A gun whose attack is DEFAULT takes every attack of its class;
     every pitch and `<letter>start` variant of a wanted action comes along.
     """
     classes = {b['cls'] for b in bindings}
@@ -285,6 +289,17 @@ def _key_times(clip, names) -> dict:
     return out
 
 
+def _part_tracks(src_clip, stem: str) -> list:
+    """The weapon-part nodes a clip animates; none for a looping aim pose,
+    whose frame-0 trigger would restart the mesh sequence every cycle.
+    See: docs/commentary/asset_convert_falloutnv.md#gun-parts
+    """
+    c = classify_stem(stem)
+    if c is None or c['action'] == 'aim':
+        return []
+    return sorted(t.bone for t in src_clip.tracks if t.bone.startswith(PART_PREFIX))
+
+
 def convert_one(kf_path: str, out_hkx: str, skeleton_nif: str,
                 verify: bool = False, fps: float = 30.0,
                 fill_kf: str = None, stem: str = None,
@@ -301,6 +316,7 @@ def convert_one(kf_path: str, out_hkx: str, skeleton_nif: str,
         'tracks': len(clip.tracks), 'sounds': events['sounds'],
         'feet': events['feet'], 'hits': events['hits'],
         'keys': _key_times(src_clip, {'attach', 'detach'}),
+        'parts': _part_tracks(src_clip, stem),
         'motion': None if motion is None else {
             'bone': motion['bone'], 'times': motion['times'].tolist(),
             'translations': (motion['translations'].tolist()
@@ -343,14 +359,15 @@ def read_manifest(out_meshes_dir: str) -> dict:
         return json.load(f)
 
 
-def _level_aim(corpus: dict, prefix: str, cls: str):
-    """The kf holding the class' level aim pose in this stance: its `aim`
-    clip, else its first attack clip (frame 0 is the aim pose), else None.
+def _level_aim(corpus: dict, prefix: str, cls: str, iron: str = ''):
+    """The kf holding the class' level aim pose in this stance (`iron` is
+    'is' for the sights): its `aim` clip, else its first attack clip
+    (frame 0 is the aim pose), else None.
     See: docs/commentary/asset_convert_falloutnv.md#level-aim-from-the-fire-clip
     """
-    return corpus.get(f'{prefix}{cls}aim') or next(
-        (corpus[f'{prefix}{cls}{a}'] for a in ATTACK_ACTIONS
-         if f'{prefix}{cls}{a}' in corpus), None)
+    return corpus.get(f'{prefix}{cls}aim{iron}') or next(
+        (corpus[f'{prefix}{cls}{a}{iron}'] for a in ATTACK_ACTIONS
+         if f'{prefix}{cls}{a}{iron}' in corpus), None)
 
 
 def _fill_clip(corpus: dict, stem: str):
@@ -363,19 +380,23 @@ def _fill_clip(corpus: dict, stem: str):
 
 
 def _synthesized_aims(corpus: dict, classes) -> list:
-    """[(aim stem, attack kf)] for every stance with a pitched aim but no
-    level one: the attack clip's first frame stands in as the level aim.
+    """[(aim stem, attack kf)] for every stance with no level aim clip:
+    the attack clip's first frame stands in as the level aim (a hip stance
+    only when it has pitched aims; an iron-sight stance whenever it has a
+    fire clip, since the first-person set ships no pitched sights).
     See: docs/commentary/asset_convert_falloutnv.md#level-aim-from-the-fire-clip
     """
     out = []
     for cls in classes:
-        for prefix in ('', 'sneak', 'pa', 'pasneak'):
-            stem = f'{prefix}{cls}aim'
-            if stem in corpus or f'{stem}down' not in corpus:
-                continue
-            kf = _level_aim(corpus, prefix, cls)
-            if kf:
-                out.append((stem, kf))
+        for prefix in ('', 'sneak'):
+            for iron in ('', 'is'):
+                stem = f'{prefix}{cls}aim{iron}'
+                pitched = f'{prefix}{cls}aim{iron}down' in corpus
+                if stem in corpus or not (pitched or iron):
+                    continue
+                kf = _level_aim(corpus, prefix, cls, iron)
+                if kf:
+                    out.append((stem, kf))
     return out
 
 

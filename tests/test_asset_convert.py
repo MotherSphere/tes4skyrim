@@ -4851,9 +4851,9 @@ class TestFalloutMeshSideSlots:
         (tmp_path / 'CLOT.txt').write_text('', encoding='utf-8')
         plan = wearable_plan.build_plan(tmp_path)
         meshes = tmp_path / 'meshes'
-        wearable_plan.latch_female(plan, meshes / 'armor' / 'x' / 'suitf.nif', meshes)
+        wearable_plan.latch_variants(plan, meshes / 'armor' / 'x' / 'suitf.nif', meshes)
         assert wearable_plan.mesh_is_female('armor/x/suitf.nif')
-        wearable_plan.latch_female(plan, meshes / 'armor' / 'x' / 'suit.nif', meshes)
+        wearable_plan.latch_variants(plan, meshes / 'armor' / 'x' / 'suit.nif', meshes)
         assert not wearable_plan.mesh_is_female('armor/x/suit.nif')
         assert wearable_plan.mesh_is_female('armor/f/suit.nif')
 

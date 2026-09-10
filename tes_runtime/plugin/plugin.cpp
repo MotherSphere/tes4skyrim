@@ -40,6 +40,7 @@
 
 #ifndef TESRUNTIME_CACHE_ONLY
 #include "engine.h"
+#include "fire.h"
 #include "guns.h"
 #include "sever.h"
 #endif
@@ -188,8 +189,8 @@ void OnMessage(SKSEMessagingInterface::Message* msg) {
     if (msg->type == SKSEMessagingInterface::kMessage_DataLoaded) {
         if (g_gunsInstalled) ResolveGunForms();
         if (g_severingInstalled) ResolveSeverForms();
-    } else if (msg->type == SKSEMessagingInterface::kMessage_PostLoadGame && g_severingInstalled) {
-        SeverReapplyAll();
+    } else if (msg->type == SKSEMessagingInterface::kMessage_PostLoadGame) {
+        if (g_severingInstalled) SeverReapplyAll();
     }
 }
 

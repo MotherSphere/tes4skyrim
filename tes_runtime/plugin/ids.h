@@ -108,10 +108,88 @@ constexpr std::size_t kEquippedItemTypeSpan = 0x100;
 // bool BShkbAnimationGraph::SetVariableInt(graph, const BSFixedString&, int)
 // (0xb2b770): the ONE routine that writes iRightHandType into a graph.
 constexpr std::uint64_t kGraphSetVariableInt = 63609;
+constexpr std::uint64_t kGraphSetVariableFloat = 63608;  // (graph, name, float) beside it
 
 // The interned animation string table getter (0x110480): iLeftHandType at
 // +0x388, iRightHandType at +0x390 (constructor 0x1dfc20, id 15908).
 constexpr std::uint64_t kAnimStringTable = 11437;
+
+// ---------------------------------------------------------------------------
+// Gun fire (docs/commentary/tes_runtime_guns.md#the-shot)
+// ---------------------------------------------------------------------------
+
+// void TESObjectWEAP::Fire(weapon, TESObjectREFR* shooter, TESAmmo* ammo,
+// AlchemyItem* poison, NiAVObject* nockedArrow) (0x2470b0): the launch the
+// engine's ArrowReleaseHandler (0x75ee20, id 42859) makes after its
+// weapon-type and attack-state checks. A null ammo reads the shooter's
+// current ammo.
+constexpr std::uint64_t kWeaponFire = 18102;
+
+// InventoryEntryData* AIProcess::GetEquippedObject(process, bool left)
+// (0x6b37f0): the entry whose first qword is the equipped form.
+constexpr std::uint64_t kProcessEquipped = 39806;
+
+// The BSTEventSink<BSAnimationGraphEvent> vtables of Character (0x1750180)
+// and PlayerCharacter (0x17565e8), the subobject at +0x30 of the actor;
+// slot 1 is Actor::ProcessEvent (0x645160, id 37997), shared by both. Every
+// clip trigger and annotation the actor's graph raises passes through it.
+constexpr std::uint64_t kCharacterAnimSinkVtable = 207890;
+constexpr std::uint64_t kPlayerAnimSinkVtable = 208044;
+
+// PlayerCharacter* singleton (0x2fbbb58).
+constexpr std::uint64_t kPlayerSingleton = 403521;
+
+// Papyrus natives, called the way the VM calls them (vm, stack, self, ...):
+// Actor.EquipItem(form, preventRemoval, silent) (0x989160),
+// ObjectReference.GetItemCount(form) -> int (0x9ce530),
+// each read off its registration site's function pointer
+// (docs/commentary/tes_runtime_guns.md#ammo-restriction).
+constexpr std::uint64_t kEquipItemNative = 54661;
+constexpr std::uint64_t kGetItemCountNative = 56173;
+
+// The camera FOV path the console `fov` command takes (0x32ed80):
+// PlayerCamera singleton (0x2f59608), the render camera state pointer
+// (0x2fbbb20) handed to SetFOV(state, fov, force, camera, bool)
+// (0x13e0110), the projection recompute (0x13b6080) and the two cached
+// defaults it writes (0x1e94260 world, 0x1e94278 first person).
+// (docs/commentary/tes_runtime_guns.md#own-the-click)
+constexpr std::uint64_t kPlayerCamera = 400802;
+constexpr std::uint64_t kRenderCameraState = 403513;
+constexpr std::uint64_t kRenderSetFov = 106461;
+constexpr std::uint64_t kFovRecompute = 105655;
+constexpr std::uint64_t kCachedWorldFov = 388785;
+constexpr std::uint64_t kCachedFirstFov = 388788;
+
+// Actor::PerformAction (0x674eb0): resolves a BGSAction (ActorActionData:
+// actor +8, BGSAction* +0x18 whose formEditorID sits at +0x20) through the
+// idle tree, sends the event to the graph and applies the attack state
+// (its callee 0x675460, id 39004). All five call sites are patched
+// (docs/commentary/tes_runtime_guns.md#own-the-click).
+constexpr std::uint64_t kPerformAction = 39002;
+
+// NiAVObject* GetObjectByName(NiAVObject* root, const BSFixedString&, bool)
+// (0xd8bc20), the node lookup Actor::ProcessEvent itself uses
+// (docs/commentary/tes_runtime_guns.md#quiver).
+constexpr std::uint64_t kObjectByName = 76207;
+
+// Gun parts, the way ObjectReference.PlayGamebryoAnimation (0x9cfdd0) plays
+// an in-mesh sequence: the NiControllerManager vtable (0x185c968) that the
+// weapon root's first controller must carry, the BSFixedString hash
+// (0xc3d430) keying the manager's name map (+0x98 buckets, +0x7c capacity,
+// +0x88 sentinel) and NiControllerSequence::Activate (0xd07020)
+// (docs/commentary/asset_convert_falloutnv.md#gun-parts).
+constexpr std::uint64_t kControllerManagerVtable = 237541;
+constexpr std::uint64_t kFixedStringHash = 68221;
+constexpr std::uint64_t kSequenceActivate = 72463;
+
+// The HUD ammo counter (docs/commentary/tes_runtime_guns.md#hud):
+// HUDMenu::ProcessMessage (0x8bed60) invokes "ShowArrowCount" (the string
+// at 0x17a1c70) through GFxMovieView::Invoke (0xf1ee90) with three
+// GFxValues, the text one set with GFxValue::SetString (0x8c8830).
+constexpr std::uint64_t kHudProcessMessage = 51612;
+constexpr std::uint64_t kShowArrowCountName = 215397;
+constexpr std::uint64_t kGfxInvoke = 82256;
+constexpr std::uint64_t kGfxSetString = 51740;
 
 // ---------------------------------------------------------------------------
 // Limb severing (docs/commentary/asset_convert_falloutnv.md#dismemberment)

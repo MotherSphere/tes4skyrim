@@ -28,7 +28,7 @@ if /i "%~1"=="cache-only" goto cacheonly
 echo [build] compiling plugin...
 cl /nologo /c /EHa /std:c++17 /O2 /MD /W3 /DNDEBUG ^
    plugin.cpp addresses.cpp hook.cpp stream.cpp compose.cpp json.cpp log.cpp ^
-   engine.cpp guns.cpp sever.cpp ^
+   engine.cpp guns.cpp fire.cpp hud.cpp parts.cpp zoom.cpp sever.cpp ^
    /Fo:obj\
 if errorlevel 1 (
     echo [build] ERROR: compilation failed
@@ -36,7 +36,7 @@ if errorlevel 1 (
 )
 
 echo [build] linking plugin...
-link /nologo /DLL /OUT:..\TESRuntime.dll obj\*.obj kernel32.lib shell32.lib ole32.lib
+link /nologo /DLL /OUT:..\TESRuntime.dll obj\*.obj kernel32.lib user32.lib shell32.lib ole32.lib
 if errorlevel 1 (
     echo [build] ERROR: link failed
     exit /b 1

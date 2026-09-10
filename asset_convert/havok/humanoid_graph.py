@@ -394,21 +394,57 @@ class HumanoidGraph:
             done.append(name)
         return done
 
-    def widen_type_conditions(self, old_type: int, new_type: int) -> int:
-        """Make every `== old` / `!= old` hand-type test also cover `new`.
+    def conditions_of_events(self, events) -> set:
+        """The condition refs of every transition on one of `events`."""
+        ids = {str(self.events.index(e)) for e in events if e in self.events}
+        out = set()
+        for arr in self.of_class(_TRANS_ARRAY_CLASS):
+            for t in _sub(arr, 'transitions').findall('hkobject'):
+                if param_text(t, 'eventId') in ids:
+                    out.add(param_text(t, 'condition'))
+        return out
 
-        Returns the number of conditions rewritten.
+    def gate_transitions(self, event: str, condition: str) -> int:
+        """Give every unconditioned transition on `event` the condition.
+        Returns the number gated.
+        See: docs/commentary/tes_runtime_guns.md#bash-and-reload-events
         """
         n = 0
+        eid = str(self.events.index(event))
+        for arr in self.of_class(_TRANS_ARRAY_CLASS):
+            for t in _sub(arr, 'transitions').findall('hkobject'):
+                cond = _sub(t, 'condition')
+                if param_text(t, 'eventId') != eid or cond.text != 'null':
+                    continue
+                cond.text = self.expression_condition(condition)
+                flags = _sub(t, 'flags')
+                kept = [f for f in (flags.text or '').split('|')
+                        if f and f not in ('0', 'FLAG_DISABLE_CONDITION')]
+                flags.text = '|'.join(kept) or '0'
+                n += 1
+        return n
+
+    def widen_type_conditions(self, old_type: int, new_type: int,
+                              skip_events=()) -> int:
+        """Make every `== old` / `!= old` hand-type test also cover `new`.
+        In the conditions of transitions on `skip_events` only the `!= old`
+        tests are widened, so those transitions exclude `new` as they
+        exclude `old`. Returns the number of conditions rewritten.
+        See: docs/commentary/tes_runtime_guns.md#bash-and-reload-events
+        """
+        n = 0
+        skip = self.conditions_of_events(skip_events)
         for el in self.of_class('hkbExpressionCondition'):
+            equal = '#' + el.get('name', '').lstrip('#') not in skip
             p = _sub(el, 'expression')
             expr = p.text or ''
-            new = re.sub(rf'\((i(?:Right|Left)HandType) == {old_type}\)',
-                         rf'((\1 == {old_type}) || (\1 == {new_type}))', expr)
             new = re.sub(rf'\((i(?:Right|Left)HandType) != {old_type}\)',
-                         rf'((\1 != {old_type}) \&\& (\1 != {new_type}))', new)
-            new = re.sub(rf'^(i(?:Right|Left)HandType) == {old_type}$',
-                         rf'(\1 == {old_type}) || (\1 == {new_type})', new)
+                         rf'((\1 != {old_type}) && (\1 != {new_type}))', expr)
+            if equal:
+                new = re.sub(rf'\((i(?:Right|Left)HandType) == {old_type}\)',
+                             rf'((\1 == {old_type}) || (\1 == {new_type}))', new)
+                new = re.sub(rf'^(i(?:Right|Left)HandType) == {old_type}$',
+                             rf'(\1 == {old_type}) || (\1 == {new_type})', new)
             if new != expr:
                 p.text = new
                 n += 1

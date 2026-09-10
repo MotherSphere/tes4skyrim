@@ -23,6 +23,8 @@ from asset_convert.havok.gun_vocabulary_falloutnv import (ANIM_TYPE_CLASS,
 
 from ..skyrim_overrides import WEAPON_ANIM_CROSSBOW
 from .bodypart_falloutnv import SIDECAR_DIR, source_file
+from .projectile_falloutnv import gun_ammo
+from .sound import get_soun_identity, sndr_editor_id
 from .common import get_float, get_formid, get_int
 from .world_falloutnv import is_fallout_source
 
@@ -66,12 +68,24 @@ def ammo_flags(tes4_flags: int) -> int:
     return bolt if is_fallout_source() else bolt | _AMMO_NON_BOLT
 
 
-def gun_profile(rec: dict) -> dict:
-    """The graph variables TESRuntime sets for a gun WEAP, or None.
+def dry_fire_sound(rec: dict) -> str:
+    """The SNDR EditorID of the gun's TNAM (Sound - Gun - No Ammo), '' if none.
+    See: docs/commentary/tes_runtime_guns.md#dry-fire
+    """
+    soun = get_formid(rec, 'TNAM')
+    if not soun:
+        return ''
+    edid, _ = get_soun_identity(soun)
+    return sndr_editor_id(edid, soun)
+
+
+def gun_profile(rec: dict, plugin: str = '') -> dict:
+    """The graph variables TESRuntime sets for a gun WEAP, the ammo it
+    loads (as (local id, file) pairs) and its dry-fire sound, or None.
 
     Indices follow gun_graph_falloutnv: class into GUN_CLASSES, reload into
     RELOAD_LETTERS, attack into ATTACK_ACTIONS (-1 = the class default).
-    See: docs/commentary/asset_convert_falloutnv.md#gun-graph
+    See: docs/commentary/tes_runtime_guns.md#ammo-restriction
     """
     cls = ANIM_TYPE_CLASS.get(get_int(rec, 'DNAM.FalloutAnimType', -1))
     if not cls:
@@ -83,7 +97,15 @@ def gun_profile(rec: dict) -> dict:
             'attack': (ATTACK_ACTIONS.index(attack)
                        if attack in ATTACK_ACTIONS else -1),
             'clip_size': get_int(rec, 'DATA.ClipSize', 0),
-            'auto': 1 if get_int(rec, 'DNAM.Flags1', 0) & 0x02 else 0}
+            'auto': 1 if get_int(rec, 'DNAM.Flags1', 0) & 0x02 else 0,
+            'dry_sound': dry_fire_sound(rec),
+            'sight_fov': get_float(rec, 'DNAM.SightFOV', 0.0) or DEFAULT_SIGHT_FOV,
+            'ammo': [{'id': f'{a & 0xFFFFFF:06X}', 'file': source_file(a, plugin)}
+                     for a in gun_ammo(rec)]}
+
+
+#: Iron-sight FOV (degrees) for a DNAM Sight FOV of 0. See: docs/commentary/tes_runtime_guns.md#zoom
+DEFAULT_SIGHT_FOV = 65.0
 
 
 def write_gun_sidecar(records: list, plugin_out_dir: str,
@@ -95,7 +117,7 @@ def write_gun_sidecar(records: list, plugin_out_dir: str,
     """
     guns = {}
     for rec in records:
-        prof = gun_profile(rec)
+        prof = gun_profile(rec, plugin_name)
         if prof is None:
             continue
         fid = get_formid(rec, 'FormID')
@@ -103,13 +125,13 @@ def write_gun_sidecar(records: list, plugin_out_dir: str,
         guns[f'{fid & 0xFFFFFF:06X}'] = prof
     if not guns:
         return ''
+    doc = {'version': 1, 'source': os.path.basename(plugin_name), 'guns': guns}
     stem = os.path.splitext(os.path.basename(plugin_name))[0]
     out_dir = os.path.join(plugin_out_dir, SIDECAR_DIR)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'{stem}.guns.json')
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump({'version': 1, 'source': os.path.basename(plugin_name),
-                   'guns': guns}, f, indent=1)
+        json.dump(doc, f, indent=1)
     return path
 
 

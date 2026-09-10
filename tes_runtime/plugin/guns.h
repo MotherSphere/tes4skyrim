@@ -23,4 +23,10 @@ bool InstallGuns();
 // After DataLoaded: resolves every sidecar entry to its runtime form.
 void ResolveGunForms();
 
+// Writes an int variable on every behavior graph of the actor (the
+// player's third and first person) through the engine's own
+// SetVariableInt; the number of graphs written.
+int SetActorGraphInt(void* actor, const char* name, int value);
+int SetActorGraphFloat(void* actor, const char* name, float value);
+
 }  // namespace tesruntime

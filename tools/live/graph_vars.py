@@ -11,6 +11,7 @@ Usage:
     python tools/live/graph_vars.py 12033475 --creature export/Oblivion.esm/meshes/creatures/scamp
     python tools/live/graph_vars.py 12033475 120d3aeb --creature ... --watch 5
     python tools/live/graph_vars.py 12033475 --creature ... --only Direction,Speed,IsCasting
+    python tools/live/graph_vars.py 14 --graph-xml export/skyrim_assets/humanoid_graph/0_master.xml --only iGunShots
 
 Chain (verified live 2026-08-23 for the project DB; extended here to values):
     TESForm::LookupByID(formid)            -> Actor*         (stable id 14617)
@@ -128,11 +129,27 @@ def variable_names(creature_dir: str) -> list[str]:
     return [n for n, _t, _iv in graph_variables(clips, mts)]
 
 
+def variable_names_xml(xml_path: str) -> list[str]:
+    """Declaration order read from a decompiled graph XML's `variableNames`
+    (the root graph an actor plays, e.g. the patched humanoid 0_master)."""
+    import re
+    text = Path(xml_path).read_text(encoding='utf-8', errors='replace')
+    m = re.search(r'<hkparam name="variableNames" numelements="(\d+)">(.*?)</hkparam>',
+                  text, re.S)
+    if not m:
+        raise SystemExit(f'{xml_path}: no variableNames array')
+    names = re.findall(r'<hkcstring>([^<]*)</hkcstring>', m.group(2))
+    assert len(names) == int(m.group(1)), (len(names), m.group(1))
+    return names
+
+
 def value_set(m: Mem, hkb: int, n: int) -> int:
     """Find the hkbVariableValueSet by signature: a pointer inside the
-    hkbBehaviorGraph whose target is (refobj 0x10) + hkArray<int32> of
-    exactly n words @+0x10, then two more hkArrays (quad @+0x20, variant
-    @+0x30) that are small."""
+    hkbBehaviorGraph whose target is (refobj 0x10) + hkArray<int32> of at
+    least n words @+0x10 (exactly n for a standalone graph; a root graph
+    linking referenced behaviors appends their variables after its own),
+    then two more hkArrays (quad @+0x20, variant @+0x30) that are small."""
+    best = None
     for off in range(0x40, 0x180, 8):
         try:
             p = m.u64(hkb + off)
@@ -143,9 +160,14 @@ def value_set(m: Mem, hkb: int, n: int) -> int:
             _v, vn = hkarray(m, p + 0x30)
         except BridgeError:
             continue
-        if size == n and data > 0x10000 and 0 <= qn < 64 and 0 <= vn < 64:
-            return p
-    raise BridgeError(f'hkbVariableValueSet with {n} words not found')
+        if size >= n and data > 0x10000 and 0 <= qn < 64 and 0 <= vn < 64:
+            if size == n:
+                return p
+            if best is None or size < best[0]:
+                best = (size, p)
+    if best is None:
+        raise BridgeError(f'hkbVariableValueSet with {n}+ words not found')
+    return best[1]
 
 
 def snapshot(b: Bridge, m: Mem, formid: int, names: list, only=None) -> dict:
@@ -184,6 +206,35 @@ def fmt(nm: str, v: tuple[int, float]) -> str:
     return str(i)
 
 
+def _names(ap, a) -> list[str]:
+    """The variable names from whichever source the arguments name."""
+    if not (a.creature or a.graph_xml):
+        ap.error('one of --creature or --graph-xml is required')
+    return (variable_names_xml(a.graph_xml) if a.graph_xml
+            else variable_names(a.creature))
+
+
+def _sample(b: Bridge, m: Mem, fid: int, names, only, changes: bool,
+            last: dict, k: int, t0: float) -> None:
+    """Take and print one snapshot of one actor (or only its changes)."""
+    try:
+        s = snapshot(b, m, fid, names, only)
+    except BridgeError as e:
+        print(f'{fid:08X}: ERROR {e}')
+        return
+    cur = {n: fmt(n, v) for n, v in s['values'].items()}
+    if not changes:
+        print(f'[{k}] {fid:08X} actor={s["actor"]:#x} graph={s["graph"]:#x}')
+        print('     ' + ' '.join(f'{n}={v}' for n, v in cur.items()))
+        return
+    prev = last.get(fid)
+    diff = cur if prev is None else {n: v for n, v in cur.items() if prev.get(n) != v}
+    if diff:
+        print(f'[{time.time()-t0:6.1f}s] {fid:08X} '
+              + ' '.join(f'{n}={v}' for n, v in diff.items()), flush=True)
+    last[fid] = cur
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('formids', nargs='+', help='actor reference FormIDs (hex)')
@@ -192,41 +243,23 @@ def main(argv=None) -> int:
     ap.add_argument('--only', help='comma-separated variable names')
     ap.add_argument('--changes', action='store_true',
                     help='print only variables that changed since the last sample')
-    ap.add_argument('--creature', required=True,
+    ap.add_argument('--creature',
                     help='EXPORT creature folder, e.g. '
                          'export/Oblivion.esm/meshes/creatures/scamp')
+    ap.add_argument('--graph-xml',
+                    help='decompiled root graph XML to take variable names '
+                         'from instead (humanoids: the patched 0_master.xml)')
     a = ap.parse_args(argv)
+    names = _names(ap, a)
     only = set(a.only.split(',')) if a.only else None
     ids = [int(x, 16) for x in a.formids]
-    names = variable_names(a.creature)
     last = {}
     t0 = time.time()
     with Bridge() as b:
         m = Mem(b)
         for k in range(a.watch):
             for fid in ids:
-                try:
-                    s = snapshot(b, m, fid, names, only)
-                except BridgeError as e:
-                    print(f'{fid:08X}: ERROR {e}')
-                    continue
-                vals = ' '.join(f'{n}={fmt(n, v)}' for n, v in s['values'].items())
-                if a.changes:
-                    # print only the variables that changed since last time
-                    prev = last.get(fid)
-                    cur = {n: fmt(n, v) for n, v in s['values'].items()}
-                    if prev is None:
-                        print(f'[{time.time()-t0:6.1f}s] {fid:08X} '
-                              + ' '.join(f'{n}={v}' for n, v in cur.items()))
-                    else:
-                        diff = {n: v for n, v in cur.items() if prev.get(n) != v}
-                        if diff:
-                            print(f'[{time.time()-t0:6.1f}s] {fid:08X} '
-                                  + ' '.join(f'{n}={v}' for n, v in diff.items()))
-                    last[fid] = cur
-                    continue
-                print(f'[{k}] {fid:08X} actor={s["actor"]:#x} graph={s["graph"]:#x}')
-                print('     ' + vals)
+                _sample(b, m, fid, names, only, a.changes, last, k, t0)
             if k + 1 < a.watch:
                 time.sleep(a.interval)
     return 0

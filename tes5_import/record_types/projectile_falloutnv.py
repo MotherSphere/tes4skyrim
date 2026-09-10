@@ -27,8 +27,8 @@ GUN_SOUND_SIGS = ('SNAM', 'XNAM', 'NAM7', 'TNAM', 'UNAM')
 
 #: AMMO FormID (low 24 bits) -> the PROJ its guns name most, built per run.
 _AMMO_PROJECTILE = {}
-#: PROJ FormID (low 24 bits) -> its model path, built per run.
-_PROJ_MODEL = {}
+#: FLST FormID (low 24 bits) -> member FormIDs, built per run.
+_FORMLISTS = {}
 
 
 def _records(by_type: dict, master_export: dict, sig: str):
@@ -59,21 +59,26 @@ def index_gun_projectiles(by_type: dict, master_export: dict = None) -> int:
     See: docs/commentary/tes4_export_falloutnv.md#formlists
     """
     _AMMO_PROJECTILE.clear()
-    _PROJ_MODEL.clear()
-    for rec in _records(by_type, master_export, 'PROJ'):
-        _PROJ_MODEL[get_formid(rec, 'FormID') & 0xFFFFFF] = get_str(
-            rec, 'Model.MODL', '')
-    lists = _formlist_members(by_type, master_export)
+    _FORMLISTS.clear()
+    _FORMLISTS.update(_formlist_members(by_type, master_export))
     votes = {}
     for rec in _records(by_type, master_export, 'WEAP'):
-        ammo, proj = get_formid(rec, 'NAM0'), get_formid(rec, 'DNAM.Projectile')
-        if not (ammo and proj):
-            continue
-        for member in lists.get(ammo & 0xFFFFFF, [ammo]):
+        proj = get_formid(rec, 'DNAM.Projectile')
+        for member in gun_ammo(rec) if proj else ():
             votes.setdefault(member & 0xFFFFFF, Counter())[proj] += 1
     for ammo, c in votes.items():
         _AMMO_PROJECTILE[ammo] = c.most_common(1)[0][0]
     return len(_AMMO_PROJECTILE)
+
+
+def gun_ammo(rec: dict) -> list:
+    """The AMMO FormIDs a FNV gun loads: its `NAM0`, expanded when a FLST.
+    See: docs/commentary/tes4_export_falloutnv.md#formlists
+    """
+    ammo = get_formid(rec, 'NAM0')
+    if not ammo:
+        return []
+    return _FORMLISTS.get(ammo & 0xFFFFFF, [ammo])
 
 
 def ammo_projectile(rec: dict) -> int:
@@ -82,13 +87,6 @@ def ammo_projectile(rec: dict) -> int:
     if own:
         return own
     return _AMMO_PROJECTILE.get(get_formid(rec, 'FormID') & 0xFFFFFF, 0)
-
-
-def ammo_model(rec: dict) -> str:
-    """The AMMO's nocked/inventory model: its projectile's, '' if none.
-    See: docs/commentary/tes4_export_falloutnv.md#nocked-model
-    """
-    return _PROJ_MODEL.get(ammo_projectile(rec) & 0xFFFFFF, '')
 
 
 def gun_sound_subs(rec: dict, writer) -> bytes:

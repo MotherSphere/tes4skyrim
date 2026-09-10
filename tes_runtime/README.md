@@ -1,7 +1,9 @@
 # TESRuntime
 
-The converter's SKSE plugin. Three jobs (gun routing, `guns.cpp`, is the third:
-[docs/commentary/asset_convert_falloutnv.md#gun-graph](../docs/commentary/asset_convert_falloutnv.md#gun-graph)),
+The converter's SKSE plugin. Four jobs (gun routing, `guns.cpp`, is the third:
+[docs/commentary/asset_convert_falloutnv.md#gun-graph](../docs/commentary/asset_convert_falloutnv.md#gun-graph);
+the gun shot, reload key and ammo restriction, `fire.cpp`, the fourth:
+[docs/commentary/tes_runtime_guns.md](../docs/commentary/tes_runtime_guns.md)),
 all done on engine contracts measured
 in `SkyrimSE.exe` and resolved through the Address Library (no raw RVAs):
 

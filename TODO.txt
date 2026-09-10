@@ -102,3 +102,28 @@ Minor Issues:
 
 	25 - SKSE dll to automatically merge multiple creature animation projects at runtime
 
+Guns (FalloutNV):
+	G1 - HUD magazine readout: the counter text field path is a guess and the hook is disabled (hud.cpp, InstallHud not called); find the field in the loaded HUD movie and re-enable
+	G2 - Iron sights off-center: FNV aligns ##SightingNode to the camera axis at runtime; needs a hook after the engine places the first-person model, the root is stomped every frame (tes_runtime_guns.md#sight-alignment)
+	G3 - Left hand holds air beside the gun (hands should stack on a 1h iron sight, both grip a 2h): the hands are wrong relative to EACH OTHER, not a model offset like G2. Rotation-only retarget from the FNV first-person skeleton keeps FNV arm lengths/shoulder width; needs the left hand constrained to the weapon grip after retarget (IK to the gun's left-hand grip node in gun_anim_falloutnv, or positional retarget of the hand bones)
+	G4 - Gun range: the 9mm only hits at point-blank; check the PROJ speed/range/gravity and the WEAP DNAM range conversion against FNV values
+	G5 - Impact effects: explosions (grenades, missiles) and bullet impact data (IPDS/IPCT) not converted; projectiles hit silently
+	G6 - Animated gun parts (magazine, slide, bolt) untested since the DLL-driven NiControllerSequence build; parts.cpp logs nothing when no sequence starts
+	G7 - Ammo models under clutter/ammo (50MG box etc.) not rebuilt with Prn=QUIVER, still attach at the feet
+	G8 - Ammo on a bow/melee holder: FNV rounds equipped with a non-gun still hang on QUIVER and show
+	G9 - Spare ammo, spread, VATS, weapon condition and weapon-specific reload speeds not implemented
+	G10 - NPC gun use: iGunShots is written per actor but AI never reloads or picks rounds; combat style for guns unverified
+	G11 - Automatic weapons: the loop attack / fGunLoopSpeed path untested in game
+	G12 - Zoom while sneaking: the iron stance SneakSwitch blend untested; sneak aim clips may be missing for some classes
+	G13 - fire.cpp is ~500 lines and mixes ammo, quiver, actions and keys; split the key thread and ammo logic out
+	G14 - Blend between the gun states: fire/reload/done/idle/moving transitions are instant (null transition effect); add crossfades where the poses differ, keeping the fire clips' shot triggers exact
+	G15 - Dual-wield 1h guns: mirror the FNV 1hp clips for the left hand (left-hand type 13 in the graph, mirrored clip set, per-hand ammo and shot counts in the DLL, left click = left gun)
+	G16 - Melee/bash key: FNV guns have their own bash (attackbash / 1hpattackbash clips); bind a key that sends a gun bash event instead of the dropped ActionLeftAttack
+	G17 - Holster/draw blend: equip and unequip clips cut to the aim pose with no crossfade
+	G18 - Muzzle flash and shell casings: FNV plays the ##FlashNode light/particle and ejects the casing model on each shot; neither is converted
+	G19 - Recoil: an SMG kicks far harder per shot than FNV. Something already applies a kick, probably the fire clip's camera track (FNV scales the Camera1st animation per weapon / fCameraAnim settings, the retarget plays it at full amplitude every shot) or the engine's bow/crossbow release kick firing on arrowRelease; find which, then apply FNV's WEAP DNAM recoil values and the ADS sway
+	G20 - Third-person aiming pitch: the AimPitchCurrent pitch blend exists but the torso twist toward the crosshair is unverified
+	G21 - Weapon mods (WMOD) and scoped weapons: scope zoom uses a scope overlay in FNV, not iron sights; the sight FOV path shows the mesh instead
+	G22 - Gun sounds beyond dry fire: fire sound is the engine's arrow release path; check the WEAP SNAM/XNAM per-shot and reload sounds are the FNV ones
+	G23 - NPC iron sights and hip fire: NPCs never zoom; the iGunZoom / fGunZoom variables are only written for the player
+

@@ -103,12 +103,16 @@ class KEYBDINPUT(ctypes.Structure):
                 ("dwExtraInfo", ULONG_PTR)]
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = (("dx", wintypes.LONG), ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ULONG_PTR))
+
+
 class _INPUTunion(ctypes.Union):
-    # MOUSEINPUT is the largest member (32 bytes on x64), and the union's size
-    # is what makes sizeof(INPUT) come out at the 40 bytes SendInput demands.
-    # Sizing this to KEYBDINPUT alone yields a 32-byte INPUT and every call
-    # fails with error 87.
-    _fields_ = [("ki", KEYBDINPUT), ("padding", ctypes.c_byte * 32)]
+    """Sized by MOUSEINPUT (32 bytes on x64) so INPUT is the 40 bytes SendInput
+    demands; a KEYBDINPUT-only union gives 32 and error 87 on every call."""
+    _fields_ = (("ki", KEYBDINPUT), ("mi", MOUSEINPUT))
 
 
 class INPUT(ctypes.Structure):
@@ -119,7 +123,11 @@ assert ctypes.sizeof(INPUT) == 40, (
     f"INPUT is {ctypes.sizeof(INPUT)} bytes, SendInput requires 40 on x64")
 
 
+INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
+#: (down, up) MOUSEEVENTF flags per button.
+MOUSE_BUTTONS = {"left": (0x0002, 0x0004), "right": (0x0008, 0x0010),
+                 "middle": (0x0020, 0x0040)}
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 KEYEVENTF_UNICODE = 0x0004
@@ -172,6 +180,20 @@ def send_key(hwnd: int, vk: int, hold_ms: int = 45) -> None:
 
 
 VK_SHIFT = 0x10
+
+
+def send_mouse(button: str, hold_ms: int = 45, times: int = 1,
+               gap_ms: int = 0) -> None:
+    """Press+release a mouse button `times` times (SendInput feeds the raw
+    input stream DirectInput reads, unlike PostMessage)."""
+    down_f, up_f = MOUSE_BUTTONS[button]
+    down = INPUT(type=INPUT_MOUSE, u=_INPUTunion(mi=MOUSEINPUT(0, 0, 0, down_f, 0, 0)))
+    up = INPUT(type=INPUT_MOUSE, u=_INPUTunion(mi=MOUSEINPUT(0, 0, 0, up_f, 0, 0)))
+    for _ in range(times):
+        _send([down])
+        time.sleep(hold_ms / 1000.0)
+        _send([up])
+        time.sleep(gap_ms / 1000.0)
 
 
 def send_text(hwnd: int, text: str, per_char_ms: int = 25) -> None:
@@ -266,6 +288,12 @@ def main(argv: list[str] | None = None) -> int:
     ky = sub.add_parser("key", help="send one named key")
     ky.add_argument("name", help=f"one of: {', '.join(sorted(NAMED_KEYS))}")
 
+    mo = sub.add_parser("mouse", help="click a mouse button (the game must be foreground)")
+    mo.add_argument("button", choices=sorted(MOUSE_BUTTONS))
+    mo.add_argument("--hold-ms", type=int, default=45)
+    mo.add_argument("--times", type=int, default=1)
+    mo.add_argument("--gap-ms", type=int, default=0)
+
     args = ap.parse_args(argv)
 
     hwnd = find_window(args.window)
@@ -273,7 +301,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no visible window matching {args.window!r} -- is the game running?",
               file=sys.stderr)
         return 2
+    return _run(args, hwnd)
 
+
+def _run(args, hwnd: int) -> int:
+    """Dispatch one parsed subcommand against the game window."""
     if args.cmd == "bootstrap":
         if not args.take_focus and not is_foreground(hwnd):
             print("the game is not the foreground window, so the keystrokes "
@@ -294,6 +326,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         send_key(hwnd, vk)
         print(f"sent {args.name.upper()}")
+    elif args.cmd == "mouse":
+        send_mouse(args.button, args.hold_ms, args.times, args.gap_ms)
+        print(f"clicked {args.button} x{args.times} (hold {args.hold_ms} ms)")
     return 0
 
 

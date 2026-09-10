@@ -7,8 +7,8 @@ GUN_CLASSES), `iGunReload` (reload letter index), `iGunAttack` (index into
 ATTACK_ACTIONS), `iGunClipSize` and `iGunAuto`. Firing goes through the
 engine's own ranged-weapon events (arrowAttach, bowDrawn, BowRelease,
 arrowRelease, attackStop), so the shot, the ammo and the projectile are the
-engine's; the magazine is counted in `iGunShots` and refilled by the reload
-clip the WEAP names.
+engine's; TESRuntime counts the magazine into `iGunShots` (a shot adds one,
+the reload clip's end resets it), so the graph only reads it.
 
 Machines:
   ready(c)   idle/turn/locomotion while the gun is drawn (1HM_Readied slot)
@@ -31,14 +31,36 @@ GUN_HAND_TYPE = 13
 
 #: Variables the DLL sets per equipped gun, plus the graph's own counters.
 GUN_VARIABLES = ('iGunClass', 'iGunReload', 'iGunAttack', 'iGunClipSize',
-                 'iGunAuto', 'iGunShots', 'iGunBaseA', 'iGunBaseB')
+                 'iGunAuto', 'iGunShots', 'iGunZoom')
+#: The zoom selector TESRuntime writes (0 hip, 1 iron sights) for the attack clips.
+ZOOM_VAR = 'iGunZoom'
+#: REAL variable: the zoom blend TESRuntime ramps (0 hip .. 1 iron); every aim pose crossfades on it.
+ZOOM_BLEND_VAR = 'fGunZoom'
+#: hkbBlenderGenerator flags: sync + parametric, what every vanilla parametric blend carries.
+PARAMETRIC_BLEND = 17
 #: REAL variable: the automatic loop clip's playbackSpeed, weaponSpeedMult x loop duration.
 LOOP_SPEED_VAR = 'fGunLoopSpeed'
 #: The attack action that fires once per loop pass (automatic weapons).
 LOOP_ACTION = 'attackloop'
 #: Events the gun clips raise for their own machines.
 GUN_EVENTS = ('TES4GunFireEnd', 'TES4GunReloadStart', 'TES4GunReloadEnd',
-              'TES4GunAttackEnd')
+              'TES4GunAttackEnd', 'TES4GunReloadRequest', 'reloadStart',
+              'TES4GunFire', 'TES4GunFireRelease')
+#: The attack-button events TESRuntime sends (press, release); the engine's attack actions never reach a gun.
+FIRE_EVENT = 'TES4GunFire'
+FIRE_RELEASE = 'TES4GunFireRelease'
+#: The clip trigger TESRuntime fires the gun on (an engine event name, one per round).
+SHOT_EVENT = 'arrowRelease'
+#: The event TESRuntime sends for the reload key.
+RELOAD_REQUEST = 'TES4GunReloadRequest'
+#: A reload only while the magazine is not full.
+RELOAD_ALLOWED = 'iGunShots > 0'
+#: The engine's own ammo-equipped event, which vanilla routes to the crossbow reload.
+ENGINE_RELOAD = 'reloadStart'
+#: The engine's crossbow attack event; a gun's root never takes it (TESRuntime owns the click).
+CROSSBOW_ATTACK = 'crossbowAttackStart'
+#: Root transitions that must keep the crossbow's hand type only (no gun bash).
+BASH_EVENTS = ('bashStart', 'bashPowerStart')
 #: The vanilla attack-window pair bounding a re-attack transition, and its flags.
 ATTACK_WINDOW = ('AttackWinStart', 'AttackWinEnd')
 F_WINDOW = 'FLAG_DISABLE_CONDITION|FLAG_USE_INITIATE_INTERVAL'
@@ -122,10 +144,10 @@ class GunClips:
                 bool(iron), pitch or '')
 
     def find(self, cls, action, prefix='', letter=None, start=False,
-             pitch=None):
+             pitch=None, iron=False):
         """The stem of one clip, or None."""
         return self.by_key.get(self._key(prefix, cls, action, letter, start,
-                                         False, pitch))
+                                         iron, pitch))
 
     def present_classes(self) -> list:
         """The classes with an attack clip, in GUN_CLASSES order."""
@@ -186,9 +208,14 @@ class GunGraphBuilder(GraphBuilder):
     def clip(self, name, stem, looping, triggers_ref='null', rate=1.0,
              anim=None, triggers=(), speed_var=None):
         """A clip generator playing manifest clip `stem`; `speed_var` binds
-        its playbackSpeed to that graph variable."""
+        its playbackSpeed to that graph variable. A clip that animates gun
+        parts raises its own stem at frame 0, the weapon mesh's sequence.
+        See: docs/commentary/asset_convert_falloutnv.md#gun-parts
+        """
         entry = self.clips.entries[stem]
         name = self.unique(name)
+        if entry.get('parts'):
+            triggers = [*triggers, (0.0, stem, False)]
         if triggers:
             triggers_ref = self.trig(triggers)
         c = self.add('hkbClipGenerator')
@@ -374,24 +401,25 @@ def _first(clips: GunClips, cls, actions, prefix=''):
     return None
 
 
-def pose_stems(clips: GunClips, cls, sneak=False):
-    """(down, level, up) aim stems of a class; sneak falls back to standing."""
+def pose_stems(clips: GunClips, cls, sneak=False, iron=False):
+    """(down, level, up) aim stems of a class; sneak falls back to standing,
+    and None when the iron-sight set is asked for and absent."""
     for prefix in (('sneak', '') if sneak else ('',)):
-        level = clips.find(cls, 'aim', prefix) or clips.find(cls, 'idle', prefix)
-        down = clips.find(cls, 'aim', prefix, pitch='down')
-        up = clips.find(cls, 'aim', prefix, pitch='up')
+        level = (clips.find(cls, 'aim', prefix, iron=iron)
+                 or (None if iron else clips.find(cls, 'idle', prefix)))
+        down = clips.find(cls, 'aim', prefix, pitch='down', iron=iron)
+        up = clips.find(cls, 'aim', prefix, pitch='up', iron=iron)
         if level or (down and up):
             return down, level, up
     return None
 
 
-def pose_gen(gb: GunGraphBuilder, cls, name, sneak_switch=True,
-             triggers=()):
-    """The drawn aim pose (pitch blend), with the sneak variant when present."""
-    stand = gb.pitch_blend(f'{name}_Stand', pose_stems(gb.clips, cls),
-                           triggers)
-    sneak = pose_stems(gb.clips, cls, sneak=True)
-    if not sneak_switch or sneak == pose_stems(gb.clips, cls):
+def _stance(gb: GunGraphBuilder, cls, name, sneak_switch, triggers, iron):
+    """The aim pose (pitch blend) with the sneak variant when present."""
+    hip = pose_stems(gb.clips, cls, iron=iron)
+    stand = gb.pitch_blend(f'{name}_Stand', hip, triggers)
+    sneak = pose_stems(gb.clips, cls, sneak=True, iron=iron)
+    if not sneak_switch or sneak == hip:
         return stand
     crouch = gb.pitch_blend(f'{name}_Sneak', sneak, triggers)
     return gb.sm(f'{name}_SneakSwitch', [
@@ -400,6 +428,36 @@ def pose_gen(gb: GunGraphBuilder, cls, name, sneak_switch=True,
         gb.state_c(1, f'{name}_Sneaking', crouch.ref,
                    [('SneakStop', 0, None, 0, None)])],
         bind_var='iIsInSneak')
+
+
+def pose_gen(gb: GunGraphBuilder, cls, name, sneak_switch=True,
+             triggers=()):
+    """The drawn aim pose, selecting the class' iron-sight pose on the zoom
+    variable when the class has one.
+    See: docs/commentary/tes_runtime_guns.md#zoom
+    """
+    hip = _stance(gb, cls, name, sneak_switch, triggers, False)
+    if pose_stems(gb.clips, cls, iron=True) is None:
+        return hip
+    iron = _stance(gb, cls, f'{name}_IS', sneak_switch, triggers, True)
+    return gb._blender(f'{name}_ZoomBlend', [(hip.ref, 0.0), (iron.ref, 1.0)],
+                       ZOOM_BLEND_VAR, '0.000000', PARAMETRIC_BLEND)
+
+
+def moving_gen(gb: GunGraphBuilder, cls, lower_bw, upper_bw):
+    """1HM_Locomotion while moving and, on the zoom variable, the class'
+    iron-sight aim pose over its lower body (FNV overlays the pose).
+    See: docs/commentary/tes_runtime_guns.md#zoom
+    """
+    loco = gb.bref(f'TES4Gun_{cls}_LocoBFR', 'Behaviors\\1HM_Locomotion.hkx')
+    if pose_stems(gb.clips, cls, iron=True) is None:
+        return loco
+    legs = gb.bref(f'TES4Gun_{cls}_LocoISBFR', 'Behaviors\\1HM_Locomotion.hkx')
+    torso = _stance(gb, cls, f'TES4Gun_{cls}_Moving_IS', True, (), True)
+    iron = gb.body_blend(f'TES4Gun_{cls}_MovingISBlend', legs.ref, torso.ref,
+                         lower_bw, upper_bw)
+    return gb._blender(f'TES4Gun_{cls}_Moving_ZoomBlend', [(loco.ref, 0.0), (iron.ref, 1.0)],
+                       ZOOM_BLEND_VAR, '0.000000', PARAMETRIC_BLEND)
 
 
 def ready_machine(gb: GunGraphBuilder, cls, lower_bw, upper_bw):
@@ -428,53 +486,64 @@ def ready_machine(gb: GunGraphBuilder, cls, lower_bw, upper_bw):
         gb.state_c(2, 'TurnLeft', turn['left'],
                    [('turnRight', 0, None, 0, None), ('turnStop', 1, None, 0, None)])],
         start=1, bind_var='iSyncTurnState')
-    loco = gb.bref(f'TES4Gun_{cls}_LocoBFR', 'Behaviors\\1HM_Locomotion.hkx')
+    moving = moving_gen(gb, cls, lower_bw, upper_bw)
     return gb.sm(f'TES4Gun_{cls}_Ready', [
         gb.state_c(0, 'Standing', standing.ref, [('moveStart', 1, None, 0, None)]),
-        gb.state_c(1, 'Moving', loco.ref, [('moveStop', 0, None, 0, None)])],
+        gb.state_c(1, 'Moving', moving.ref, [('moveStop', 0, None, 0, None)])],
         bind_var='iSyncIdleLocomotion')
 
 
 def fire_triggers(entry: dict) -> list:
-    """The engine's ranged-shot event sequence at the clip's fire frame, and
-    the attack window opening at FNV's `a:` (next attack) key.
-    See: docs/commentary/asset_convert_falloutnv.md#fire-rate
+    """The shot trigger at the clip's fire frame (TESRuntime launches the
+    round on it), and the attack window opening at FNV's `a:` key.
+    See: docs/commentary/tes_runtime_guns.md#the-shot
     """
-    t = (entry.get('hits') or [0.05])[0]
+    t = (entry.get('hits') or [0.02])[0]
     nxt = entry.get('keys', {}).get('next', max(t, entry['duration'] - 0.034))
-    return [(max(0.0, t - 0.03), 'arrowAttach', False),
-            (max(0.0, t - 0.02), 'bowDrawn', False),
-            (max(0.0, t - 0.01), 'BowRelease', False),
-            (t, 'arrowRelease', False),
+    return [(t, SHOT_EVENT, False),
             (nxt, ATTACK_WINDOW[0], False),
             (nxt, 'attackStop', False),
             (0.0, ATTACK_WINDOW[1], True),
             (0.0, 'TES4GunFireEnd', True)]
 
 
-def _attack_gen(gb: GunGraphBuilder, cls, action, tag):
+def _attack_blend(gb: GunGraphBuilder, cls, action, name, iron):
     """One attack's pitch blend at the gun's speed, every clip carrying the
     shot triggers; the loop attack plays at the class' loop speed.
     See: docs/commentary/asset_convert_falloutnv.md#automatic-fire-rate
     """
-    level = gb.clips.find(cls, action)
+    level = gb.clips.find(cls, action, iron=iron)
     trig = fire_triggers(gb.clips.entries[level])
-    stems = (gb.clips.find(cls, action, pitch='down'), level,
-             gb.clips.find(cls, action, pitch='up'))
+    stems = (gb.clips.find(cls, action, pitch='down', iron=iron), level,
+             gb.clips.find(cls, action, pitch='up', iron=iron))
     speed = LOOP_SPEED_VAR if action == LOOP_ACTION else 'weaponSpeedMult'
-    return gb.pitch_blend(f'TES4Gun_{cls}_{action}{tag}', stems, trig,
-                          looping=False, speed_var=speed)
+    return gb.pitch_blend(name, stems, trig, looping=False, speed_var=speed)
 
 
-def _count_assignments(gb: GunGraphBuilder, cls, mine, other) -> list:
-    """A fire state's per-frame assignments: the idempotent shot count and,
-    when the class has a loop attack, its loop speed."""
-    out = [(f'{other} + 1', 'iGunShots'), ('iGunShots', mine)]
+def _attack_gen(gb: GunGraphBuilder, cls, action, tag):
+    """One attack, hip or (on the zoom variable) FNV's own iron-sight fire
+    clip when it ships one.
+    See: docs/commentary/tes_runtime_guns.md#zoom
+    """
+    name = f'TES4Gun_{cls}_{action}{tag}'
+    hip = _attack_blend(gb, cls, action, name, False)
+    if not gb.clips.find(cls, action, iron=True):
+        return hip
+    iron = _attack_blend(gb, cls, action, f'{name}_IS', True)
+    return gb.msg(f'{name}_ZoomMSG', [hip.ref, iron.ref], ZOOM_VAR)
+
+
+def _fire_gen(gb: GunGraphBuilder, cls, letter):
+    """The fire clip selector, under a per-frame loop-speed assignment when
+    the class has a loop attack."""
+    gen = fire_msg(gb, cls, letter)
     loop = gb.clips.find(cls, LOOP_ACTION)
-    if loop:
-        dur = gb.clips.entries[loop]['duration']
-        out.append((f'weaponSpeedMult * {dur:.5f}', LOOP_SPEED_VAR))
-    return out
+    if not loop:
+        return gen
+    dur = gb.clips.entries[loop]['duration']
+    eem = gb.eem_assign(f'TES4Gun_{cls}_LoopSpeed{letter}',
+                        [(f'weaponSpeedMult * {dur:.5f}', LOOP_SPEED_VAR)])
+    return gb.mod_gen(f'TES4Gun_{cls}_Fire{letter}', [eem.ref], gen.ref)
 
 
 def fire_msg(gb: GunGraphBuilder, cls, tag):
@@ -535,30 +604,19 @@ def reload_msg(gb: GunGraphBuilder, cls):
 RELOAD_COND = '(iGunClipSize > 0) && (iGunShots >= iGunClipSize)'
 
 
-def fire_machine(gb: GunGraphBuilder, cls):
-    """Fire (A/B alternate for automatics) -> reload or done.
+def fire_machine(gb: GunGraphBuilder, cls, reload_entry=False):
+    """Fire (A/B alternate for automatics) -> reload or done; `reload_entry`
+    starts the machine at Reload (Done without a reload clip).
 
-    The shot count is kept by idempotent per-frame assignments: each fire
-    state sets iGunShots one above the other state's base and re-bases the
-    other; done/reload states re-base both, so a state entry counts once.
-    The transitions are instant so only one state's modifier runs per frame.
+    `iGunShots` is TESRuntime's; the transitions are instant since the fire
+    clips end at the aim pose.
     See: docs/commentary/asset_convert_falloutnv.md#fire-transitions-are-instant
     """
-    eem_a = gb.eem_assign(f'TES4Gun_{cls}_CountA',
-                          _count_assignments(gb, cls, 'iGunBaseB', 'iGunBaseA'))
-    eem_b = gb.eem_assign(f'TES4Gun_{cls}_CountB',
-                          _count_assignments(gb, cls, 'iGunBaseA', 'iGunBaseB'))
-    eem_done = gb.eem_assign(f'TES4Gun_{cls}_Rebase',
-                             [('iGunShots', 'iGunBaseA'),
-                              ('iGunShots', 'iGunBaseB')])
-    fire_a = gb.mod_gen(f'TES4Gun_{cls}_FireA', [eem_a.ref],
-                        fire_msg(gb, cls, 'A').ref)
-    fire_b = gb.mod_gen(f'TES4Gun_{cls}_FireB', [eem_b.ref],
-                        fire_msg(gb, cls, 'B').ref)
-    done_pose = pose_gen(gb, cls, f'TES4Gun_{cls}_Done', sneak_switch=False,
-                         triggers=[(0.02, 'attackStop', False),
-                                   (0.02, 'TES4GunAttackEnd', False)])
-    done = gb.mod_gen(f'TES4Gun_{cls}_DoneMG', [eem_done.ref], done_pose.ref)
+    fire_a = _fire_gen(gb, cls, 'A')
+    fire_b = _fire_gen(gb, cls, 'B')
+    done = pose_gen(gb, cls, f'TES4Gun_{cls}_Done', sneak_switch=False,
+                    triggers=[(0.02, 'attackStop', False),
+                              (0.02, 'TES4GunAttackEnd', False)])
     reload_gen = reload_msg(gb, cls)
 
     def fire_trans(other):
@@ -566,31 +624,34 @@ def fire_machine(gb: GunGraphBuilder, cls):
         window), the other fire state, done.
         See: docs/commentary/asset_convert_falloutnv.md#reload-on-the-window
         """
-        out = [('crossbowAttackStart', other, None, 3, F_WINDOW, ATTACK_WINDOW),
+        out = [(FIRE_EVENT, other, None, 3, F_WINDOW, ATTACK_WINDOW),
                ('TES4GunFireEnd', other, 'iGunAuto == 1', 1, None),
                ('TES4GunFireEnd', 3, None, 0, None),
-               ('attackRelease', 3, 'iGunAuto == 1', 0, None)]
+               (FIRE_RELEASE, 3, 'iGunAuto == 1', 0, None)]
         if reload_gen is not None:
-            out[:0] = [('crossbowAttackStart', 2, RELOAD_COND, 4,
+            out[:0] = [(RELOAD_REQUEST, 2, RELOAD_ALLOWED, 5, None),
+                       (ENGINE_RELOAD, 2, RELOAD_ALLOWED, 5, None),
+                       (FIRE_EVENT, 2, RELOAD_COND, 4,
                         F_WINDOW_COND, ATTACK_WINDOW),
                        ('TES4GunFireEnd', 2, RELOAD_COND, 2, None)]
         return out
     states = [gb.state_c(0, 'FireA', fire_a.ref, fire_trans(1), True),
               gb.state_c(1, 'FireB', fire_b.ref, fire_trans(0), True)]
     if reload_gen is not None:
-        eem_reload = gb.eem_assign(f'TES4Gun_{cls}_Refill',
-                                   [('0', 'iGunShots'), ('0', 'iGunBaseA'),
-                                    ('0', 'iGunBaseB')])
-        reload = gb.mod_gen(f'TES4Gun_{cls}_Reload', [eem_reload.ref],
-                            reload_gen.ref)
-        states.append(gb.state_c(2, 'Reload', reload.ref,
+        states.append(gb.state_c(2, 'Reload', reload_gen.ref,
                                  [('TES4GunReloadEnd', 3, None, 0, None)],
                                  True))
-    states.append(gb.state_c(3, 'Done', done.ref))
-    return gb.sm(f'TES4Gun_{cls}_FireBehavior', states)
+    again = [(FIRE_EVENT, 0, None, 0, None)]
+    if reload_gen is not None:
+        again.insert(0, (FIRE_EVENT, 2, RELOAD_COND, 4, None))
+    states.append(gb.state_c(3, 'Done', done.ref, again))
+    start = (2 if reload_gen is not None else 3) if reload_entry else 0
+    return gb.sm(f'TES4Gun_{cls}_Fire{"Reload" if reload_entry else ""}Behavior',
+                 states, start=start)
 
 
-def attack_machine(gb: GunGraphBuilder, cls, lower_bw, upper_bw):
+def attack_machine(gb: GunGraphBuilder, cls, lower_bw, upper_bw,
+                   reload_entry=False):
     """The fire machine on the upper body over standing/moving lower body."""
     stand = pose_gen(gb, cls, f'TES4Gun_{cls}_AttackStand')
     loco = gb.bref(f'TES4Gun_{cls}_AttackLocoBFR',
@@ -600,7 +661,8 @@ def attack_machine(gb: GunGraphBuilder, cls, lower_bw, upper_bw):
         gb.state_c(1, 'Moving', loco.ref, [('moveStop', 0, None, 0, None)])],
         bind_var='iSyncIdleLocomotion')
     return gb.body_blend(f'TES4Gun_{cls}_AttackBlend', lower.ref,
-                         fire_machine(gb, cls).ref, lower_bw, upper_bw)
+                         fire_machine(gb, cls, reload_entry).ref,
+                         lower_bw, upper_bw)
 
 
 def class_selector(gb: GunGraphBuilder, name, build):

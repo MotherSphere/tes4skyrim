@@ -32,8 +32,8 @@ from ..skyrim_overrides import (
 )
 from .equipment_falloutnv import ammo_flags, gun_speed
 from .equipment_falloutnv import refine_anim_type as refine_fallout_anim_type
-from .projectile_falloutnv import (ammo_model, ammo_projectile,
-                                   gun_sheathe_sounds, gun_sound_subs)
+from .projectile_falloutnv import (ammo_projectile, gun_sheathe_sounds,
+                                   gun_sound_subs)
 from .common import (
     VENDOR_KYWD,
     _common_header_subs,
@@ -371,10 +371,11 @@ def convert_WEAP(rec: dict, writer=None) -> bytes:
     # DNAM — weapon parameters (100 bytes)
     dnam = bytearray(100)
     struct.pack_into('<B', dnam, 0, anim_type)
-    struct.pack_into('<f', dnam, 4, WEAPON_ANIM_MULT.get(anim_type, 1.0))   # animationMultiplier
-    struct.pack_into('<f', dnam, 8, reach if reach > 0.0 else 1.0)             # Reach (0.0 is invalid; default to 1.0)
-    struct.pack_into('<I', dnam, 12, WEAPON_ANIM_FLAGS.get(anim_type, 0))   # Flags
-    struct.pack_into('<f', dnam, 44, speed)                                  # Speed (animationAttackMult slot)
+    struct.pack_into('<f', dnam, 4, gun_speed(rec, WEAPON_ANIM_MULT.get(anim_type, 1.0)))
+    struct.pack_into('<f', dnam, 8, reach if reach > 0.0 else 1.0)
+    struct.pack_into('<I', dnam, 12, WEAPON_ANIM_FLAGS.get(anim_type, 0))
+    struct.pack_into('<B', dnam, 26, max(1, get_int(rec, 'DNAM.ProjectileCount', 1)))
+    struct.pack_into('<f', dnam, 44, speed)
     struct.pack_into('<B', dnam, 76, WEAPON_ANIM_STAGGER.get(anim_type, 0)) # Stagger
     subs += pack_subrecord('DNAM', bytes(dnam))
 
@@ -714,7 +715,7 @@ def _build_arrow_proj(edid: str, model_path: str, speed: float, proj_fid: int) -
 
 def convert_AMMO(rec: dict, writer=None) -> bytes:
     subs = _common_header_subs(rec, obnd_sig='AMMO')
-    model = ammo_model(rec) or get_str(rec, 'Model.MODL')
+    model = get_str(rec, 'Model.MODL')
     if model:
         subs += pack_string_subrecord('MODL', prefix_path(model))
 

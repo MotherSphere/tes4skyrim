@@ -36,7 +36,8 @@ constexpr std::uint8_t kFormTypeActor = 0x3e;
 // TESObjectREFR / Actor layout the plugin reads.
 constexpr std::size_t kRefCount = 0x28;        // BSHandleRefObject, low 10 bits
 constexpr std::size_t kActorValueOwner = 0xb8;
-constexpr std::size_t kVtGet3D = 0x70;
+constexpr std::size_t kVtGet3D = 0x70;             // Get3D(): the 3D of the current camera
+constexpr std::size_t kVtGet3DFirstPerson = 0x6f;  // Get3D(bool firstPerson)
 constexpr std::size_t kVtGetObjectByName = 0x2a;
 constexpr int kActorValueHealth = 0x18;
 

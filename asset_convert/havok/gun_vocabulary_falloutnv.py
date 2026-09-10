@@ -10,6 +10,8 @@ See: docs/commentary/asset_convert_falloutnv.md#gun-animations
 ANIM_TYPE_CLASS = {3: '1hp', 4: '1hp', 5: '2hr', 6: '2ha', 7: '2hr',
                    8: '2hh', 9: '2hl'}
 
+#: The prefix FNV gives weapon nodes its actor clips animate (##Clip, ##Slide).
+PART_PREFIX = '##'
 #: The classes in graph order: iGunClass is an index into this tuple.
 GUN_CLASSES = ('1hp', '2hr', '2ha', '2hh', '2hl')
 

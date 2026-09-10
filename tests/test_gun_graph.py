@@ -22,7 +22,7 @@ BASE_EVENTS = ['crossbowAttackStart', 'attackRelease', 'attackStop',
                'SneakStart', 'SneakStop', 'WeapEquip_Out',
                'WeapEquip_OutMoving', 'weaponDraw', 'BeginWeaponDraw',
                'AttackWinStart', 'AttackWinEnd']
-BASE_VARS = ['iRightHandType', 'iLeftHandType', 'AimPitchCurrent',
+BASE_VARS = ['iRightHandType', 'iLeftHandType', 'AimPitchCurrent', 'bBowDrawn',
              'weaponSpeedMult',
              'iIsInSneak', 'iSyncTurnState', 'iSyncIdleLocomotion',
              'Direction', 'SpeedSampled']
@@ -88,18 +88,19 @@ class TestMachines:
         root = ET.fromstring(xml)
         objs = {o.get('name'): o for o in root.find('hksection')}
         names = {o.get('class') for o in objs.values()}
-        assert {'hkbEvaluateExpressionModifier', 'hkbManualSelectorGenerator',
-                'hkbExpressionCondition', 'hkbClipTriggerArray'} <= names
+        assert {'hkbManualSelectorGenerator', 'hkbExpressionCondition',
+                'hkbClipTriggerArray'} <= names
+        assert 'hkbEvaluateExpressionModifier' not in names
         fire_gens = [g for g in gb.generators if 'attack' in g['stem']]
         assert fire_gens
         events = {e for g in fire_gens for _t, e in g['events']}
-        assert {'arrowAttach', 'bowDrawn', 'BowRelease', 'arrowRelease',
-                'TES4GunFireEnd'} <= events
-        release = [t for g in fire_gens for t, e in g['events'] if e == 'arrowRelease']
-        assert all(t >= 0.0 for t in release)
+        assert {'arrowRelease', 'attackStop', 'TES4GunFireEnd'} <= events
+        assert not {'arrowAttach', 'bowDrawn', 'BowRelease'} & events
+        shots = [t for g in fire_gens for t, e in g['events'] if e == 'arrowRelease']
+        assert shots and all(t >= 0.0 for t in shots)
         conds = [(param_text(o, 'expression')) for o in objs.values()
                  if o.get('class') == 'hkbExpressionCondition']
-        assert any('iGunClipSize' in c for c in conds)
+        assert any('iGunShots >= iGunClipSize' in c for c in conds)
         assert any('iGunAuto == 1' in c for c in conds)
 
     def test_reload_chain_and_end_events(self):
@@ -301,6 +302,6 @@ class TestGunProfile:
                'DNAM.Flags1': '2'}
         p = gun_profile(rec)
         assert p == {'class': 1, 'reload': 2, 'attack': 2, 'clip_size': 8,
-                     'auto': 1}
+                     'auto': 1, 'dry_sound': '', 'sight_fov': 65.0, 'ammo': []}
         assert gun_profile({'DNAM.FalloutAnimType': '1'}) is None
         assert gun_profile({'DNAM.FalloutAnimType': '3'})['attack'] == -1

@@ -129,10 +129,10 @@ _WEAP_FORMIDS = ("SNAM", "XNAM", "NAM7", "TNAM", "UNAM", "NAM9", "NAM8",
 def _emit_weap_fire(lines: list, rec: Record, dnam):
     """The gun's projectile, ammo use, rate fields and sound links.
 
-    DNAM offsets (wbDefinitionsFNV): 14 Ammo Use, 36 Projectile, 42
-    Projectile Count, 60 Animation Attack Multiplier, 64 Fire Rate, 88
-    Attack Shots/Sec. SNAM appears twice (shoot 3D, shoot distant); the
-    first is the shot.
+    DNAM offsets (wbDefinitionsFNV): 14 Ammo Use, 28 Sight FOV, 36
+    Projectile, 42 Projectile Count, 60 Animation Attack Multiplier, 64
+    Fire Rate, 88 Attack Shots/Sec. SNAM appears twice (shoot 3D, shoot
+    distant); the first is the shot.
     See: docs/commentary/tes4_export_falloutnv.md#projectiles
     """
     if dnam and len(dnam.data) >= 44:
@@ -142,6 +142,7 @@ def _emit_weap_fire(lines: list, rec: Record, dnam):
                      f"{get_formid_str(struct.unpack_from('<I', d, 36)[0])}")
         lines.append(f"DNAM.ProjectileCount={d[42]}")
     if dnam:
+        emit_float(lines, "DNAM.SightFOV", dnam, 28)
         emit_float(lines, "DNAM.AnimAttackMult", dnam, 60)
         emit_float(lines, "DNAM.FireRate", dnam, 64)
         emit_float(lines, "DNAM.ShotsPerSec", dnam, 88)

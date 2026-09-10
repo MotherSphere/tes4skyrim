@@ -19,8 +19,9 @@ from asset_convert.havok.animation_data import (clip_block_lines,
                                                 crc_triple_lines,
                                                 motion_entry_lines)
 from asset_convert.havok.gun_graph_falloutnv import (
-    GUN_EVENTS, GUN_HAND_TYPE, GUN_VARIABLES, LOOP_SPEED_VAR, GunClips,
-    GunGraphBuilder,
+    BASH_EVENTS, CROSSBOW_ATTACK, ENGINE_RELOAD, FIRE_EVENT, GUN_EVENTS, GUN_HAND_TYPE,
+    GUN_VARIABLES,
+    LOOP_SPEED_VAR, RELOAD_ALLOWED, RELOAD_REQUEST, ZOOM_BLEND_VAR, GunClips, GunGraphBuilder,
     attack_machine, class_selector, equip_gen, loco_machine, ready_machine,
     unequip_gen)
 from asset_convert.havok.gun_moves_falloutnv import (SPRINT_SELECTORS,
@@ -71,7 +72,9 @@ def _prepare(g: HumanoidGraph, clips: GunClips) -> GunGraphBuilder:
     for v in GUN_VARIABLES:
         g.add_variable(v)
     g.add_variable(LOOP_SPEED_VAR, 1.0, real=True)
-    for e in GUN_EVENTS:
+    g.add_variable(ZOOM_BLEND_VAR, 0.0, real=True)
+    parts = [s for s, e in clips.entries.items() if e.get('parts')]
+    for e in (*GUN_EVENTS, *parts):
         if e not in g.events:
             g.add_event(e)
     return GunGraphBuilder(g.events, g.variables, g.next_id(), clips)
@@ -88,11 +91,10 @@ def _finish(g: HumanoidGraph, gb: GunGraphBuilder, top, replacements: dict,
 
 
 def patch_1hm(g: HumanoidGraph, clips: GunClips, out_path: str) -> list:
-    """The readied slot and the attack state, entered on crossbowAttackStart.
-
-    The engine sends crossbowAttackStart for every weapon whose record is a
-    crossbow, which a converted gun is; a hand type of 13 routes it to the
-    gun attack state ahead of the vanilla crossbow transition.
+    """The readied slot and the attack state, entered on TESRuntime's
+    TES4GunFire: the engine's own attack actions are swallowed for a gun
+    holder, so nothing of the crossbow's attack path reaches the graph.
+    See: docs/commentary/tes_runtime_guns.md#own-the-click
     """
     gb = _prepare(g, clips)
     blend = g.find('CrossBow_AttackUpperLowerBody3rdPBlend')
@@ -103,21 +105,43 @@ def patch_1hm(g: HumanoidGraph, clips: GunClips, out_path: str) -> list:
     attack = class_selector(
         gb, 'TES4Gun_Attack_MSG',
         lambda c: attack_machine(gb, c, lower_bw, upper_bw))
+    reload = class_selector(
+        gb, 'TES4Gun_ReloadEntry_MSG',
+        lambda c: attack_machine(gb, c, lower_bw, upper_bw, True))
     g.splice(gb.render(ready))
+    _gun_root_states(g, attack.ref, reload.ref)
+    g.extend_type_slots(GUN_HAND_TYPE,
+                        {'1HM_Readied_BehaviorGraph': ready.ref})
+    g.widen_type_conditions(LAST_VANILLA_TYPE, GUN_HAND_TYPE, BASH_EVENTS)
+    g.write(out_path)
+    return gb.generators
+
+
+def _gun_root_states(g: HumanoidGraph, attack_ref: str, reload_ref: str):
+    """Two root states: the attack entered on TES4GunFire, and the
+    same machine started at Reload, entered on the reload request and on
+    the engine's own reloadStart (ammo equipped) while the magazine is not
+    full; both leave on TES4GunAttackEnd. The vanilla crossbow transitions
+    on reloadStart and crossbowAttackStart are gated to non-gun hand types.
+    See: docs/commentary/tes_runtime_guns.md#bash-and-reload-events
+    """
     root = g.find('1HM_Behavior', 'hkbStateMachine')
     sid = max(int(param_text(g.obj(r), 'stateId'))
               for r in g.ref_list(root, 'states')) + 1
-    g.add_state(root, sid, 'TES4Gun_AttackState', attack.ref)
-    g.add_transition(g.state_of(root, sid), 'TES4GunAttackEnd', 0)
+    g.add_state(root, sid, 'TES4Gun_AttackState', attack_ref)
+    g.add_state(root, sid + 1, 'TES4Gun_ReloadState', reload_ref)
+    for s in (sid, sid + 1):
+        g.add_transition(g.state_of(root, s), 'TES4GunAttackEnd', 0)
+    gun = f'iRightHandType == {GUN_HAND_TYPE}'
+    for event in (ENGINE_RELOAD, CROSSBOW_ATTACK):
+        g.gate_transitions(event, f'iRightHandType != {GUN_HAND_TYPE}')
+    reload_cond = f'({gun}) && ({RELOAD_ALLOWED})'
     for entry in (0, 1, 2):
-        g.add_transition(g.state_of(root, entry), 'crossbowAttackStart', sid,
-                         condition=f'iRightHandType == {GUN_HAND_TYPE}',
-                         priority=1, first=True)
-    g.extend_type_slots(GUN_HAND_TYPE,
-                        {'1HM_Readied_BehaviorGraph': ready.ref})
-    g.widen_type_conditions(LAST_VANILLA_TYPE, GUN_HAND_TYPE)
-    g.write(out_path)
-    return gb.generators
+        for event, to, cond in ((FIRE_EVENT, sid, gun),
+                                (RELOAD_REQUEST, sid + 1, reload_cond),
+                                (ENGINE_RELOAD, sid + 1, reload_cond)):
+            g.add_transition(g.state_of(root, entry), event, to,
+                             condition=cond, priority=1, first=True)
 
 
 def patch_weapequip(g: HumanoidGraph, clips: GunClips, out_path: str) -> list:
@@ -250,7 +274,7 @@ def _set_block(clips: GunClips, generators: list) -> list:
              'iLeftHandType', str(GUN_HAND_TYPE), str(GUN_HAND_TYPE),
              'iRightHandType', str(GUN_HAND_TYPE), str(GUN_HAND_TYPE),
              'iWantMountedWeaponAnims', '0', '0',
-             '1', 'crossbowAttackStart', '0', str(len(fires)), *fires]
+             '1', FIRE_EVENT, '0', str(len(fires)), *fires]
     lines += crc_triple_lines(clips.anim_dir, clips.entries)
     return lines
 

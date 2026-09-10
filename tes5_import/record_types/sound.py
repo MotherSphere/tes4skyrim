@@ -180,6 +180,11 @@ def _sound_anam_paths(filename: str) -> list:
     return variants or literal
 
 
+def sndr_editor_id(edid: str, fid: int) -> str:
+    """The EditorID of a SOUN's companion SNDR."""
+    return f"TES4_{edid}_SNDR" if edid else f"TES4_SOUN_{fid:08X}_SNDR"
+
+
 def _sndr_record(rec: dict, writer, edid: str, filename: str) -> tuple:
     """Build this SOUN's companion SNDR.  Returns (sndr_bytes, sndr_formid).
 
@@ -198,8 +203,7 @@ def _sndr_record(rec: dict, writer, edid: str, filename: str) -> tuple:
     sndr_fid = writer.derive_formid('SNDR', fid)
     record_sndr_for_soun(fid, sndr_fid)
 
-    sndr_edid = f"TES4_{edid}_SNDR" if edid else f"TES4_SOUN_{fid:08X}_SNDR"
-    subs = pack_string_subrecord('EDID', sndr_edid)
+    subs = pack_string_subrecord('EDID', sndr_editor_id(edid, fid))
     subs += pack_uint32_subrecord('CNAM', 0x1EEF540A)
     subs += pack_formid_subrecord('GNAM', _sndr_gnam(tes4_flags, is_2d))
     for anam in _sound_anam_paths(filename):

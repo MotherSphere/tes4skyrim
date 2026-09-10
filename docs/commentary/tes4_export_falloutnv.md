@@ -273,14 +273,16 @@ PROJs with a muzzle-flash light are all Cone/Flame spell projectiles, cast
 with a caster reference; no weapon-launched Missile or Arrow has one. The
 converter keeps the flag and the `NAM1` flash model and writes light 0.
 
-<a id="nocked-model"></a>**The AMMO's model is its bullet, not its box.**
-Skyrim attaches the AMMO's `MODL` to the hand at `arrowAttach` (the
-nocked arrow: different arrows look different in hand) and shows it in
-the inventory viewer. A FNV AMMO's model is a box of rounds
-(`ammo\9mmammo.nif`), so every shot would flash a carton at the hand for
-the 30 ms between attach and release. The converted AMMO therefore takes
-its projectile's model (`projectiles\9mmprojectile.nif`), which sits inside
-the gun; its own box model is used only when no projectile resolves.
+<a id="nocked-model"></a>**The AMMO's model is its box; nothing is
+attached to the actor.** Skyrim attaches the AMMO's `MODL` to the hand at
+`arrowAttach` and to the actor's `QUIVER` node while equipped, and shows
+it in the inventory viewer and on the ground. A gun clip never raises
+`arrowAttach`, so the earlier bullet-model substitution (a carton at the
+hand for 30 ms) is moot and the FNV box model (`ammo\9mmammo.nif`) is
+kept for the inventory and the world; the flying round is the PROJ's own
+model. The quiver attachment (which sat at a gun holder's feet) is
+culled by TESRuntime on every gun draw and ammo equip, and restored on a
+non-gun draw (docs/commentary/tes_runtime_guns.md#quiver).
 
 ### <a id="impacts"></a>Impacts: the gun's own IPDS, not the arrow's
 

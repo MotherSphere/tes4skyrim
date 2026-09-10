@@ -46,15 +46,16 @@ class TestClipGrammar:
 
     def test_selection_follows_the_authored_binding(self):
         """Only the letters/attacks the WEAPs name, plus the shared and
-        locomotion sets, survive; iron sights and power armor do not."""
+        locomotion sets, survive; of the iron-sight set the aim poses and
+        the bound attacks (for the zoom key), and power armor never."""
         bindings = [{'cls': '1hp', 'reload': 'c', 'attack': 'attack3'},
                     {'cls': '2hr', 'reload': 'a', 'attack': None}]
         stems = ['1hpreloada', '1hpreloadc', 'sneak1hpreloadc', '1hpattack3',
-                 '1hpattack4', '1hpaimis', 'pa1hpaim', '2hrreloada',
-                 '2hrattack3', '2hrattackleft', '2hlreloada', '1hpequip',
-                 '2hrfastforward', '1hpturnleft', '2hrreloadastart']
+                 '1hpattack4', '1hpaimis', '1hpattack3is', 'pa1hpaim',
+                 '2hrreloada', '2hrattack3', '2hrattackleft', '2hlreloada',
+                 '1hpequip', '2hrfastforward', '1hpturnleft', '2hrreloadastart']
         assert select_stems(bindings, stems) == [
-            '1hpattack3', '1hpequip', '1hpreloadc', '1hpturnleft',
+            '1hpaimis', '1hpattack3', '1hpattack3is', '1hpequip', '1hpreloadc', '1hpturnleft',
             '2hrattack3', '2hrattackleft', '2hrfastforward', '2hrreloada',
             '2hrreloadastart', 'sneak1hpreloadc']
 

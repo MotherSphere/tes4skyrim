@@ -445,10 +445,13 @@ overwritten; the census over all 24 humanoid graphs found only these two. Per cl
 state runs fire (A/B alternation for automatics) → reload once the WEAP's clip
 size is spent → done, over a standing/moving lower body.
 
-The shot itself stays the engine's: clip triggers fire `arrowAttach`,
-`bowDrawn`, `BowRelease` and `arrowRelease` around the FNV `Hit` text key, the
-sequence the engine requires to launch a projectile (attack state 9 → 10 → 11
-→ 12). `reloadStart`/`reloadStop`/`bowEnd` do not exist in the executable and
+The shot is TESRuntime's: each clip carries one `TES4GunShot` trigger at
+the FNV `Hit` text key and the DLL fires the gun on it
+([the shot](tes_runtime_guns.md#the-shot)); the bow event trio it used to
+raise went through the engine's attack state machine, one cycle per shot,
+which is why nothing fired at a gun's rate
+([why not the crossbow](tes_runtime_guns.md#why-not-the-crossbow)).
+`reloadStart`/`reloadStop`/`bowEnd` do not exist in the executable and
 are graph-internal here. Shots are counted by idempotent per-frame
 `hkbEvaluateExpressionModifier` assignments rather than by an event, so a
 dropped frame cannot desync the count.
@@ -495,15 +498,19 @@ size until the player stopped firing. The window now carries a second
 `FLAG_DISABLE_CONDITION`, conditioned on `RELOAD_COND`.
 
 <a id="fire-transitions-are-instant"></a>**The fire machine's transitions
-carry no blend effect.** The idempotent count is only idempotent while one
-state's modifier runs per frame: under the shared 0.3 s crossfade FireA and
-Done were both active for ~18 frames, Done re-based `iGunBaseA` to
-`iGunShots` and FireA set `iGunShots` to `iGunBaseA + 1` again, so every
-frame of the blend counted a shot. One pistol shot left the count past a
-13-round clip and the second shot's `TES4GunFireEnd` met `RELOAD_COND` (the
-"two shots then reload" report). `fire_machine` builds its states with
-`instant=True`, a null transition, so exactly one modifier runs per frame;
-the fire clips end at the aim pose, so nothing visible crossfades anyway.
+carry no blend effect, and the graph no longer counts shots.** Two builds
+counted the magazine inside the graph with per-frame
+hkbEvaluateExpressionModifier assignments (`iGunShots = iGunBaseB + 1`,
+re-based by Done and Reload). Under the shared 0.3 s crossfade FireA and
+Done were both active for ~18 frames and every frame counted a shot ("two
+shots then reload"); with instant transitions (`instant=True`, a null
+transition) the count still ran past a 13-round clip after one shot, a
+reload clip playing straight after the fire clip's `TES4GunFireEnd`.
+TESRuntime already counts shots for the HUD, so it now writes
+`iGunShots` into every graph of the actor on each shot and resets it on
+`TES4GunReloadEnd` (`SetActorGraphInt`); the fire states carry only the
+automatic's loop-speed assignment. The transitions stay instant since the
+fire clips end at the aim pose.
 
 Every other humanoid graph (bash, block, sprint, stagger, magic, mounted,
 first person) has its type-12 slots cloned to 13, so no graph is short an
@@ -658,6 +665,44 @@ lacks a `<class>forward`, filled with that class' aim and named
 67 selected + 40 stand-in first-person clips, 138 clip generators in the
 FirstPerson project against 310 in DefaultMale/DefaultFemale.
 
+## <a id="gun-parts"></a>Gun parts: the magazine, slide and bolt
+
+**Code:** `asset_convert/nif/gun_parts_falloutnv.py`,
+`asset_convert/havok/gun_anim_falloutnv.py` (`parts` in the manifest),
+`asset_convert/havok/gun_graph_falloutnv.py` (`GunGraphBuilder.clip`),
+`asset_convert/havok/gun_patch_falloutnv.py` (`_prepare`).
+
+FNV animates a gun's moving parts from the ACTOR clip: `1hpreloada.kf`
+carries tracks for `##Clip` and `##Slide`, `2hrreloada.kf` for `##HRBolt`,
+`##HRClip`, `##HRTrigger`, and `1hpequip.kf` for 24 such nodes; the `##`
+prefix marks a node shared by every weapon mesh that has it, and no FNV
+weapon mesh holds a NiControllerSequence of its own (0 of the exported
+weapon meshes). The clip conversion keeps only skeleton bones, so those
+tracks were dropped and the magazine never moved. Skyrim animates a
+weapon's parts the other way round: a sequence inside the mesh, started
+by an animation event of the same name, through the sub-graph an
+attached mesh gets from its BGED (the crossbow string; Papyrus
+`PlaySubGraphAnimation` "sends the event to the actor's sub graphs, used
+for objects attached to actors"). So each FNV weapon mesh gains, for
+every gun clip whose `##` tracks name one of its nodes, a
+NiControllerSequence named after the clip stem (transform interpolators
+sampled from the clip, `start`/`end` keys, a managed
+NiTransformController per node), and the actor clip raises the stem as a
+trigger at its first frame (the manifest records `parts` per clip; the
+patch registers those stems as graph events). TESRuntime starts the
+sequence on that event (`parts.cpp`): the weapon root under the actor's
+`WEAPON` bone, its NiControllerManager, the name map and
+`NiControllerSequence::Activate`, the exact path of
+`ObjectReference.PlayGamebryoAnimation`; only a gun holder's events are
+looked up, and only NiNodes (vtable slot 3, `AsNiNode`) are walked, since a
+build that read the child array off every object crashed on a nocked
+vanilla bow's trishapes. A first build gave each weapon
+mesh a BGED sub-graph instead (the animated-object pass); attached to the
+player it broke the actor's own graph: T-pose in third person, invisible
+arms in first, no gun animation at all. The sequence plays at 1.0 while a
+fire clip plays at `weaponSpeedMult`; reload and equip clips play at 1.0,
+so only the slide of an automatic can drift.
+
 ## <a id="dismemberment"></a>Limb dismemberment at runtime
 
 **Code:** `tes5_import/record_types/bodypart_falloutnv.py`,
@@ -683,3 +728,15 @@ and after a game load, so a limb does not grow back when the cell unloads.
 
 Both sidecars carry plugin-local FormIDs plus the owning file, resolved
 through the running load order at DataLoaded, so no load position is assumed.
+
+## <a id="ammo-prn"></a>An AMMO model hangs on QUIVER
+
+Skyrim attaches an equipped AMMO's model to the actor at the node its NIF
+names in the `Prn` NiStringExtraData (Oblivion arrows carry `Quiver`,
+remapped to `QUIVER`); a NIF without one attaches at the skeleton root, so
+FNV's ammo boxes, which never hang on an actor in FNV and carry no `Prn`,
+appeared at the player's feet and outside the QUIVER node TESRuntime culls
+for a gun holder. The wearable plan now flags every `AMMO` record's
+`Model.MODL` (`QUIVER`), and `convert_prn` gives such a root without an
+authored `Prn` the value `QUIVER` with no seating transform or inventory
+marker, so the box sits under the node the DLL hides.
