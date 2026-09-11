@@ -32,7 +32,7 @@ import os
 import sys
 from collections import Counter
 
-from tes5_import.tes5_reader import GRP_EXT_BLOCK, walk
+from tes5_import.base.tes5_reader import GRP_EXT_BLOCK, walk
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

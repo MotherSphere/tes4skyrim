@@ -1,7 +1,7 @@
 # Plan — "Vanilla Creature Swap" ESP generator + GUI
 
 **Status: PLAN, partly built.** The match table and resolver of section 2
-ship as `tes5_import/vanilla_creature_swap.py` (233 lines), read only by
+ship as `tes5_import/actors/vanilla_creature_swap.py` (233 lines), read only by
 `tools/creature/creature_swap_report.py` -- the pipeline imports neither.
 The ESP generator (section 4) and the GUI action (section 6) are unbuilt,
 and they are what this plan still describes.
@@ -143,7 +143,7 @@ creatures that must stay apart. The split is:
 | **Structural feature** | unicorn `Horn.NIF`, buck `antlar8point`, mammoth tusks | **NO** | Changes what the creature *is*, not how it is decorated. (Ram horns are NOT in this class — see below.) |
 
 **Rule: group by BASE BODY MESH; ignore attachments — with an explicit
-structural-parts allowlist that is never ignored.**
+structural-parts whitelist that is never ignored.**
 
 ```python
 # Cosmetic: strip before comparing (colour is in the texture, not the mesh name)

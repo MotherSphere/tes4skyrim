@@ -1,6 +1,6 @@
 # asset_convert/sources/mod_ingest.py - mod archive ingest
 
-**Code:** `asset_convert/sources/bsa_extract.py`, `asset_convert/sources/mod_ingest.py`, `asset_convert/sources/source_registry.py`, `tes5_import/overrides.py`
+**Code:** `asset_convert/sources/bsa_extract.py`, `asset_convert/sources/mod_ingest.py`, `asset_convert/sources/source_registry.py`, `tes5_import/overrides/nested.py`
 
 ## Contents
 
@@ -154,7 +154,7 @@ Everything downstream is already safe. The BSA extractor writes to
 `export/<plugin>/{meshes,textures,sound,trees,misc}`
 ([bsa_extract.py:378-390](../../asset_convert/sources/bsa_extract.py#L378-L390)) — exactly the
 shape a loose-file mod has. Masters resolve as **sibling directories under
-`export/`** ([overrides.py:73-80](../../tes5_import/overrides.py#L73-L80)).
+`export/`** ([overrides.py:73-80](../../tes5_import/overrides/nested.py#L73-L80)).
 
 **The architectural win: ingest only has to produce the same `export/<plugin>/`
 tree the BSA extractor already produces. Nothing after Phase 2 changes.**

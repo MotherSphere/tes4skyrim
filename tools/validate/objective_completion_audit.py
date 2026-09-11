@@ -30,8 +30,8 @@ import os
 import sys
 
 from script_convert.objective_completion import _closed_by, parallel_stages
-from tes5_import.quest_converter import pc_stage_texts
-from tes5_import.text_reader import get_int, get_str, parse_export_file
+from tes5_import.dialogue.quest import pc_stage_texts
+from tes5_import.base.text_reader import get_int, get_str, parse_export_file
 
 
 def _fragments(rec):

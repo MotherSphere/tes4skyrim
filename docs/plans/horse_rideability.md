@@ -19,7 +19,7 @@ Extend `tools/creature_inventory.py` (or the `creature_projects.json` contract) 
 `is_mount: bool` flag, set for the `horse` folder (matched by clip inventory shape —
 check for paired/rider-adjacent clip absence rather than hardcoding the string "horse",
 since Nehrim/other plugins may ship differently-named horse-equivalents or additional
-mountable creatures — e.g. detect via a config allowlist keyed on skeleton bone census
+mountable creatures — e.g. detect via a config whitelist keyed on skeleton bone census
 matching the vanilla horse, falling back to folder-name heuristic like the existing
 `_FOLDER_KEYWORDS` animal-tagging in `creature_races.py:107`).
 

@@ -117,7 +117,7 @@ class TestRecord:
 @needs_fnv
 class TestExport:
     def test_default_body_part_data_exported_with_limbs(self):
-        from tes5_import.text_reader import parse_export_file
+        from tes5_import.base.text_reader import parse_export_file
         recs = {r.get('EditorID'): r for r in parse_export_file(BPTD_TXT)}
         rec = recs['DefaultBodyPartData']
         assert int(rec['FormID'], 16) == DEFAULT_BODY_PART_DATA

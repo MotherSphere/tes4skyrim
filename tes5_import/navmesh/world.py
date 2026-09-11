@@ -18,7 +18,7 @@ import math
 
 import numpy as np
 
-from ..text_reader import get_float, get_str
+from ..base.text_reader import get_float, get_str
 from . import params
 
 _CELL_SIZE = 4096.0
@@ -26,30 +26,15 @@ _LAND_VERTS = 33
 _LAND_SPACING = _CELL_SIZE / (_LAND_VERTS - 1)   # 128.0
 _VHGT_UNIT = 8.0
 
-# Largest plausible magnitude for a placement coordinate, in game units.
-#
-# Oblivion's worldspaces span roughly +-2e5 units (a 4096-unit cell grid at
-# +-32 blocks), so 1e7 is ~50x the whole map and cannot be a real placement.
-#
-# This is NOT defensive padding -- Nehrim genuinely ships refs with garbage
-# floats where the CS never initialised the position: 17 REFRs across 10 base
-# objects carry PosY = 8.936455989415117e+17 (and PosX = 1.68e-36), e.g. REFR
-# 001E57C4 in cell 001E4FEC. Placing one stretches the cell's triangle soup to
-# 8.9e17 units wide, which blew the native TriGrid's dense bucket grid to 5.4e14
-# buckets -- a 4-billion-GB allocation whose std::bad_alloc aborted the pool
-# worker and failed the whole Nehrim import with a bare BrokenProcessPool.
-#
-# A ref this far out contributes nothing a navmesh could use (it is nowhere near
-# the pathgrid), so dropping its collision is exactly right; the ref itself is
-# still converted and written normally by the record path.
-_MAX_PLACEMENT = 1e7
+#: Placement bound in game units. See: docs/commentary/tes5_import_navmesh.md#wild-placements-are-dropped
+MAX_PLACEMENT = 1e7
 
 
 def _finite_placement(pos, scale):
     """True if a REFR's placement can contribute usable collision geometry."""
     if not np.all(np.isfinite(pos)) or not math.isfinite(scale):
         return False
-    return bool(np.all(np.abs(pos) <= _MAX_PLACEMENT))
+    return bool(np.all(np.abs(pos) <= MAX_PLACEMENT))
 
 
 def _rot_matrix(rx, ry, rz):

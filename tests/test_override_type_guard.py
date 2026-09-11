@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import.overrides import _expected_output_sig, _signature_mismatch
+from tes5_import.overrides.nested import _expected_output_sig, _signature_mismatch
 
 
 class TestExpectedOutputSig:

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from asset_convert.collision import collision_extract as ce
 from tes5_import.navmesh import build
-from tes5_import.pgrd_to_navm import (_collect_doors, _compute_adjacency,
+from tes5_import.navmesh.from_pgrd import (collect_doors, compute_adjacency,
                                       load_door_centroids)
 import tools.navmesh.audit as na
 import tools.navmesh.check as nc
@@ -36,7 +36,7 @@ def check(verts,tris):
     nm.formid=0; nm.truncated=False; nm.version=12; nm.worldspace=0; nm.cell=0
     nm.grid=None; nm.edge_links=[]; nm.door_tris=[]; nm.cover_tris=0; nm.bbox=None
     nm.verts=[c for v in verts for c in v]
-    adj=_compute_adjacency(tris)
+    adj=compute_adjacency(tris)
     nm.tris=[(t[0],t[1],t[2],adj[i][0],adj[i][1],adj[i][2],0x0800,0) for i,t in enumerate(tris)]
     from collections import Counter
     return Counter(r for r,_ in nc.check_navmesh(nm,None,local_mask=None))
@@ -47,8 +47,8 @@ def door_report(verts, tris, doors):
     the door even though the topology looks correct — vanilla door triangles
     are min 992 / median 9,614 sq units (n=1,659 in Skyrim.esm)."""
     import math
-    from tes5_import.pgrd_to_navm import _build_door_links
-    links = dict((ref, ti) for ti, ref in _build_door_links(
+    from tes5_import.navmesh.from_pgrd import build_door_links
+    links = dict((ref, ti) for ti, ref in build_door_links(
         verts, tris, [(x, y, z, r, i + 1, tp, w)
                       for i, (x, y, z, r, _f, tp, w) in enumerate(doors)]))
 
@@ -95,7 +95,7 @@ for cellname in [a for a in sys.argv[1:] if not a.startswith('--')]:
     fid=(c.get('FormID') or '').upper()
     nodes,edges=na._pgrd_nodes(pgrd_by_cell[fid])
     refrs=refr_by_cell.get(fid,[])
-    doors=_collect_doors(refrs,door_fids)
+    doors=collect_doors(refrs,door_fids)
     v,t=build.build_navmesh(refrs, base_model, ce.get_collision, nodes, edges,
                             land_rec=land_by_cell.get(fid),
                             doors=[(x,y,z,r,tp,w) for (x,y,z,r,_f,tp,w) in doors])

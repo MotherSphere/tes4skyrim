@@ -55,10 +55,10 @@ import struct
 import sys
 from collections import Counter
 
-from tes5_import.tes5_reader import subrecords, walk
+from tes5_import.base.tes5_reader import subrecords, walk
 
-# NVNM constants — mirror tes5_import/pgrd_to_navm.py.
-_PATHING_CELL_CRC = 0xA5E9A03C
+#: Mirrors tes5_import/navmesh/from_pgrd.py.
+PATHING_CELL_CRC = 0xA5E9A03C
 _TRI_FLAG_WATER = 0x0200
 _TRI_FLAG_DOOR = 0x0400
 _TRI_FLAG_FOUND = 0x0800
@@ -113,7 +113,7 @@ class NavMesh:
 def parse_nvnm(fid, d):
     """Parse an NVNM blob into a NavMesh.  Returns None if unparseable.
 
-    Layout is documented in tes5_import/pgrd_to_navm.py.  Note the EDGE LINK
+    Layout is documented in tes5_import/navmesh/from_pgrd.py.  Note the EDGE LINK
     stride of 10 bytes (Type U32 + Navmesh FormID U32 + Triangle S16) — a
     12-byte stride silently misparses every navmesh that HAS edge links, which
     is most vanilla exteriors.
@@ -358,7 +358,7 @@ def _parse_navi_meshes(body):
     """FormIDs registered by the NAVI's NVMI entries.
 
     One NVMI subrecord per navmesh; the navmesh FormID is the FIRST field
-    (offset 0) — see tes5_import/navi_builder.py for the full layout.  We only
+    (offset 0) — see tes5_import/navmesh/navi.py for the full layout.  We only
     need that field, so the rest of the entry is not parsed.
     """
     fids = []

@@ -24,8 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from asset_convert.collision import collision_extract as ce
 from tes5_import.navmesh import build
-from tes5_import.pgrd_to_navm import (
-    _collect_doors, load_door_centroids,
+from tes5_import.navmesh.from_pgrd import (
+    collect_doors, load_door_centroids,
 )
 
 DEFAULT_EXPORT = 'export/Oblivion.esm'
@@ -43,7 +43,7 @@ class CellCtx(object):
         import tools.navmesh.audit as na
         self.nodes, self.edges = na._pgrd_nodes(pg) if pg is not None else ([], [])
         self.refrs = index.refr_by_cell.get(self.fid, [])
-        self.doors = _collect_doors(self.refrs, index.door_fids)
+        self.doors = collect_doors(self.refrs, index.door_fids)
         self.land = index.land_by_cell.get(self.fid)
 
     @property

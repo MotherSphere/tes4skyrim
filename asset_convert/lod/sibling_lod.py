@@ -36,7 +36,7 @@ import struct
 from pathlib import Path
 
 from asset_convert.lod.terrain_lod import (shipped_lod_worldspaces, master_names)
-from tes5_import.tes5_reader import FLAG_PERSISTENT, records, walk
+from tes5_import.base.tes5_reader import FLAG_PERSISTENT, records, walk
 
 
 # Shared-folder resolution -- see output_layout. An imported mod's plugins keep

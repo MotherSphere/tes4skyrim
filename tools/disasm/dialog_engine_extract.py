@@ -25,7 +25,7 @@ What it recovers
 
 Usage:
     python tools/disasm/dialog_engine_extract.py --subtypes
-    python tools/disasm/dialog_engine_extract.py --json tes5_import/dialog_engine_tables.json
+    python tools/disasm/dialog_engine_extract.py --json tes5_import/generated/dialog_engine_tables.json
 """
 
 import argparse

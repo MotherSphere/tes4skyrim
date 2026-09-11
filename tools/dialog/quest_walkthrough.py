@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tools.esm.tes5_esm_reader import (TES5Record,
                                    _zstring)
-from tes5_import.text_reader import parse_export_file
+from tes5_import.base.text_reader import parse_export_file
 
 # ── Skyrim CTDA function indices (project table, tools/esm/tes5_esm_reader.py) ──
 F_GETQUESTRUNNING = 56

@@ -36,7 +36,7 @@ import os
 import struct
 import sys
 
-from tes5_import.tes5_reader import walk
+from tes5_import.base.tes5_reader import walk
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

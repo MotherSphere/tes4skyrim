@@ -179,7 +179,7 @@ def test_derived_ids_are_stable_across_writers():
     Every user converts the mod themselves. If two people's conversions gave a
     generated record different ids, neither could share a save or a patch.
     """
-    from tes5_import.writer import PluginWriter
+    from tes5_import.base.writer import PluginWriter
 
     def run():
         w = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
@@ -196,7 +196,7 @@ def test_derived_ids_do_not_depend_on_allocation_ORDER():
     A site that starts allocating a second id, a new site added anywhere, or a
     reordered export must all leave existing ids untouched.
     """
-    from tes5_import.writer import PluginWriter
+    from tes5_import.base.writer import PluginWriter
 
     a = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
     first = {k: a.derive_formid('OTFT', k) for k in (10, 20, 30)}
@@ -214,7 +214,7 @@ def test_derived_ids_do_not_depend_on_allocation_ORDER():
 
 def test_derived_ids_never_land_on_an_authored_record():
     """A companion colliding with a real record silently destroys one of them."""
-    from tes5_import.writer import PluginWriter, DERIVED_ID_BASE
+    from tes5_import.base.writer import PluginWriter, DERIVED_ID_BASE
 
     w = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
     # Reserve a big authored block INSIDE the derived region, then allocate
@@ -237,7 +237,7 @@ def test_derived_ids_are_stable_under_hash_randomisation():
     import sys
 
     code = (
-        'from tes5_import.writer import PluginWriter;'
+        'from tes5_import.base.writer import PluginWriter;'
         'w=PluginWriter(masters=["Skyrim.esm"]);'
         'print([w.derive_formid(s,k) for s,k in '
         '[("OTFT",1),("ARMA",("a","b")),("GLOB","TES4Fame")]])'
@@ -261,7 +261,7 @@ def test_hedr_next_object_id_clears_every_derived_id():
     against a derived id lets 0x0118E937 "beat" 0x00FFC374 and ship a header
     below real records.
     """
-    from tes5_import.writer import PluginWriter
+    from tes5_import.base.writer import PluginWriter
 
     w = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
     w.next_object_id = (1 << 24) | 0x18E937      # as import_plugin sets it
@@ -284,7 +284,7 @@ def test_derived_region_avoids_the_plugin_s_dense_id_block():
     instead landed in Oblivion's dense low block (7.26%). This pins the fix:
     given ids packed into one region, the window must be chosen elsewhere.
     """
-    from tes5_import.writer import PluginWriter
+    from tes5_import.base.writer import PluginWriter
 
     w = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
     # A plugin whose ids fill 0x000000-0x200000 densely, like Oblivion's.
@@ -306,7 +306,7 @@ def test_derived_region_avoids_the_plugin_s_dense_id_block():
 
 def test_derived_region_choice_is_deterministic():
     """Two machines must choose the SAME window, or ids differ everywhere."""
-    from tes5_import.writer import PluginWriter
+    from tes5_import.base.writer import PluginWriter
 
     ids = {(1 << 24) | i for i in range(0, 0x180000, 3)}
     a = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
@@ -328,7 +328,7 @@ def test_derived_ids_leave_runtime_headroom():
     2,360 — vanilla Skyrim.esm leaves 16.7M. A long playthrough would run the
     pool dry.
     """
-    from tes5_import.writer import PluginWriter, _RUNTIME_HEADROOM
+    from tes5_import.base.writer import PluginWriter, _RUNTIME_HEADROOM
 
     w = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
     w.reserve_source_ids({(1 << 24) | i for i in range(0, 0x180000, 2)})
@@ -351,8 +351,8 @@ def test_fixed_id_windows_are_reserved_before_hashing():
     header is written BELOW them (15 DIALs shipped above HEDR at 0xF40000),
     and a derived record can hash straight onto one.
     """
-    from tes5_import.writer import PluginWriter
-    from tes5_import.dialog_converter import (CONV_FAKE_FID_BASE,
+    from tes5_import.base.writer import PluginWriter
+    from tes5_import.dialogue.converter import (CONV_FAKE_FID_BASE,
                                               CONV_FAKE_FID_COUNT)
 
     w = PluginWriter(masters=['Skyrim.esm'], is_esm=True)
@@ -372,7 +372,7 @@ def test_fixed_id_windows_are_reserved_before_hashing():
 
 def test_scheme_version_is_declared():
     """Bumping this is how a deliberate id-layout change gets recorded."""
-    from tes5_import.writer import FORMID_SCHEME_VERSION
+    from tes5_import.base.writer import FORMID_SCHEME_VERSION
     assert isinstance(FORMID_SCHEME_VERSION, int)
 
 

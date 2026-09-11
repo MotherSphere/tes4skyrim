@@ -109,6 +109,49 @@ see the `oblivion-to-skyrim-dialog` skill.
 
 ## Known Problems and Skipped Records
 
+### Why the dispatch table converts what it converts
+<a id="dispatch-table-membership"></a>
+
+**Code:** `tes5_import/registry.py` — `IMPORT_DISPATCH`, `TYPE_MAP`, `SKIP_TYPES`.
+
+Several signatures look like they should be skipped, or look like they should be
+in the generic dispatch, and are not. Each exception is load-bearing:
+
+- **MGEF is CONVERTED** (`record_types/magic.py`). It used to be skipped, with
+  every effect re-pointed at a vanilla Skyrim MGEF through a flat code table —
+  which cannot express an effect parameterised by a FormID the source carries,
+  so all 33 summons and every bound weapon/armor were dropped and **382 records
+  became inert filler**.
+- **GLOB is NOT skipped.** Converted scripts bind GlobalVariable properties to
+  TES4 globals (`TES4Fame`, quest counters), which read `None` if the records do
+  not exist. `convert_GLOB` drops the engine-time globals (`GameHour` etc.);
+  properties naming those bind unshifted to Skyrim's own forms via
+  `ENGINE_GLOBAL_FORMIDS`.
+- **CLMT is CONVERTED** — it is the ONLY path to the converted WTHR records
+  (weather is reached via `WRLD → CNAM → CLMT → WLST`, never referenced
+  directly). Skipping it orphans every converted weather.
+- **REGN is CONVERTED for its WEATHER entries only** (`convert_REGN`).
+  TamrielClimate carries a single Clear weather at 100%, so ALL of Cyrodiil's
+  weather variety lives in region RDWT lists. The other region data types
+  (objects/grass/sound/map) belong to TES4 systems with no direct equivalent and
+  are dropped.
+- **HAIR is CONVERTED to HDPT** (`convert_HAIR`). Oblivion hair is a real mesh
+  with a real per-NPC length (`NPC_.LNAM` blending the `.tri`'s HairMorph), none
+  of which survives substituting a vanilla Skyrim hairstyle. The length is baked
+  per variant by `asset_convert.character.hair_pipeline`, which is why one HAIR
+  record can emit several HDPTs.
+- **GMST is skipped WHOLESALE**, but the ambient-dialogue pacing settings are an
+  exception — `AMBIENT_GMST_OVERRIDES` in `constants.py`, emitted by the
+  orchestrator regardless of the skip.
+
+Two signatures are converted but deliberately **outside** the generic dispatch,
+because it runs too early or in the wrong order:
+
+- **PACK** (`pack_converter.py`) — quest packages need the QUST aliases to exist
+  first, so PACK is written in its own phase after QUST (Phase 3b2).
+- **WTHR** — it mints four IMGS companions for its HDR tone mapping, so it runs
+  in its own serial phase (Phase 2b) where record order is deterministic.
+
 ### Records That Cannot Be Auto-Converted
 - **PGRD** (Path Grid) → Must be rebuilt as NAVM (NavMesh) in Creation Kit
 - **ROAD** → Replaced by NavMesh system
@@ -120,7 +163,7 @@ see the `oblivion-to-skyrim-dialog` skill.
 - **PACK** — TES5 package system is completely different (procedural tree). Only skeleton records can be created.
   **Substitution (2026-07-09)**: PKID refs to skipped PACKs must NOT be passed through (they dangle → the
   actor has no working AI packages). NOTE: this was necessary but did NOT resolve the creature stuck-in-idle
-  bug — the vanilla-asset A/B dog moved even with dangling packages. `tes5_import/packages.py`
+  bug — the vanilla-asset A/B dog moved even with dangling packages. `tes5_import/packages/actor_wiring.py`
   substitutes vanilla generics instead: creatures always get PKID `DefaultMasterPackageCreature` (0010F2A5) +
   DPLT `DefaultMasterPackageListCreature` (0010F2A6) — exactly what every vanilla wolf/dog/skeever carries;
   humanoids get one `DefaultSandboxCurrentLocation1024` (000BFB6B) standing in for wander/eat/sleep-type TES4
@@ -131,7 +174,7 @@ see the `oblivion-to-skyrim-dialog` skill.
 - **QUST** — Alias system, objectives, and VMAD fragments are all new. Only basic stage data can be transferred.
 - **INFO** — Dialog response structure changed significantly. VMAD fragments replace result scripts.
 - **NPC_/CREA** — Attribute system removed, skill system changed, many new subsystems (templates, outfits, perks, keywords).
-- **Outfit split (`tes5_import/outfits.py`)** — TES4's single CNTO inventory (engine picks what to wear at
+- **Outfit split (`tes5_import/actors/outfits.py`)** — TES4's single CNTO inventory (engine picks what to wear at
   spawn) → TES5 DOFT/OTFT (worn) + CNTO (carried), disjoint. Per-biped-slot conflict resolution keeps
   one winner per slot (armor > clothing > value). **ChanceNone contract:** only a *guaranteed* winner
   (plain ARMO/CLOT, or an LVLI with `LVLD.ChanceNone==0` down to slot-filling leaves) may EVICT a
@@ -196,7 +239,7 @@ were all exonerated.
 
 **Discriminator:** every dying animal was placed through a generated
 `<list>_Lvl` template shell (TES4 `REFR → LVLC` becomes
-`ACHR → NPC_ shell → TPLT → LVLN`, see `tes5_import/leveled_actors.py`), while
+`ACHR → NPC_ shell → TPLT → LVLN`, see `tes5_import/actors/leveled_actors.py`), while
 every confirmed survivor — sheep `1A1963`, pack mule `206C73` — was a
 hand-placed `ACHR` pointing **straight at its base NPC_**. `placeatme` on the
 base likewise never goes through the shell, which is exactly why the console
@@ -266,7 +309,7 @@ inherited value wins.
 Oblivion hair is CONVERTED, not substituted with a vanilla Skyrim hairstyle.
 `convert_HAIR` -> HDPT (Type 3), `asset_convert/character/hair_pipeline.py` for the
 meshes, `asset_convert/character/facegen_tri.py` for the `.tri` codec,
-`tes5_import/hair_variants.py` for the plan both sides share.
+`tes5_import/actors/hair_variants.py` for the plan both sides share.
 
 ### Why one HAIR becomes several HDPTs
 
@@ -510,7 +553,7 @@ Vanilla helmets are modelled big enough to enclose the hairline; tighter
 Oblivion helms are not, so the hairline pokes through the shell (top hidden,
 sides visible). Converted headgear therefore also covers slot 41 (LongHair) on
 both ARMO and ARMA (`BIPED_SLOT_EXTRA` / `ARMA_BODY_COVERAGE_EXTRA` in
-`tes5_import/constants.py`), which suppresses the 141 partitions → all hair
+`tes5_import/base/constants.py`), which suppresses the 141 partitions → all hair
 fully hidden.
 
 ## Enchantment Type Mapping
@@ -705,7 +748,7 @@ must stay in step. CNAM.CrimeGold carries across as the Steal Multiplier.
   effects all resolve to projectile-less Alch* MGEFs casts NOTHING in game
   (CK: "is AIMED but has no Magic Effects with Projectiles assigned", 369x).
   Skyrim ships no aimed variants of plain value modifiers, so
-  `tes5_import/magic_effects.py` synthesizes a companion MGEF per (vanilla
+  `tes5_import/actors/magic_effects.py` synthesizes a companion MGEF per (vanilla
   effect, TES4 code): clone of the vanilla 152-byte DATA (baked in
   `vanilla_mgef_data.py`, regen with `tools/generators/gen_vanilla_mgef_table.py`),
   patched to CastType=FF(1)/Delivery=Aimed(2) + a projectile (spectral arrow

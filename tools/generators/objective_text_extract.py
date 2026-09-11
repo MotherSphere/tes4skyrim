@@ -30,8 +30,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tes5_import.text_reader import parse_export_file, get_int, get_str
-from tes5_import.quest_converter import pc_stage_texts
+from tes5_import.base.text_reader import parse_export_file, get_int, get_str
+from tes5_import.dialogue.quest import pc_stage_texts
 
 
 def objective_slots(rec):

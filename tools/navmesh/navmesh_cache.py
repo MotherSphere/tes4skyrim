@@ -131,21 +131,7 @@ def collision_hash(plugin: str) -> str | None:
     return ce.collision_content_hash()
 
 
-# The only plugins we publish a shared cache for.  Everything else under
-# export/ is a local experiment: a DLC, a landmass mod, a half-converted ESP
-# somebody ran once.  Those caches are worthless to a downloader (nobody else
-# has that plugin) but they are NOT harmless -- discover_plugins() is what the
-# pre-push gate iterates, so a 0-entry or partially-generated cache from a
-# throwaway run fails verify() and BLOCKS the push, and a large one gets zipped
-# and uploaded as a release asset nobody wants.
-#
-# Deliberately an allowlist, not a size/entry-count heuristic: "big enough to
-# publish" would silently start shipping the next landmass mod that happens to
-# cross the threshold.  Adding a plugin here is a decision to host its cache.
-#
-# Matched case-insensitively -- export/ folder names come from whatever the
-# user typed after -f, and 'Nehrim.esm' vs 'nehrim.esm' must not change what
-# gets published.
+#: Hosted caches, case-insensitive. See: docs/commentary/tes5_import_navmesh.md#publishable-plugins
 PUBLISHABLE_PLUGINS = ('Oblivion.esm', 'Nehrim.esm', 'Morrowind_ob.esm')
 
 

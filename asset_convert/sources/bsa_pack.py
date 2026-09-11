@@ -47,7 +47,7 @@ import sys
 from pathlib import Path
 
 from core.subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
-from tes5_import.writer import pack_tes4_header
+from tes5_import.base.writer import pack_tes4_header
 from asset_convert import paths
 
 # ---------------------------------------------------------------------------

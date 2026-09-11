@@ -1,6 +1,6 @@
 # the whole pipeline - performance and parallelism
 
-**Code:** `asset_convert/nif/pyffi_monkey_patch.py`, `tes5_import/writer.py`, `asset_convert/ui/book_inam.py`, `asset_convert/nif/nif_geom_array.py`
+**Code:** `asset_convert/nif/pyffi_monkey_patch.py`, `tes5_import/base/writer.py`, `asset_convert/ui/book_inam.py`, `asset_convert/nif/nif_geom_array.py`
 
 ## Contents
 
@@ -577,7 +577,7 @@ properly parallel. Two findings:
 - **Worker state replay pattern**: converter functions depend on module globals
   set in Phase 0 (formid offset, cell locations, WORLD_NAMES, furniture origin
   shifts, mesh bounds). Process pools must replay them via an initializer — see
-  `tes5_import/navm_worker.py` and `tes5_import/convert_worker.py`.
+  `tes5_import/navmesh/worker.py` and `tes5_import/base/convert_worker.py`.
 - **Determinism contract**: the output ESM must be byte-reproducible. Process
   results in submission order (`ex.map`, not `as_completed`) and keep record
   EMISSION serial — derived ids no longer depend on call order, but group order
@@ -617,7 +617,7 @@ is what lets converted mods interoperate: a patch written against Oblivion's
 `0001A2B3` still resolves.
 
 **Generated records derive their id from their source**, via
-`PluginWriter.derive_formid(site, key)` (`tes5_import/writer.py`). `site` names
+`PluginWriter.derive_formid(site, key)` (`tes5_import/base/writer.py`). `site` names
 the kind of record ('OTFT', 'ARMA', 'NAVM'), `key` identifies what it was
 generated FROM — normally the source TES4 FormID. The id is
 `md5(site, key)` mapped into `DERIVED_ID_BASE`.. and is therefore a pure

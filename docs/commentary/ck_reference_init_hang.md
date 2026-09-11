@@ -1,6 +1,6 @@
-# tes5_import/writer.py - the CK reference-init hang
+# tes5_import/base/writer.py - the CK reference-init hang
 
-**Code:** `tes5_import/import_main.py`, `tes5_import/record_types/world.py`, `tes5_import/convert_worker.py`, `tes5_import/navi_builder.py`
+**Code:** `tes5_import/import_main.py`, `tes5_import/record_types/world.py`, `tes5_import/base/convert_worker.py`, `tes5_import/navmesh/navi.py`
 
 ## Contents
 
@@ -161,7 +161,7 @@ agree): `…STAT SCOL MSTT PWAT GRAS TREE…`, `LTEX` right after `MGEF`/`SCPT`,
 `WATR`, `FLST` and `MOVT` genuinely do come after it.
 
 Fix: `MSTT`, `LTEX` and `PROJ` pinned at their vanilla slots in
-`tes5_import/writer.py`'s `_group_order()`; `WATR`, `FLST`, `MOVT` pinned too
+`tes5_import/base/writer.py`'s `_group_order()`; `WATR`, `FLST`, `MOVT` pinned too
 so the layout no longer depends on the order groups happened to be added in.
 
 Guard: `python tools/validate/esm_group_anchors.py <esm> --order-only` fails the build
@@ -170,6 +170,26 @@ reproduced all three on the pre-fix output and passes on vanilla.
 
 **This is not the hang** — CK logs these and keeps going — but it silently cost
 1,852 placed objects in every build so far.
+
+### <a id="qust-after-cell-wrld-dial"></a>QUST must come AFTER CELL, WRLD and DIAL
+
+The same parse-order rule runs in the other direction for quests. Vanilla's
+order is `…CELL, WRLD, DIAL, QUST, …`, and the engine resolves a quest's
+forced-reference aliases (ALFR) **when it loads the QUST group**. With QUST
+first, the ACHR/REFR targets living in the later cell groups are not in the
+form map yet, so every forced ref fails with
+`[QUESTS] Could not find forced ref (…)` and the alias fills NONE — no marker.
+
+A quest in a *plugin* can still find a ref in a *master*, because masters load
+fully first. That is exactly why the same alias resolved in a test ESP but not
+in-file. DIAL is placed before QUST to match vanilla as well.
+
+### <a id="impact-footstep-chain"></a>The impact/footstep chain
+
+xEdit's canonical order is `… VTYP MATT IPCT IPDS ARMA … FSTP FSTS …`.
+IPCT/IPDS must precede ARMA (whose SNDD points into it), and FSTP must precede
+the FSTS that lists it. Creature footstep audio rides this chain — see
+`tes5_import/actors/creature_footsteps.py`.
 
 ## What "Initializing References" actually is (decompiled 2026-08-22)
 <a id="what-initializing-references-actually"></a>
@@ -383,7 +403,7 @@ not a one-off.)
      together — 8 of the 38 weren't persistent and were already being
      correctly re-homed before; the other 30 needed both changes).
 
-3. **One asymmetric ledge portal link** (`tes5_import/pgrd_to_navm.py`,
+3. **One asymmetric ledge portal link** (`tes5_import/navmesh/from_pgrd.py`,
    `_pack_nvnm`'s ledge-linking loop). `_open_edge_towards` is evaluated
    independently for each side of a hi/lo ledge-drop pair; geometry can make
    one side resolve an open facing edge while the other doesn't, producing a

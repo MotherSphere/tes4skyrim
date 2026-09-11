@@ -10,9 +10,9 @@ See: docs/commentary/tes4_export_falloutnv.md#navmesh-authored-not-generated
 
 import struct
 
-from ..pgrd_to_navm import pack_navm_record, pack_nvnm
-from ..text_reader import get_hex_bytes
-from ..writer import pack_string_subrecord, pack_subrecord
+from ..navmesh.from_pgrd import pack_navm_record, pack_nvnm
+from ..base.text_reader import get_hex_bytes
+from ..base.writer import pack_string_subrecord, pack_subrecord
 from .common import get_formid, get_int, get_str
 
 #: Bytes per NVVX vertex: three f32.

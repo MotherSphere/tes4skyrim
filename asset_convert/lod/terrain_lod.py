@@ -38,7 +38,7 @@ from asset_convert.texture.dds_codec import (
     write_dds_dxt1,
     write_normal_dds,
 )
-from tes5_import.tes5_reader import (GRP_TOP,
+from tes5_import.base.tes5_reader import (GRP_TOP,
                                      GRP_WORLD_CHILDREN,
                                      header_end, read_group,
                                      read_record, records, walk)

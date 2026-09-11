@@ -7,13 +7,13 @@ See: docs/commentary/tes5_import_actors.md
 
 import struct
 
-from ..constants import TES5_SKILL_ORDER
-from ..creature_races import creature_capped_level, creature_health_offset
-from ..outfits import split_inventory
-from ..packages import (CLAS_CREATURE_CASTER, CLAS_CREATURE_PREDATOR,
+from ..base.constants import TES5_SKILL_ORDER
+from ..actors.creature_races import creature_capped_level, creature_health_offset
+from ..actors.outfits import split_inventory
+from ..packages.actor_wiring import (CLAS_CREATURE_CASTER, CLAS_CREATURE_PREDATOR,
                         CSTY_ANIMAL, CSTY_DEFAULT, DPLT_CREATURE_LIST,
                         PKID_CREATURE_MASTER)
-from ..skyrim_overrides import (TES4_RACE_FID_TO_EDID, VOICE_TYPE_MAP,
+from ..base.equivalents import (TES4_RACE_FID_TO_EDID, VOICE_TYPE_MAP,
                                 resolve_creature_race)
 from .actor_common import (GOLD001_FID, NAM5_UNKNOWN, SOUND_LEVEL_NORMAL,
                            T4C_ESSENTIAL, T4C_NO_BLOOD_DECAL,
@@ -293,7 +293,7 @@ def _crea_vmad(rec: dict, packed: bytes) -> bytes:
 
     See: docs/commentary/tes5_import_actors.md#ghost-dissolve
     """
-    from ..creature_races import creature_dissolve_info
+    from ..actors.creature_races import creature_dissolve_info
     dissolve = creature_dissolve_info(get_formid(rec, 'FormID'))
     if dissolve is None:
         return packed
@@ -323,7 +323,7 @@ def _crea_snams(rec: dict, vendor_fids: list) -> bytes:
 
 def _crea_race(rec: dict, edid: str) -> int:
     """The generated creature RACE, else the Skyrim-race aliasing fallback."""
-    from ..creature_races import get_creature_race
+    from ..actors.creature_races import get_creature_race
     fid = get_creature_race(get_formid(rec, 'FormID') & 0x00FFFFFF)
     if fid is not None:
         return fid
@@ -400,7 +400,7 @@ def _crea_class(rec: dict):
 
     See: docs/commentary/tes5_import_actors.md#creature-class-and-package
     """
-    from ..creature_races import creature_has_offensive_spell
+    from ..actors.creature_races import creature_has_offensive_spell
     return (CLAS_CREATURE_CASTER if creature_has_offensive_spell([rec])
             else CLAS_CREATURE_PREDATOR)
 
@@ -490,7 +490,7 @@ def convert_CREA(rec: dict, writer=None) -> bytes:
     if edid:
         subs += pack_string_subrecord('EDID', edid)
 
-    from ..object_scripts import get_object_vmad
+    from ..base.object_scripts import get_object_vmad
     subs += _crea_vmad(rec, get_object_vmad(get_formid(rec, 'FormID')))
     subs += pack_obnd(-12, -12, 0, 12, 12, 60)
     subs += pack_subrecord('ACBS', crea_acbs(rec))

@@ -16,10 +16,10 @@ import pytest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from asset_convert.havok.kf_decode import (decode_kf, eval_bspline,  # noqa: E402
+from asset_convert.havok.kf_decode import (decode_kf, eval_bspline,
                                      split_root_motion, knots,
                                      basis_weights)
-from asset_convert.havok.hkx_xml import HKXCMD  # noqa: E402
+from asset_convert.havok.hkx_xml import HKXCMD
 
 DOG_DIR = os.path.join(REPO, 'export', 'Oblivion.esm', 'meshes',
                        'creatures', 'dog')

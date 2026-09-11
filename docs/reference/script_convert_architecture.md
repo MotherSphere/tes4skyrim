@@ -271,7 +271,7 @@ Measured from every importer, tool and test that touches this package.
   editor_id)` and `convert_fragment(source, extends) -> list[str]`, which
   **must preserve `_property_refs` across calls**; `get_property_refs()`;
   `get_cell_family_helpers()`; `set_scro_aliases()`; `set_music_cues()`.
-- **`._property_refs` is a LIVE attribute.** `tes5_import/dialog_converter.py`
+- **`._property_refs` is a LIVE attribute.** `tes5_import/dialogue/converter.py`
   reads the private directly (`:222`, `:1352`) and `pipeline._add_scro_ref`
   both reads and writes it (`:1652`, `:1661`). Implement it as a property over
   `Resolver.property_refs`.
@@ -390,7 +390,7 @@ the old 60-physical-line cap fired on, so the pressure is unchanged while the
 metric stops being gameable. 60 statements would have dropped it to 225 (2.9%).
 
 This also stops charging data tables as complex code: `_init_dispatch` in
-`tes5_import/constants.py` is 185 physical lines but **12 statements**.
+`tes5_import/base/constants.py` is 185 physical lines but **12 statements**.
 
 `oversized-files` still counts `code_lines()`: line and statement counts
 already agree there (20 files vs 22), so it needs no re-baseline.
@@ -557,7 +557,7 @@ re-hashes, and gates whatever changed.
 
 **The routing rule lives in the HOOK, not in `permissions`.** Rules evaluate
 deny, then ask, then allow, and the first match wins — specificity never
-reorders them. So a `deny` cannot carry an allowlist exception: `deny: ["Bash"]`
+reorders them. So a `deny` cannot carry a whitelist exception: `deny: ["Bash"]`
 with `allow: ["Bash(python tools/validate/safe_run.py:*)"]` blocks the wrapper
 too, and so does `Bash(*)` or even `Bash(python *)`. A hook returning
 `permissionDecision: "allow"` does not lift a deny either. What does work is a

@@ -43,7 +43,7 @@ CK-verified.
 `[FORMS] Invalid form ID for effect setting found while loading counter effects for XXXX.`
 
 **FIXED 2026-08-22** — `_sort_mgef_by_counter_effects` in
-[writer.py](../../tes5_import/writer.py).
+[writer.py](../../tes5_import/base/writer.py).
 
 The original diagnosis ("targets no longer exist") was **wrong**. Every ESCE
 target resolves to an MGEF that is present in the output, no ESCE dangles, and
@@ -125,7 +125,7 @@ asymmetry — they will disappear when the EditorID collision is fixed.
 `[SCRIPTS] X (01......) cannot be scripted, but has scripts attached to it.`
 
 These are the **LVLN shell NPCs** from
-[leveled_actors.py](../../tes5_import/leveled_actors.py). An NPC_ whose `TPLT`
+[leveled_actors.py](../../tes5_import/actors/leveled_actors.py). An NPC_ whose `TPLT`
 points at an LVLN is not scriptable in Skyrim, so **every VMAD we attach to a
 shell is silently discarded.**
 
@@ -159,7 +159,7 @@ order like any other form, producing `0x01023FE9` and friends — ids that exist
 in no file. The CK reports one warning per bound property, and the scripts, which
 branch on the player's race, silently do nothing.
 
-[object_scripts.py](../../tes5_import/object_scripts.py) already had exactly this
+[object_scripts.py](../../tes5_import/base/object_scripts.py) already had exactly this
 pattern for engine-hardcoded bases (`TES4_ITEM_FORMID_TO_SKYRIM`, so a scripted
 `AddItem Gold001` hands out real Skyrim gold). Races are the same case and were
 simply missing; `_skyrim_race_formid` now routes them through
@@ -225,7 +225,7 @@ index 0**.
 
 ### 2 `GetItemCount(0x0000000B)` — FIXED
 
-`_remap_formid` in [dialog_conditions.py](../../tes5_import/dialog_conditions.py)
+`_remap_formid` in [dialog_conditions.py](../../tes5_import/base/conditions.py)
 passed through **everything** with index 0 and object id `< 0x100`. That is far
 too wide: Oblivion.esm defines **127 records** below 0x100 — Tamriel WRLD
 `0x3C`, gold `0xF`, `DASkeletonKey` `0xB`, 57 DIALs from `0xAA`, 21 SKILs, 27
@@ -375,7 +375,7 @@ The cause is `_marker_cells` giving each marker a 3x3 block so neighbouring
 markers collide (`TES4LeafrotCaveLocation` and `TES4GarnetCampLocation` both
 claiming 44,-13, and so on).
 
-Fix in [locations.py](../../tes5_import/locations.py): resolve cell ownership in a
+Fix in [locations.py](../../tes5_import/base/locations.py): resolve cell ownership in a
 pre-pass before any LCTN is written. A marker's OWN square is claimed first, then
 the surrounding ring fills only squares still unowned; ties break on marker
 FormID so the output stays byte-reproducible. `LCEC` and `grid_to_location` are

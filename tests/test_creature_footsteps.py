@@ -1,4 +1,4 @@
-"""Tests for the creature footstep sound chain (tes5_import/creature_footsteps).
+"""Tests for the creature footstep chain (tes5_import/actors/creature_footsteps).
 
 Skyrim reads creature locomotion audio through
     ARMA.SNDD -> FSTS -> FSTP -> IPDS -> IPCT -> SNDR
@@ -7,17 +7,12 @@ sounds in CREA CSDT slots 0-3, which were being dropped entirely — every
 converted creature was silent on foot.
 """
 
-import os
 import struct
-import sys
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO)
-
-from tes5_import.creature_footsteps import (  # noqa: E402
-    _FOOTSTEP_MATERIALS, build_creature_footsteps, get_creature_footstep_set,
+from tes5_import.actors.creature_footsteps import (
+    FOOTSTEP_MATERIALS, build_creature_footsteps, get_creature_footstep_set,
     patch_creature_footsteps, reset_creature_footsteps)
-from tes5_import.writer import pack_record, pack_string_subrecord  # noqa: E402
+from tes5_import.base.writer import pack_record, pack_string_subrecord
 
 
 class FakeWriter:
@@ -96,7 +91,7 @@ def test_ipds_maps_every_material_to_the_impact():
     ipct_fid = struct.unpack_from('<I', w._top_groups['IPCT'][0], 12)[0]
     pnams = [v for s, v in _subrecords(w._top_groups['IPDS'][0])
              if s == b'PNAM']
-    assert len(pnams) == len(_FOOTSTEP_MATERIALS)
+    assert len(pnams) == len(FOOTSTEP_MATERIALS)
     assert {struct.unpack_from('<I', v, 4)[0] for v in pnams} == {ipct_fid}
 
 

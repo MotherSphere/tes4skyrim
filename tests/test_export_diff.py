@@ -1,6 +1,6 @@
 """Author-intent diffing between master and plugin exports."""
 
-from tes5_import.export_diff import changed_keys, diff_records
+from tes5_import.overrides.diff import changed_keys, diff_records
 
 
 class TestScalars:

@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from asset_convert.collision import collision_extract as ce
 from tes5_import.navmesh import world
-from tes5_import.text_reader import (
+from tes5_import.base.text_reader import (
     parse_export_directory, group_records_by_type, get_float, get_int, get_str,
 )
 
@@ -218,13 +218,12 @@ def load_cell(export_dir, cell_arg, load_collision=True):
         m = get_str(d, 'Model.MODL') or get_str(d, 'MODL')
         door_fids[int(f, 16) & 0xFFFFFF] = model_key(m) if m else None
 
-    # Doors as build_navmesh wants them: (x, y, z, rot_z, is_teleport).
-    from tes5_import.pgrd_to_navm import _collect_doors, load_door_centroids
+    from tes5_import.navmesh.from_pgrd import collect_doors, load_door_centroids
     load_door_centroids(
         str(assets_for(export_dir) / 'door_centers_cache.json'),
                         quiet=True)
     doors = [(x, y, z, r, tp, w)
-             for (x, y, z, r, _f, tp, w) in _collect_doors(refrs, door_fids)]
+             for (x, y, z, r, _f, tp, w) in collect_doors(refrs, door_fids)]
 
     is_ext = bool(cell.get('ParentWRLD') and
                   cell.get('ParentWRLD') != '00000000')

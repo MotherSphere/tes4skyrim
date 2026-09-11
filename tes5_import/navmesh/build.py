@@ -44,7 +44,7 @@ def teleport_door_positions(refr_recs):
             # see navmesh/world.py _MAX_PLACEMENT for why these exist.
             if not all(math.isfinite(v) for v in (x, y, z, rz)):
                 continue
-            if max(abs(x), abs(y), abs(z)) > world._MAX_PLACEMENT:
+            if max(abs(x), abs(y), abs(z)) > world.MAX_PLACEMENT:
                 continue
             # Width 0: no measured doorway span for a bare-XTEL fallback door;
             # corridor_doors falls back to its constant half-width.

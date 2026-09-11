@@ -1,33 +1,21 @@
+"""TES4 export text -> a binary Skyrim SE plugin.
+
+Layout:
+
+- base/         readers, the writer, and the tables every domain shares
+- generated/    tool output; never hand-edited (see its README)
+- record_types/ one converter per TES4 record signature
+- dialogue/     DIAL/INFO/QUST, speak-as voices, conversations
+- packages/     TES4 PACK -> TES5 package templates
+- actors/       races, outfits, faces, hair, idles, footsteps
+- overrides/    plugins that have TES4 masters
+- navmesh/      PGRD -> NAVM generation
+- registry.py   which converter handles which signature
+- import_main   the orchestrator
+
+Deliberately EMPTY of imports. Importing any leaf module runs this one, so a
+re-export here would drag all 17 converters -- and their `core` dependency --
+into a tool that only wanted a single reader.
+
+See: docs/reference/record_mapping.md#dispatch-table-membership
 """
-TES5 Import Package — Convert TES4 exports to Skyrim SE binary format.
-
-This package contains:
-- constants: Lookup tables and mappings
-- writer: Binary packing for TES5 records/groups
-- text_reader: KEY=VALUE text parser (shared with tes4_export)
-- record_types/: Per-group converter functions
-- import_main: Import orchestrator
-"""
-
-from .constants import (
-    BIPED_SLOT_MAP,
-    DEFAULT_RACE,
-    ENCH_CAST_TYPE_MAP,
-    ENCH_TYPE_MAP,
-    IMPORT_DISPATCH,
-    MAP_MARKER_TYPE_MAP,
-    MATT_MAP,
-    RACE_MAP,
-    SKIP_TYPES,
-    TES4_SKILL_TO_TES5,
-    TES5_SKILL_ORDER,
-    TYPE_MAP,
-    WEAPON_TYPE_MAP,
-)
-
-__all__ = [
-    'RACE_MAP', 'DEFAULT_RACE', 'BIPED_SLOT_MAP', 'WEAPON_TYPE_MAP',
-    'ENCH_TYPE_MAP', 'ENCH_CAST_TYPE_MAP', 'MAP_MARKER_TYPE_MAP',
-    'MATT_MAP', 'TES4_SKILL_TO_TES5', 'TES5_SKILL_ORDER',
-    'IMPORT_DISPATCH', 'TYPE_MAP', 'SKIP_TYPES',
-]

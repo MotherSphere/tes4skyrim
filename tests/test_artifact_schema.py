@@ -1,4 +1,4 @@
-"""Versioned pipeline artifacts (tes5_import/artifact_schema.py).
+"""Versioned pipeline artifacts (tes5_import/base/artifact_schema.py).
 
 The guard test is `test_schema_matches_frozen_hash`: it fails when an
 artifact's required-key set changes without a version bump.  That is the exact
@@ -16,7 +16,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tes5_import.artifact_schema import (
+from tes5_import.base.artifact_schema import (
     ARTIFACTS, StaleArtifactError, read_artifact, write_artifact)
 
 
@@ -156,26 +156,26 @@ class TestPreflight(unittest.TestCase):
         return d
 
     def _patch_layout(self, td):
-        import tes5_import.overrides as ov
+        import tes5_import.overrides.nested as ov
         self._saved = (ov._export_root, ov._master_export_dir)
         ov._export_root = lambda d: td
         ov._master_export_dir = lambda root, name: os.path.join(root, name)
         self.addCleanup(self._restore)
 
     def _restore(self):
-        import tes5_import.overrides as ov
+        import tes5_import.overrides.nested as ov
         ov._export_root, ov._master_export_dir = self._saved
 
     def test_missing_artifacts_are_not_an_error(self):
         """Plenty of plugins ship no creatures and no music."""
-        from tes5_import.artifact_schema import preflight_artifacts
+        from tes5_import.base.artifact_schema import preflight_artifacts
         with tempfile.TemporaryDirectory() as td:
             self._patch_layout(td)
             d = self._plugin(td, 'Bare.esp')
             preflight_artifacts(d)      # must not raise
 
     def test_own_stale_artifact_names_this_plugin(self):
-        from tes5_import.artifact_schema import preflight_artifacts
+        from tes5_import.base.artifact_schema import preflight_artifacts
         with tempfile.TemporaryDirectory() as td:
             self._patch_layout(td)
             d = self._plugin(td, 'Nehrim.esm',
@@ -186,7 +186,7 @@ class TestPreflight(unittest.TestCase):
 
     def test_stale_master_artifact_names_the_MASTER(self):
         """The reported bug: DLCFrostcrag died over Oblivion.esm's file."""
-        from tes5_import.artifact_schema import preflight_artifacts
+        from tes5_import.base.artifact_schema import preflight_artifacts
         with tempfile.TemporaryDirectory() as td:
             self._patch_layout(td)
             self._plugin(td, 'Oblivion.esm',

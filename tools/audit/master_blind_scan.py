@@ -95,9 +95,9 @@ def measure(plugin):
     own probes -- see docs/commentary/tes5_import_override.md.
     """
     sys.path.insert(0, os.getcwd())
-    from tes5_import.text_reader import (parse_export_directory,
+    from tes5_import.base.text_reader import (parse_export_directory,
                                          group_records_by_type)
-    from tes5_import.overrides import load_master_export
+    from tes5_import.overrides.nested import load_master_export
 
     export_dir = os.path.join('export', plugin)
     if not os.path.isdir(export_dir):

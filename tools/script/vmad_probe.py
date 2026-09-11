@@ -18,7 +18,7 @@ import mmap
 import struct
 import sys
 
-from tes5_import.tes5_reader import records, subrecords
+from tes5_import.base.tes5_reader import records, subrecords
 
 
 def _records(buf):

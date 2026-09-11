@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from tes5_import import packages
-from tes5_import.tes5_reader import records
+from tes5_import.packages import actor_wiring as packages
+from tes5_import.base.tes5_reader import records
 
 
 
@@ -38,7 +38,7 @@ def test_is_quest_package_reads_the_registered_set():
 
 def test_override_pkid_rebuild_drops_plugin_owned_quest_packages():
     """The override path must filter, not just the normal converter path."""
-    from tes5_import.override_builder import _rebuild_packages
+    from tes5_import.overrides.builder import _rebuild_packages
 
     quest_pkg = 0x02002D7C      # newly owned by THIS plugin's quest
     plain = 0x0101DC54          # ordinary package, must survive

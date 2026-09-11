@@ -38,7 +38,7 @@ Also `Flags 2` bit `0x10` = "Allow Mounted Combat" (optional, vanilla horse leav
 unset — the player can't fight from horseback in vanilla Skyrim either, so we should
 match that rather than trying to add it).
 
-**Action**: `tes5_import/creature_races.py` RACE builder gets a `mount_data` field,
+**Action**: `tes5_import/actors/creature_races.py` RACE builder gets a `mount_data` field,
 populated with the vanilla horse constants above for any creature folder flagged as a
 mount (see §3.1 — driven by a manifest flag, not creature-name string matching).
 
@@ -114,7 +114,7 @@ no source data at all).
 - **AI package**: vanilla `PlayerHorseWaitInPaddock` (00109AB2) is an ordinary
   wander/wait-in-location package — dumped and confirmed there is NO special
   "mountable" package type. Mounting is purely a runtime `Actor.Mount()`/engine action,
-  not AI-package-gated. Existing `tes5_import/packages.py` creature-package
+  not AI-package-gated. Existing `tes5_import/packages/actor_wiring.py` creature-package
   substitution (DefaultMasterPackageCreature) is sufficient; no new package logic
   needed.
 - **Papyrus/engine hookup**: player interacts via the standard "Mount" activate prompt,

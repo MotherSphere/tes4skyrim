@@ -696,7 +696,7 @@ def load_templates(templates_dir=None, skyrim_data=None):
 
 def distinct_book_models(export_subdir):
     """Distinct Model.MODL paths from the export's BOOK.txt."""
-    from tes5_import.text_reader import parse_export_file
+    from tes5_import.base.text_reader import parse_export_file
     records = parse_export_file(os.path.join(export_subdir, 'BOOK.txt'))
     models = {}
     for rec in records:

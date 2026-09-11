@@ -26,7 +26,7 @@ WHAT COUNTS AS A NAVMESH CHANGE
 -------------------------------
 Exactly the files whose contents feed the cache tag
 (import_main._navmesh_geom_cache): `tes5_import/navmesh/*.py` and
-`tes5_import/pgrd_to_navm.py`.  Editing any of them changes the tag and
+`tes5_import/navmesh/from_pgrd.py`.  Editing any of them changes the tag and
 invalidates every entry, so the published cache MUST be rebuilt or it is dead
 weight for every downloader.  `_geom_hash` also consumes collision geometry,
 but per-mesh and via the export, so asset-side edits are not gated here.
@@ -60,28 +60,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from tools.navmesh import navmesh_cache as nc
 
-# Sources whose bytes feed the cache tag.  Keep in step with
-# import_main._navmesh_geom_cache -- a test asserts they agree.
-NAVMESH_PATHS = ('tes5_import/navmesh/', 'tes5_import/pgrd_to_navm.py')
+#: Sources whose bytes feed the cache tag; a test asserts they match pool.
+NAVMESH_PATHS = ('tes5_import/navmesh/',)
+#: Under the prefix but NOT a tag source -- see pool._TAG_EXCLUDE.
+NAVMESH_EXCLUDE = ('tes5_import/navmesh/edge_links.py',)
 
-# Files that do not feed the tag but contain SOME code that can change what
-# gets cached or how it is keyed.  Listing a function here makes the CHECK run;
-# it does not by itself block anything.  The block only happens if the check
-# then finds the cache was built by different code (cache_matches_tag), so
-# over-triggering costs a fast stamp comparison and nothing else -- a cache
-# that is already correct always passes.  That asymmetry is why the function
-# lists can stay generous: a missed trigger ships a dead cache, an extra
-# trigger costs microseconds.
-#
-# Attribution uses git's `-U0` hunk headers, which name the enclosing function
-# (the same technique release_notes.py uses to attribute convert.py per phase).
-# It exists to keep the *reported reason* honest -- so the hook says "you
-# changed _gather_navm_jobs" rather than "you changed import_main.py" -- not to
-# suppress checks.
-#
-# Deliberately NOT gated: navm_edge_links.py.  build_edge_links stitches
-# cross-cell portals into the NVNM *after* geometry comes out of the cache, so
-# editing it changes the written mesh but never the cached geometry.
+#: Non-tag files that change caching. See: docs/commentary/tes5_import_navmesh.md#what-gates-a-push
 NAVMESH_FUNCS = {
     'asset_convert/collision/collision_extract.py': frozenset({
         'collision_digest',       # the per-mesh digest every cell hash consumes
@@ -153,7 +137,8 @@ def touches_navmesh(paths: list[str], base: str = None,
     otherwise an unrelated dialogue fix in import_main.py would block the push.
     """
     hits = [p for p in paths
-            if any(p.startswith(n) or p == n for n in NAVMESH_PATHS)]
+            if any(p.startswith(n) or p == n for n in NAVMESH_PATHS)
+            and p not in NAVMESH_EXCLUDE]
     for path in paths:
         funcs = NAVMESH_FUNCS.get(path)
         if funcs and (base is None

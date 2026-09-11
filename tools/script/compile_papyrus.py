@@ -17,7 +17,7 @@ from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
-from core.subprocess_flags import windows_cmd  # noqa: E402
+from core.subprocess_flags import windows_cmd
 
 def find_compiler():
     p = _PROJECT_ROOT / 'external' / 'papyrus-compiler' / 'papyrus.exe'

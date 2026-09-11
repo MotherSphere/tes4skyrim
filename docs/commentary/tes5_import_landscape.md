@@ -130,7 +130,7 @@ future per-region music with a cell-level value.
 ## OBND: authored bounds, and the int16 clamp
 
 **Code:** `tes5_import/record_types/common.py` (`_resolve_obnd`),
-`tes5_import/writer.py` (`pack_obnd`)
+`tes5_import/base/writer.py` (`pack_obnd`)
 
 OBND is six **signed 16-bit** ints. Two independent defects met here and
 crashed the game.

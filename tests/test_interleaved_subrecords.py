@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import.override_builder import _apply_generic
+from tes5_import.overrides.builder import _apply_generic
 
 
 def _sigs(pairs):

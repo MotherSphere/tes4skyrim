@@ -13,7 +13,7 @@ import struct
 import pytest
 
 from tes5_import.record_types import equipment as eq
-from tes5_import.skyrim_overrides import (
+from tes5_import.base.equivalents import (
     ARMA_ADDITIONAL_RACES,
     ARMA_ADDITIONAL_RACES_NONBEAST,
     ARMA_BEAST_RACES,

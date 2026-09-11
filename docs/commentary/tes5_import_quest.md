@@ -1,6 +1,6 @@
-# tes5_import/object_scripts.py - quests and quest scripts
+# tes5_import/base/object_scripts.py - quests and quest scripts
 
-**Code:** `tes5_import/quest_converter.py`, `script_convert/converter.py`, `tes5_import/dialog_converter.py`, `tes5_import/object_scripts.py`, `script_convert/constants.py`
+**Code:** `tes5_import/dialogue/quest.py`, `script_convert/converter.py`, `tes5_import/dialogue/converter.py`, `tes5_import/base/object_scripts.py`, `script_convert/constants.py`
 
 ## Contents
 
@@ -36,6 +36,61 @@
 - [Known gaps (round 6, not fixed here)](#known-gaps-2)
 - [Known gaps (round 3, not fixed here)](#known-gaps-2-2)
 - [Known gap (not fixed here)](#known-gap)
+- [Why an actor script must move to its placed reference](#actor-script-relocation)
+
+## Why an actor script must move to its placed reference
+<a id="actor-script-relocation"></a>
+
+**Code:** `tes5_import/base/object_scripts.py:_relocate_actor_scripts_to_refs`
+
+Three independent reasons an actor script MUST live on the reference, not on
+the base `NPC_`/`CREA`:
+
+1. **`GetVMScriptVariable(ref, "::var_var")` reads the property off a script
+   attached to the *reference named in param1*** (the ACHR), not off the base
+   record — verified against Skyrim.esm, where 100% of vanilla func-630 package
+   conditions name a REFR that carries its own VMAD holding the variable. A
+   base-attached script propagates to instances for property *access* (fragment
+   writes work), but the condition *read* fails, so the quest package never wins
+   its arbitration and the actor stays put (Pinarus/FGC01Rats,
+   Arielle/MG04Restore, ~142 actors).
+
+2. **Reference events never fire on a base-attached script.** `OnPackageEnd` and
+   friends are declared on `Actor`/`ObjectReference` (vanilla Scripts.zip);
+   `NPC_` is an ActorBase, so an event-driven script bound there is inert. This
+   silently killed every converted quest that sequences on package completion —
+   CharacterGen sets stage 12 from Renote's `OnPackageEnd`, so the chain stopped
+   at stage 10 and the Emperor/guards had no `GetStage ==` package to select at
+   all.
+
+3. **Self-reference calls have no target on a base record.** A bare `enable` /
+   `moveto` / `startcombat` acts on the calling REFERENCE; an ActorBase is not
+   one, so the call does nothing. Oblivion's standard scripted-entrance idiom is
+   an initially-disabled placement whose own GameMode block enables it on a cue,
+   which makes this the difference between the actor appearing and never
+   existing — Celebro, the Nehrim intro companion, was absent from the start
+   cell for exactly this reason (`MQ00CelebroScript`:
+   `if GetStage MQ00 == 5 / enable`).
+
+Vanilla does exactly this split: instance-identified logic lives on the ACHR
+(masterAmbushScript, 464 placements), while generic per-actor behaviour stays on
+the base (WIDeadBodyCleanupScript, defaultGhostScript).
+
+The script is moved (base entry removed) rather than duplicated so there is
+exactly ONE instance — both the fragment write (via the ACHR-typed self
+property) and the condition read resolve to it.
+
+### Which scripts qualify, and the single-placement rule
+
+The MASTERS' scripts are indexed alongside this plugin's (keyed on the
+`master_export` key, this plugin's space — see `_collect_scpts`): a dependent
+plugin's actor can carry one of its master's scripts, and missing it means the
+relocation never happens, so every reason above silently applies.
+
+A script may be moved OFF the base only when that base has a single placement,
+else siblings would lose it. Shared bases (rare: SI victims, Sheogorath's sheep)
+keep the base attachment and gain a per-ref one, matching Oblivion's
+per-instance variables.
 
 ## Quest conversion: bugs found and fixed
 <a id="quest-conversion-bugs"></a>
@@ -65,8 +120,8 @@ found nothing, and silently skipped the binding → `myMS14` was None at runtime
 `myMS14.SetStage(...)` in 8 dialogue fragments plus the attached scripts did nothing. **MS14 (Nothing You
 Can Possess) was uncompletable.** Fix: `resolve_property_formid()` in
 [script_convert/constants.py](../../script_convert/constants.py) reverses the `my` rename on lookup miss; used by
-both the INFO-fragment binder ([tes5_import/dialog_converter.py](../../tes5_import/dialog_converter.py)) and the
-object-script binder ([tes5_import/object_scripts.py](../../tes5_import/object_scripts.py)). Verified: TIF props
+both the INFO-fragment binder ([tes5_import/dialogue/converter.py](../../tes5_import/dialogue/converter.py)) and the
+object-script binder ([tes5_import/base/object_scripts.py](../../tes5_import/base/object_scripts.py)). Verified: TIF props
 now bind `myMS14 → 01017606`, and SE09AddItemsScript's props now include `SE09` + all activator refs.
 
 ### 3. `StartConversation target topic` discarded the topic (`Say(None)`)
@@ -87,7 +142,7 @@ was converted+compiled but attached to nothing. Fixed in
 The importer's fragment filter counted a whitespace-only (`"\r\n"`) stage result script; the psc
 generator's filter (`script.strip()`) didn't. `TES4_QF_E3` and `TES4_QF_SEObelisks` VMADs referenced a
 `Fragment_Stage_0100_Item_0` that doesn't exist. Fixed by aligning the importer filter
-([tes5_import/dialog_converter.py](../../tes5_import/dialog_converter.py) `_quest_stage_fragments`).
+([tes5_import/dialogue/converter.py](../../tes5_import/dialogue/converter.py) `_quest_stage_fragments`).
 
 ### 6. Inherited bark gate dead-ended conversation-revealed choice topics (SE36 froze)
 The bark-choice promotion stamps the revealing greeting's timing gate onto the choice topic's INFOs. SE36's
@@ -448,7 +503,7 @@ ESM that `AMBBaenlinDeath` and `AMBBaenlinMiss` bind to `01064209`/`0106420A`.
 
 Skyrim has no `AddTopic`, so the pipeline re-expresses Oblivion's dialogue
 visibility model as one `TES4Unlock_<topic>` global per explicitly-added topic
-(`tes5_import/dialog_unlocks.py`). INFO fragments and quest-stage fragments both
+(`tes5_import/dialogue/unlocks.py`). INFO fragments and quest-stage fragments both
 emit `TES4Unlock_X.SetValue(1)`. A **script** `AddTopic X` — the third reveal
 route — emitted an inert `;NE: AddTopic` comment instead.
 
@@ -493,7 +548,7 @@ already exists"*. The QUST emitter now seeds its `declared` set from
 
 The converter mints properties for records that exist only in the output —
 `TES4Fame`, `TES4Infamy`, `TES4GoldFenced`, `TES4CyrodiilCrimeFaction`, and now
-`TES4Unlock_*`. `_resolve_props` in `tes5_import/object_scripts.py` binds
+`TES4Unlock_*`. `_resolve_props` in `tes5_import/base/object_scripts.py` binds
 properties through `resolve_property_formid()`, which looks them up in
 `xref.edid_to_formid` — a map built **from the TES4 export**, which by
 definition never contains a synthesized record. So every one silently resolved
@@ -520,11 +575,10 @@ read the same global and looked clean precisely because the defect was one layer
 below the script text.
 
 **Fix.** `_resolve_props` consults the registry before falling through to the
-EditorID lookup, via a new `get_well_known_properties()` accessor in
-`import_main` (an accessor rather than a direct import, because `import_main`
-imports `object_scripts`). The registry is populated in the main process during
-phase 0 and the object-script plan is also main-process, so no worker sees an
-empty copy.
+EditorID lookup, importing `WELL_KNOWN_PROPERTIES` directly from
+`synth_records` (its defining module). The registry is populated in the main
+process during phase 0 and the object-script plan is also main-process, so no
+worker sees an empty copy.
 
 ### R5-3. An early `return` permanently killed the polling loop
 
@@ -1417,7 +1471,7 @@ be "fixed". Split out of the audit so they are not read as stale.
   (plus 2,252 ACHR and 253 ACRE). It looks unbindable, because the script is
   attached to the *base object* and the property names the *reference* — but
   Skyrim instantiates a base record's VMAD scripts on every placed reference,
-  which is why `SCRIPTABLE_TYPES` in `tes5_import/object_scripts.py` includes
+  which is why `SCRIPTABLE_TYPES` in `tes5_import/base/object_scripts.py` includes
   the base signatures in the first place. `cross_ref.get_record_script_type`
   deliberately follows the `NAME` chain for this reason. Correct as written.
 
@@ -1710,7 +1764,7 @@ stage 40).  SEFF scripts converted to `extends ActiveMagicEffect` and compiled,
 but nothing referenced them: no carrier MGEF, so the script never ran.
 Built as `build_seff_variants` in `tes5_import/record_types/magic.py` -- one
 Script-archetype MGEF per distinct SEFF script, VMAD built by
-`build_magic_effect_script_plan` in `tes5_import/object_scripts.py`, spliced
+`build_magic_effect_script_plan` in `tes5_import/base/object_scripts.py`, spliced
 into the converted SPEL/ENCH/INGR effect lists.
 
 **B. MenuMode blocks were preserved as comments** -- MS05 (Through a Nightmare,
@@ -1728,7 +1782,7 @@ game.  The walkthrough baseline excludes orphaned SCPTs.
 
 ## <a id="quest-conversion"></a>QUST conversion: what the module owns
 
-**Code:** `tes5_import/quest_converter.py`
+**Code:** `tes5_import/dialogue/quest.py`
 
 Split out of `dialog_converter.py`, which had grown to 2,759 code lines. The
 seam was chosen by counting call-graph edges across every candidate cut, not by

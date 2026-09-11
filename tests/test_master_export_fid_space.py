@@ -63,7 +63,7 @@ def test_master_record_keyed_in_this_plugins_space(tmp_path):
     Anequina's own records sit at index 01 in its file; in the child's list
     Anequina is slot 02. The key must be 02..., not the raw 01... .
     """
-    from tes5_import.overrides import load_master_export
+    from tes5_import.overrides.nested import load_master_export
 
     _write_export(tmp_path, 'Oblivion.esm', [],
                   [('FACT', '00012345', 'VanillaFaction')])
@@ -94,7 +94,7 @@ def test_fid_to_edid_uses_the_rekeyed_id(tmp_path):
     master's own-space id, and the later blanket +offset then resolves the
     property to a different FILE.
     """
-    from tes5_import.overrides import load_master_export
+    from tes5_import.overrides.nested import load_master_export
 
     _write_export(tmp_path, 'Oblivion.esm', [],
                   [('FACT', '00012345', 'VanillaFaction')])
@@ -119,11 +119,7 @@ def test_fid_to_edid_uses_the_rekeyed_id(tmp_path):
     assert fid_to_edid[0x020247E2] == 'ANQCORCorintheFaction'
     assert fid_to_edid[0x010247E2] == 'TamrielLand'
 
-    # And the id the writer ultimately emits: +1 for the prepended Skyrim.esm.
-    # 02 -> 03, which is ElsweyrAnequina.esp in the OUTPUT master list
-    # (Skyrim, Oblivion, Tamriel, Anequina). Keying on the raw 01 would have
-    # produced 02 = Tamriel.esp, the LAND -- the shipped defect.
-    from tes5_import.text_reader import remap_formid
+    from tes5_import.base.text_reader import remap_formid
     assert remap_formid(0x020247E2, offset=1) == 0x030247E2
 
 
@@ -133,7 +129,7 @@ def test_reference_fields_are_rekeyed_with_their_record(tmp_path):
     The cross-ref graph chains them (record_scri[fid] -> script edid), so a
     value left in the master's space misses every key in the graph.
     """
-    from tes5_import.overrides import load_master_export
+    from tes5_import.overrides.nested import load_master_export
 
     _write_export(tmp_path, 'Oblivion.esm', [], [])
     _write_export(tmp_path, 'Tamriel.esp', ['Oblivion.esm'], [])
@@ -186,7 +182,7 @@ def _vmad(scripts):
 
 
 def test_shift_vmad_moves_object_properties():
-    from tes5_import.override_merge import _shift_vmad
+    from tes5_import.overrides.master_index import _shift_vmad
 
     payload = _vmad([('QF_ANQMerchantsGuild04', [
         ('TES4Unlock_ANQMCG04Bookkeeper', 1, 0x020E0E24),
@@ -203,7 +199,7 @@ def test_shift_vmad_moves_object_properties():
 
 def test_shift_vmad_identity_map_is_byte_exact():
     """An index the map does not mention must be left strictly alone."""
-    from tes5_import.override_merge import _shift_vmad
+    from tes5_import.overrides.master_index import _shift_vmad
 
     payload = _vmad([
         ('QF_Thing', [('A', 1, 0x01001234), ('Name', 2, 'hello'),
@@ -218,7 +214,7 @@ def test_shift_vmad_identity_map_is_byte_exact():
 
 def test_shift_vmad_returns_unparsable_payload_untouched():
     """A half-rewritten VMAD would corrupt a binding -- refuse instead."""
-    from tes5_import.override_merge import _shift_vmad
+    from tes5_import.overrides.master_index import _shift_vmad
 
     junk = b'\x05\x00\x02\x00\x01\x00' + b'\xff' * 3      # truncated
     assert _shift_vmad(junk, {2: 3}) == junk

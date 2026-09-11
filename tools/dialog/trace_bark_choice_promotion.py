@@ -27,13 +27,14 @@ from pathlib import Path
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(
     _os.path.abspath(__file__)))))
-from tes5_import.text_reader import (
+from tes5_import.base.text_reader import (
     parse_export_directory, group_records_by_type,
     get_formid, get_int, get_str,
 )
-from tes5_import.dialog_converter import (
-    classify_topic, should_skip_dial, service_menu_kind, _quest_state_ctdas,
+from tes5_import.dialogue.converter import (
+    classify_topic, should_skip_dial, service_menu_kind,
 )
+from tes5_import.dialogue.quest import quest_state_ctdas
 
 
 def _bark_dial_fids(dials):
@@ -48,7 +49,35 @@ def _bark_dial_fids(dials):
     return out
 
 
+def _revealers_by_target(infos, bark_dial_fids):
+    """target_fid -> [(revealer_bark_fid, gate_is_nonempty), ...].
+
+    Gates are read at offset=0, i.e. raw FormIDs: this only needs to know
+    whether a gate is non-empty, never which record it names.
+    """
+    revealers = defaultdict(list)
+    for info_rec in infos:
+        parent = get_formid(info_rec, 'ParentDIAL')
+        if parent not in bark_dial_fids:
+            continue
+        targets = []
+        for i in range(get_int(info_rec, 'ChoiceCount')):
+            cfid = get_formid(info_rec, f'Choice[{i}]')
+            if cfid and cfid not in bark_dial_fids:
+                targets.append(cfid)
+        cfid = get_formid(info_rec, 'TCLT.Choice')
+        if cfid and cfid not in bark_dial_fids:
+            targets.append(cfid)
+        if not targets:
+            continue
+        gate = quest_state_ctdas(info_rec, 0)
+        for cfid in targets:
+            revealers[cfid].append((parent, len(gate) > 0))
+    return revealers
+
+
 def main(argv=None):
+    """Report which bark choices get promoted to top-level topics."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('export_dir', help='export/<file> directory')
     ap.add_argument('--only', default='',
@@ -67,26 +96,7 @@ def main(argv=None):
                    for d in dials}
     bark_dial_fids = _bark_dial_fids(dials)
 
-    # target_fid -> list of (revealer_bark_fid, gate_is_nonempty)
-    revealers = defaultdict(list)
-    for info_rec in infos:
-        parent = get_formid(info_rec, 'ParentDIAL')
-        if parent not in bark_dial_fids:
-            continue
-        targets = []
-        for i in range(get_int(info_rec, 'ChoiceCount')):
-            cfid = get_formid(info_rec, f'Choice[{i}]')
-            if cfid and cfid not in bark_dial_fids:
-                targets.append(cfid)
-        cfid = get_formid(info_rec, 'TCLT.Choice')
-        if cfid and cfid not in bark_dial_fids:
-            targets.append(cfid)
-        if not targets:
-            continue
-        # offset=0: raw FormIDs, enough for gate-nonempty detection.
-        gate = _quest_state_ctdas(info_rec, 0)
-        for cfid in targets:
-            revealers[cfid].append((parent, len(gate) > 0))
+    revealers = _revealers_by_target(infos, bark_dial_fids)
 
     only = {s.strip() for s in args.only.split(',') if s.strip()}
     n_promote = 0

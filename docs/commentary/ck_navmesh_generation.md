@@ -1,6 +1,6 @@
 # tools/navmesh/ - how the CK generates navmesh
 
-**Code:** `tes5_import/navmesh/params.py`, `tes5_import/navm_edge_links.py`, `tools/navmesh/audit.py`, `tools/navmesh/check.py`
+**Code:** `tes5_import/navmesh/params.py`, `tes5_import/navmesh/edge_links.py`, `tools/navmesh/audit.py`, `tools/navmesh/check.py`
 
 ## Contents
 

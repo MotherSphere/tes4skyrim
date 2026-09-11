@@ -42,6 +42,7 @@ What a format or contract IS. Stable; no dates, no status.
 | [skyrim_commands.md](reference/skyrim_commands.md) |  |
 | [skyrim_mountable_actor.md](reference/skyrim_mountable_actor.md) | What makes a Skyrim actor mountable |
 | [tes4_record_definitions.md](reference/tes4_record_definitions.md) | TES4 (Oblivion) Complete Binary Record Definitions |
+| [tes5_import_architecture.md](reference/tes5_import_architecture.md) | `tes5_import/` architecture — read this BEFORE writing any code here |
 | [tes5_binary_format.md](reference/tes5_binary_format.md) | Skyrim SE (TES5/SSE) Binary File Format — Exact Layout |
 | [tes_runtime_fragments.md](reference/tes_runtime_fragments.md) | TESRuntime animation cache fragments — the schema any mod emits |
 | [xedit_scripting.md](reference/xedit_scripting.md) | xEdit Scripting Reference (historical) |
@@ -68,7 +69,7 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [asset_convert_ui.md](commentary/asset_convert_ui.md) | asset_convert/ui/ui_menus.py - Oblivion UI in Skyrim |
 | [ck_exe_disassembly.md](commentary/ck_exe_disassembly.md) | tools/disasm/ - CreationKit.exe as a source |
 | [ck_navmesh_generation.md](commentary/ck_navmesh_generation.md) | tools/navmesh/ - how the CK generates navmesh |
-| [ck_reference_init_hang.md](commentary/ck_reference_init_hang.md) | tes5_import/writer.py - the CK reference-init hang |
+| [ck_reference_init_hang.md](commentary/ck_reference_init_hang.md) | tes5_import/base/writer.py - the CK reference-init hang |
 | [ck_vs_game_missing_objects.md](commentary/ck_vs_game_missing_objects.md) | tes5_import/ - objects in the CK, missing in game |
 | [ck_warnings.md](commentary/ck_warnings.md) | tes5_import/ - what the CK complains about |
 | [ingame_testing.md](commentary/ingame_testing.md) | tools/dialog/ - in-game test methodology |
@@ -76,17 +77,20 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [script_convert.md](commentary/script_convert.md) | script_convert/ - TES4 script to Papyrus |
 | [tes4_export_falloutnv.md](commentary/tes4_export_falloutnv.md) | tes4_export/record_types/falloutnv.py - FO3/FNV export deltas |
 | [tes4_export_morrowind.md](commentary/tes4_export_morrowind.md) | tes4_export/tes3_reader.py, export_morrowind.py - TES3 export and Morroblivion compatibility |
-| [tes5_import_dialogue.md](commentary/tes5_import_dialogue.md) | tes5_import/dialog_converter.py - dialogue and voice |
+| [tes5_import_conditions.md](commentary/tes5_import_conditions.md) | tes5_import/base/conditions.py - CTDA translation |
+| [tes5_import_dialogue.md](commentary/tes5_import_dialogue.md) | tes5_import/dialogue/converter.py - dialogue and voice |
 | [tes5_import_actors.md](commentary/tes5_import_actors.md) | tes5_import/record_types/actor_common.py, npc.py, creature.py - actor conversion |
 | [tes5_import_falloutnv_actors.md](commentary/tes5_import_falloutnv_actors.md) | tes5_import/record_types/actors_falloutnv.py - FO3/FNV actor templates |
 | [tes5_import_landscape.md](commentary/tes5_import_landscape.md) | tes5_import/record_types/region.py - REGN, LSCR and WATR |
 | [tes5_import_magic.md](commentary/tes5_import_magic.md) | tes5_import/record_types/magic.py - magic conversion |
-| [tes5_import_mod_merge.md](commentary/tes5_import_mod_merge.md) | tes5_import/master_manifest.py - merging a mod stack |
+| [tes5_import_mod_merge.md](commentary/tes5_import_mod_merge.md) | tes5_import/overrides/manifest.py - merging a mod stack |
 | [tes5_import_navmesh.md](commentary/tes5_import_navmesh.md) | tes5_import/navmesh/ - PGRD to NAVM, LAND and worldspace |
-| [tes5_import_override.md](commentary/tes5_import_override.md) | tes5_import/overrides.py - plugins with masters |
-| [tes5_import_package.md](commentary/tes5_import_package.md) | tes5_import/pack_converter.py - AI packages |
-| [tes5_import_quest.md](commentary/tes5_import_quest.md) | tes5_import/object_scripts.py - quests and quest scripts |
+| [tes5_import_override.md](commentary/tes5_import_override.md) | tes5_import/overrides/nested.py - plugins with masters |
+| [tes5_import_pipeline.md](commentary/tes5_import_pipeline.md) | tes5_import/pipeline*.py - phase ordering and the finalize pass |
+| [tes5_import_package.md](commentary/tes5_import_package.md) | tes5_import/packages/converter.py - AI packages |
+| [tes5_import_quest.md](commentary/tes5_import_quest.md) | tes5_import/base/object_scripts.py - quests and quest scripts |
 | [tes5_import_sound.md](commentary/tes5_import_sound.md) | tes5_import/record_types/sound.py - SOUN, SNDR and SOPM |
+| [tes5_import_world.md](commentary/tes5_import_world.md) | tes5_import/record_types/world.py - CELL, WRLD and placed references |
 | [tes5_import_weather.md](commentary/tes5_import_weather.md) | tes5_import/record_types/world.py - weather and climate |
 | [tes_runtime_guns.md](commentary/tes_runtime_guns.md) | tes_runtime/plugin/fire.cpp - the gun shot, reload key and ammo restriction in the SKSE plugin |
 | [version_upgrade_planning.md](commentary/version_upgrade_planning.md) | version.py - which steps a new release owes |

@@ -1,6 +1,6 @@
 # tools/dialog/ - in-game test methodology
 
-**Code:** `tes5_import/dialog_conditions.py`, `tools/live/quest_labtest.py`, `tools/live/dialog_live.py`, `tools/live/game_input.py`
+**Code:** `tes5_import/base/conditions.py`, `tools/live/quest_labtest.py`, `tools/live/dialog_live.py`, `tools/live/game_input.py`
 
 ## Contents
 
@@ -154,7 +154,7 @@ Field names verified against the real export files:
 ### Decoding a TES4 condition
 
 Conditions are exported as raw 24-byte hex, not decoded fields. The layout
-(identical to `tes5_import/dialog_conditions.py`, which the tool imports rather
+(identical to `tes5_import/base/conditions.py`, which the tool imports rather
 than re-implementing):
 
 ```

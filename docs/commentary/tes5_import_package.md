@@ -1,6 +1,6 @@
-# tes5_import/pack_converter.py - AI packages
+# tes5_import/packages/converter.py - AI packages
 
-**Code:** `tes5_import/pack_converter.py`, `tes5_import/packages.py`, `tes5_import/dialog_converter.py`, `tes5_import/dialog_conditions.py`
+**Code:** `tes5_import/packages/converter.py`, `tes5_import/packages/actor_wiring.py`, `tes5_import/dialogue/converter.py`, `tes5_import/base/conditions.py`
 
 ## Contents
 
@@ -36,8 +36,8 @@ follow, escort, flee, and ambush the way they did in Oblivion.
 >
 > Current reality:
 > - `PACK` is **NOT** in `SKIP_TYPES` — it is converted.
-> - `convert_PACK` lives in [tes5_import/pack_converter.py](../../tes5_import/pack_converter.py)
->   (with templates in [pack_templates.py](../../tes5_import/pack_templates.py)), not
+> - `convert_PACK` lives in [tes5_import/packages/converter.py](../../tes5_import/packages/converter.py)
+>   (with templates in [pack_templates.py](../../tes5_import/packages/templates.py)), not
 >   in `record_types/dialog_misc.py`, and is live code.
 > - PACK is written in its **own phase (import_main Phase 3b2), after QUST**,
 >   because quest packages need the aliases to exist first — it is deliberately
@@ -184,7 +184,7 @@ Two routes, and vanilla uses both:
   quest is running, which is precisely how Oblivion's "quest package with a
   `GetStage` condition sitting at the top of the NPC's list" behaves.
 
-Our `convert_QUST` ([tes5_import/dialog_converter.py:379](../../tes5_import/dialog_converter.py#L379))
+Our `convert_QUST` ([tes5_import/dialogue/converter.py:379](../../tes5_import/dialogue/converter.py#L379))
 currently emits **no aliases at all**. That is a hard prerequisite for quest
 packages.
 
@@ -277,7 +277,7 @@ The rest degrade to travel-and-sandbox, which is strictly better than today's
 ## 3. Design
 <a id="3-design"></a>
 
-### 3.1 New module: `tes5_import/pack_converter.py`
+### 3.1 New module: `tes5_import/packages/converter.py`
 
 Own file (CLAUDE.md: keep files < ~1000 lines; `dialog_misc.py` is already large).
 Delete `convert_PACK` from `dialog_misc.py`.
@@ -394,13 +394,13 @@ Aliases must be **stable and idempotent** (index by EditorID) because the Papyru
 ### 3.5 Conditions
 
 TES4 `Condition[N].Raw` → TES5 `CTDA` via the **existing** translator in
-[tes5_import/dialog_conditions.py](../../tes5_import/dialog_conditions.py) — do not
+[tes5_import/base/conditions.py](../../tes5_import/base/conditions.py) — do not
 write a second one. Quest packages' `GetStage FGC01Rats == 50` conditions are the
 entire activation mechanism, so this must be reused, not approximated.
 
 ### 3.6 Actor wiring — retire the substitution shim
 
-[tes5_import/packages.py](../../tes5_import/packages.py) currently *drops* types
+[tes5_import/packages/actor_wiring.py](../../tes5_import/packages/actor_wiring.py) currently *drops* types
 {1,2,7,8,9,10} and collapses everything else to one sandbox. Once real packages
 exist:
 

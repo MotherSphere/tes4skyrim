@@ -41,7 +41,7 @@ from asset_convert.havok.hkx_anim import (decode_clip, event_annotations,
                                           write_clip_hkx)
 from asset_convert.havok.hkx_xml import convert_hkx_to_amd64
 from output_layout import assets_for
-from tes5_import.text_reader import parse_export_file
+from tes5_import.base.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
 #: Actions every gun of a class plays, regardless of its DNAM.

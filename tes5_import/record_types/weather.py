@@ -8,7 +8,7 @@ See: docs/commentary/tes5_import_weather.md
 
 import struct
 
-from ..text_reader import get_hex_bytes
+from ..base.text_reader import get_hex_bytes
 from .common import (
     prefix_path,
     get_float,

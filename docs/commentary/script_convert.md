@@ -1,6 +1,6 @@
 # script_convert/ - TES4 script to Papyrus
 
-**Code:** `script_convert/converter.py`, `tes5_import/constants.py`, `script_convert/tes5/blocks.py`, `tes5_import/record_types/actors.py`
+**Code:** `script_convert/converter.py`, `tes5_import/base/constants.py`, `script_convert/tes5/blocks.py`, `tes5_import/record_types/actors.py`
 
 ## Contents
 
@@ -77,6 +77,7 @@
 - [An inert read must never FIRE a guard](#an-inert-read-must-never-fire)
 - [A ref tested against `1` is still a null test](#ref-compared-to-one)
 - [A declaration can nest at ANY depth](#declarations-nest-at-any-depth)
+- [Not every INFO needs a fragment — the dialogue stutter](#info-fragment-stutter)
 
 ## Papyrus / Script Conversion Notes
 <a id="papyrus-script-conversion-notes"></a>
@@ -787,9 +788,9 @@ injects the same registry as `well_known_props`, so `QF_*`/`TIF_*` fragments
 bound correctly — which is why a verification counting the 4,762 *dialogue*
 bindings reported all-clear while every object script was broken.
 
-- `import_main.get_well_known_properties()` exposes the registry (an accessor,
-  not a direct import, because `import_main` imports `object_scripts`).
-  `_resolve_props` consults it before falling through to the EditorID lookup.
+- `synth_records.WELL_KNOWN_PROPERTIES` is the registry, imported directly by
+  `object_scripts`. `_resolve_props` consults it before falling through to the
+  EditorID lookup.
 - Worst case found: `TGStolenGoodsScript`, the **Thieves Guild rank driver** —
   all ten of its gates read `TES4GoldFenced.GetValue()`, so a None property
   threw on the first tick and no TG rank ever advanced.
@@ -1138,7 +1139,7 @@ no way to raise an attribute, so enforcing it would lock the content away
 *permanently* rather than merely early.
 
 Three places must agree, and a change to one needs the same change in the others:
-`tes5_import/dialog_conditions.py` (`_TES4_AV_ATTRIBUTES` / `_TES4_AV_TO_TES5`,
+`tes5_import/base/conditions.py` (`_TES4_AV_ATTRIBUTES` / `_TES4_AV_TO_TES5`,
 applied in `convert_ctda` for functions 14 `GetActorValue` and 277
 `GetBaseActorValue`), `script_convert/constants.py` (`TES4_ATTRIBUTES`,
 `ATTRIBUTE_STUB_VALUE`, `ACTOR_VALUE_MAP`), and
@@ -1239,7 +1240,7 @@ and diff it against the no-op sets before assuming a command was dropped for a
 good reason.
 
 Losses that ARE correct and should not be re-litigated: `AddTopic` (223 `;NE:`)
-is deliberate — `tes5_import/dialog_unlocks.py` re-expresses topic visibility as
+is deliberate — `tes5_import/dialogue/unlocks.py` re-expresses topic visibility as
 `TES4Unlock_*` GLOB gates and scans SCPT sources *because* script_convert leaves
 an inert comment. `ModDisposition` (414) is a genuine engine removal, with the
 `<= -100` hostility case already converting to `StartCombat`.
@@ -1352,7 +1353,7 @@ engine.**
 * Bare `Say`/`SayTo` (no assignment) stay plain fire-and-forget `Say()`
   (Nehrim's 727 hand-timed speech state machines). The measure-then-deliver
   pair (`set L to ref.Say T` / `ref.Say T`) collapses to the SayLine alone.
-* The NPC-to-NPC driver (`tes5_import/npc_conversations.py`) uses the same
+* The NPC-to-NPC driver (`tes5_import/dialogue/conversations.py`) uses the same
   primitive: `Utility.Wait(TES4Polyfill.SayLine(A, T, fallback) + 0.6)`.
 
 #### Why results stay in the END fragment
@@ -1657,6 +1658,20 @@ Neen), it never ran: the player paid 1000 gold, the dialogue fragment set the
 destination code, and nothing ever moved them.
 
 ### A script on the PLAYER base needs a quest alias (2026-08-01)
+<a id="player-base-script-needs-quest-alias"></a>
+
+**A type-0 script's base must be one EVERY attaching record can bind.** Papyrus
+refuses a script whose declared base does not match the form ("Unable to bind
+script X because their base types do not match"), so a script shared between an
+actor and a non-actor record cannot be `Actor` — the non-actor copies would
+silently never attach. Scanning for the FIRST actor attachment and returning
+early did exactly that to `NoActivationScript`, which Oblivion puts on **both a
+DOOR and an NPC_**. `Actor extends ObjectReference`, so the shared base binds to
+both and every inherited event still resolves.
+
+The player-base case is the exception, and only when the player base is the
+script's SOLE attachment — a script shared with real NPCs still has to bind to
+them as an `Actor`.
 
 Oblivion let a plugin script the player by attaching a SCPT to the player's base
 `NPC_ 0x00000007`. **Skyrim has no equivalent binding**, and the relocation above
@@ -4494,7 +4509,7 @@ what caught the 51 and the 109 above, neither of which appears in the residue.
 ## <a id="property-names-go-through-safe-property-name"></a>Every property name goes through `safe_property_name`
 
 **Code:** `script_convert/constants.py`, `script_convert/converter.py`,
-`script_convert/pipeline.py`, `tes5_import/quest_converter.py`
+`script_convert/pipeline.py`, `tes5_import/dialogue/quest.py`
 
 `safe_property_name` (and `sanitize_name` / `record_type_to_papyrus` beside it)
 are the cross-package spelling contract for Papyrus identifiers. They carry no
@@ -4527,3 +4542,44 @@ A type already upgraded by `_convert_ref` (`Quest` -> `TES4_FGQuestTrack`) must
 not be downgraded: `_preload_stage_scro_refs` runs once per stage and would
 otherwise reset types promoted when an earlier stage's result script accessed
 cross-script variables.
+
+## Not every INFO needs a fragment — the dialogue stutter
+<a id="info-fragment-stutter"></a>
+
+**Code:** `script_convert/pipeline.py:info_needs_fragment`
+
+🛑 **`info_needs_fragment` is the single source of truth.** The fragment
+EMITTER (`_info_batch`) and the VMAD WRITER (`tes5_import.dialogue.converter`)
+must agree exactly: a VMAD flag bit with no function behind it makes the engine
+bind a missing function, and a `.pex` nothing attaches is dead weight. Both
+call it.
+
+### Why not always — the stutter fix
+
+Every INFO used to get one, so the plugin shipped **19,278 per-INFO `.pex`
+files** against vanilla Skyrim's ~5,500 — 100% of INFOs carrying a fragment
+where vanilla carries one on **17.6%**, and **141 bytes of VMAD per INFO**
+against vanilla's 14.
+
+That cost falls **on the line-selection path**: when the engine picks a
+dialogue line it must bind that INFO's fragment — load the `.pex`, link it,
+resolve its properties — *before* anything is spoken. This matches every
+symptom the other theories could not:
+
+- it fires on plain NPC activation (no script of ours runs, but the greeting's
+  fragment is still bound);
+- it happens even when the voice file is **missing**, because binding precedes
+  playback;
+- it warms up on repeat, because a bound script stays loaded;
+- consecutive lines reusing an already-loaded fragment do not stutter.
+
+**54% of the fragments (10,417) contained nothing but the LineBegan/LineEnded
+timing calls.** Those matter only for a topic a converted SCRIPT drives through
+`TES4Polyfill.SayLine`, which blocks until `OnBegin` reports the line started.
+A line the PLAYER picks never goes through SayLine, so its timing-only fragment
+was pure per-line cost with no behaviour attached.
+
+So a fragment is emitted only when it actually does something: the INFO has a
+TES4 result script to run; it reveals AddTopic unlock globals; it opens a
+service (barter/training) menu; or its topic is script-driven, so SayLine needs
+the Begin/End hooks.

@@ -7,7 +7,7 @@ import os
 import re
 import struct
 
-from tes5_import.text_reader import parse_export_file
+from tes5_import.base.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
 from script_convert.constants import (sanitize_name, safe_property_name, record_type_to_papyrus, papyrus_script_name,
@@ -113,7 +113,7 @@ def _script_worker_init(xref, output_dir, info_reveals, service_topics,
     # NOT carry over — each worker reloads the mesh-bounds cache or every
     # needs_havok_release() lookup answers 0 and no trap gets its release.
     if mesh_bounds_cache:
-        from tes5_import.mesh_bounds import load_mesh_bounds
+        from tes5_import.base.mesh_bounds import load_mesh_bounds
         load_mesh_bounds(mesh_bounds_cache, quiet=True)
     _WORKER_CTX.update(xref=xref, output_dir=output_dir,
                        info_reveals=info_reveals,
@@ -219,12 +219,7 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
                     pass
     os.makedirs(output_dir, exist_ok=True)
 
-    # Mesh physics facts, so a converted `playgroup` can ask whether the object
-    # it animates is HELD until a script releases it (breakaway pieces,
-    # constrained trap islands).  Without this the lookup silently answers 0
-    # for every mesh and no trap ever gets its SetMotionType release — see
-    # CrossRefGraph.needs_havok_release.
-    from tes5_import.mesh_bounds import load_mesh_bounds
+    from tes5_import.base.mesh_bounds import load_mesh_bounds
     from asset_convert.collision.collision_extract import bounds_cache_is_current
     _bounds_cache = str(assets_for(export_dir) / 'mesh_bounds_cache.json')
     # A cache from before the HELD bit existed loads fine and answers 0 for
@@ -294,10 +289,7 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
         if xref.ref_as_int:
             print(f'    {len(xref.ref_as_int)} ref variables detected as integer-only (cross-script)')
 
-    # Phase 1.6: AddTopic unlock plan — MUST be the same analysis the importer
-    # runs, so the SetValue lines in the generated fragments match the VMAD
-    # property bindings and GLOB records written into the ESM.
-    from tes5_import.dialog_unlocks import build_unlock_plan
+    from tes5_import.dialogue.unlocks import build_unlock_plan
     by_type = {}
     for sig in ('DIAL', 'INFO', 'QUST', 'SCPT', 'NPC_'):
         path = os.path.join(export_dir, f'{sig}.txt')
@@ -308,10 +300,7 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
 
     stats = _new_stats()
 
-    # Service-menu topics (Barter/Training): INFOs under them whose fragment
-    # is generated here must ALSO open the Skyrim menu — the importer attaches
-    # the shared static script only to INFOs WITHOUT their own fragment.
-    from tes5_import.dialog_converter import SERVICE_MENU_TOPICS, DIAL_TYPE_SERVICE
+    from tes5_import.dialogue.converter import (DIAL_TYPE_SERVICE, SERVICE_MENU_TOPICS)
     service_topics = {}
     for rec in by_type.get('DIAL', []):
         edid = rec.get('EditorID', '')
@@ -374,7 +363,7 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
     # only, mirroring the importer's gate (a dependent plugin's copy would
     # collide with its master's script name).
     if not master_names(export_dir):
-        from tes5_import.npc_conversations import (build_conversation_plan,
+        from tes5_import.dialogue.conversations import (build_conversation_plan,
                                                    generate_driver_psc)
         conv_by_type = dict(by_type)
         for sig in ('ACHR', 'ACRE'):
@@ -1735,39 +1724,13 @@ def info_needs_fragment(rec: dict, info_reveals: dict = None,
                         service_topics: dict = None) -> bool:
     """Does this INFO need a Papyrus fragment script at all?
 
-    🛑 THE SINGLE SOURCE OF TRUTH.  The fragment EMITTER (_info_batch) and the
-    VMAD WRITER (tes5_import.dialog_converter) must agree exactly: a VMAD flag
-    bit with no function behind it makes the engine bind a missing function,
-    and a .pex nothing attaches is dead weight.  Both call THIS.
+    🛑 THE SINGLE SOURCE OF TRUTH: the fragment emitter (`_info_batch`) and the
+    VMAD writer (`tes5_import.dialogue.converter`) must agree exactly, so both
+    call this.  True when the INFO has a TES4 result script, reveals AddTopic
+    unlock globals, opens a service menu, or sits on a script-driven topic
+    whose SayLine needs the Begin/End hooks.
 
-    WHY NOT ALWAYS (the stutter fix)
-    -------------------------------------------
-    Every INFO used to get one, so the plugin shipped 19,278 per-INFO .pex
-    files against vanilla Skyrim's ~5,500 -- 100% of INFOs carrying a fragment
-    where vanilla carries one on 17.6%, and 141 bytes of VMAD per INFO against
-    vanilla's 14.
-
-    That costs time ON THE LINE-SELECTION PATH: when the engine picks a
-    dialogue line it must bind that INFO's fragment -- load the .pex, link it,
-    resolve its properties -- BEFORE anything is spoken.  Measured against the
-    user's report, this matches every symptom the other theories could not:
-    it fires on plain NPC activation (no script of ours runs, but the greeting's
-    fragment is still bound), on topic selection, and on Say(); it happens even
-    when the voice file is MISSING, because binding precedes playback; it warms
-    up on repeat, because a bound script stays loaded; and consecutive lines
-    that reuse an already-loaded fragment do not stutter.
-
-    54% of the fragments (10,417) contained nothing but the LineBegan/LineEnded
-    timing calls.  Those are only meaningful for a topic a converted SCRIPT
-    drives through TES4Polyfill.SayLine, which blocks until OnBegin reports the
-    line started.  A line the PLAYER picks never goes through SayLine, so its
-    timing-only fragment was pure per-line cost with no behaviour attached.
-
-    So a fragment is emitted only when it actually DOES something:
-      * the INFO has a TES4 result script to run;
-      * it reveals AddTopic unlock globals;
-      * it opens a service (barter/training) menu;
-      * or its topic is script-driven, so SayLine needs the Begin/End hooks.
+    See: docs/commentary/script_convert.md#info-fragment-stutter
     """
     from script_convert.converter import ScriptConverter
     info_reveals = info_reveals or {}

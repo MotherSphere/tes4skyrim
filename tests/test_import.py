@@ -34,14 +34,14 @@ from tes5_import.record_types.world import (
     convert_LAND,
     convert_REFR,
 )
-from tes5_import.text_reader import (
+from tes5_import.base.text_reader import (
     get_formid,
     get_int,
     parse_record_block,
     unescape_value,
 )
-from tes5_import.tes5_reader import records as reader_records
-from tes5_import.writer import (
+from tes5_import.base.tes5_reader import records as reader_records
+from tes5_import.base.writer import (
     FORM_VERSION_SSE,
     GROUP_HEADER_SIZE,
     RECORD_HEADER_SIZE,
@@ -399,7 +399,7 @@ class TestConverters:
 
     def test_arma_generation(self):
         """ARMO with writer should generate a companion ARMA record."""
-        from tes5_import.writer import PluginWriter
+        from tes5_import.base.writer import PluginWriter
         rec = {'Signature': 'ARMO', 'FormID': '00000300', 'RecordFlags': '0',
                'EditorID': 'IronArmor', 'FULL': 'Iron Armor',
                'BMDT.BipedFlags': '4', 'BMDT.GeneralFlags': '0',
@@ -430,7 +430,7 @@ class TestConverters:
         MOD3 only and 0 carrying neither, so female-only is legal and empty is
         not: MOD3 must be written and MOD2 must NOT be invented.
         """
-        from tes5_import.writer import PluginWriter
+        from tes5_import.base.writer import PluginWriter
         rec = {'Signature': 'ARMO', 'FormID': '00000301', 'RecordFlags': '0',
                'EditorID': 'IrlandaRobe', 'FULL': 'Robe',
                'BMDT.BipedFlags': '12', 'BMDT.GeneralFlags': '0',
@@ -541,7 +541,7 @@ class TestConverters:
         that FGTS is responsible for.
         """
         import colorsys
-        from tes5_import.npc_face_mapper import _pick_skin_tone
+        from tes5_import.actors.npc_face_mapper import _pick_skin_tone
 
         def tone(race, gender='Male'):
             _, rgb, _ = _pick_skin_tone(race, gender, 0x00000500)
@@ -620,7 +620,7 @@ class TestConverters:
         passive Ability is neither (the scamp's AbDaedricResistWeak is a
         self-buff), and only a pure TOUCH spell becomes the melee ATKD
         'Attack Spell' (the flame atronach idiom)."""
-        from tes5_import import creature_races as cr
+        from tes5_import.actors import creature_races as cr
         cr.load_creature_item_index({
             'SPEL': [
                 {'Signature': 'SPEL', 'FormID': '0002B543',
@@ -659,7 +659,7 @@ class TestConverters:
         """ATKD field 3 is 'Attack Spell' (xEdit: [SPEL, SHOU, NULL]) — the
         vanilla melee-caster idiom (109 vanilla attack entries; the flame
         atronach's four attacks each name a fire spell)."""
-        from tes5_import.creature_races import _atkd
+        from tes5_import.actors.creature_races import _atkd
         data = _atkd(spell=0x0105D4A2)
         assert len(data) == 44
         dmg, chance, spell, flags = struct.unpack_from('<ffII', data, 0)
@@ -1267,7 +1267,7 @@ class TestSoundDescriptorSlotCoverage:
         """A real synthesized TACT must come through byte-identical."""
         from tes5_import.record_types import sound
         from tes5_import.record_types.items import patch_sound_descriptor_slots
-        from tes5_import.speaker_activators import _pack_tact
+        from tes5_import.dialogue.speak_as import _pack_tact
 
         class W:
             def __init__(self, groups):
@@ -1726,7 +1726,7 @@ class TestServiceConversion:
 
     def test_trainer_class_and_faction(self):
         from tes5_import.record_types.actor_common import (create_trainer_records, create_vendor_factions, get_trainer_class_fid, get_trainer_faction_fid)
-        from tes5_import.constants import TES5_SKILL_ORDER
+        from tes5_import.base.constants import TES5_SKILL_ORDER
         writer = PluginWriter(masters=['Skyrim.esm'])
         npc = self._trainer_npc()   # Teaches=7 (Alchemy), max 70
         by_type = {'NPC_': [npc], 'CLAS': [self._clas_rec()]}
@@ -1794,9 +1794,9 @@ class TestServiceConversion:
         conditions on an INFO (longest OR-run is 20); past that the engine drops
         the line, so every Barter INFO failed and merchants lost the topic
         entirely — while Training, a 1-condition gate, kept working."""
-        from tes5_import.dialog_conditions import (FUNC_GET_IN_FACTION,
+        from tes5_import.base.conditions import (FUNC_GET_IN_FACTION,
                                                    build_ctda)
-        from tes5_import.dialog_converter import _build_service_fallback_info
+        from tes5_import.dialogue.groups import _build_service_fallback_info
         from tes5_import.record_types.actor_common import (create_vendor_factions, get_merchant_faction_fid)
         writer = PluginWriter(masters=['Skyrim.esm'])
         # Many distinct service bitmasks => many vendor factions. The gate must
@@ -1821,7 +1821,7 @@ class TestServiceConversion:
         assert get_trainer_class_fid(0x00000500) == 0
 
     def test_service_menu_kind(self):
-        from tes5_import.dialog_converter import (service_menu_kind,
+        from tes5_import.dialogue.converter import (service_menu_kind,
                                                   should_skip_dial)
         barter = {'Signature': 'DIAL', 'FormID': '0000010F',
                   'EditorID': 'Barter', 'DATA.Type': '5'}
@@ -1833,7 +1833,7 @@ class TestServiceConversion:
         assert should_skip_dial(refusal)
 
     def test_convert_info_service_vmad(self):
-        from tes5_import.dialog_converter import convert_INFO
+        from tes5_import.dialogue.converter import convert_INFO
         rec = {'Signature': 'INFO', 'FormID': '00062116', 'RecordFlags': '0',
                'ParentDIAL': '0000010F', 'DATA.Flags': '2',
                'ResponseCount': '1', 'Response[0].EmotionType': '0',
@@ -1904,7 +1904,7 @@ class TestServiceConversion:
 
     def test_barter_topic_dialogue(self):
         """End-to-end: Barter topic converts with prompt, gate and fragment."""
-        from tes5_import.dialog_converter import build_dialog_groups
+        from tes5_import.dialogue.groups import build_dialog_groups
         from tes5_import.record_types.actor_common import (create_trainer_records, create_vendor_factions)
         writer = PluginWriter(masters=['Skyrim.esm'])
         npc = self._trainer_npc()
@@ -1946,8 +1946,8 @@ class TestServiceConversion:
         Arvena asks what happened in the basement, player can't answer). Also
         verifies a greeting Choice pointing at ANOTHER bark is dropped (it would
         dangle after the bark pass splits/merges topics)."""
-        from tes5_import.dialog_converter import build_dialog_groups
-        from tes5_import.text_reader import set_formid_index_offset
+        from tes5_import.dialogue.groups import build_dialog_groups
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(0)
         writer = PluginWriter(masters=['Skyrim.esm'])
         qust = {'Signature': 'QUST', 'FormID': '00035713',
@@ -2038,7 +2038,7 @@ class TestServiceConversion:
         topic on first contact; a prose mention rides that bark line's own
         (stage) conditions. Azzan's 'Advancement' was showing before joining
         the guild because 6 late-game greetings say the word 'advancement'."""
-        from tes5_import.dialog_unlocks import build_unlock_plan
+        from tes5_import.dialogue.unlocks import build_unlock_plan
         # A conversation topic 'Advancement', AddTopic'd by a normal join line.
         topic = {'Signature': 'DIAL', 'FormID': '0003568F',
                  'EditorID': 'advancementFG', 'FULL': 'Advancement',
@@ -2068,7 +2068,7 @@ class TestServiceConversion:
         record's OWN DNAM.Priority byte has NO EFFECT in-game, because the
         engine arbitrates dialogue on the quest's own priority. convert_QUST
         must write the EFFECTIVE (boosted) priority, not the raw TES4 value."""
-        from tes5_import.quest_converter import compute_quest_priorities, convert_QUST
+        from tes5_import.dialogue.quest import compute_quest_priorities, convert_QUST
         staged = {'Signature': 'QUST', 'FormID': '00035713',
                  'EditorID': 'RealQuest', 'DATA.Flags': '0',
                  'DATA.Priority': '60', 'StageCount': '1',
@@ -2104,7 +2104,7 @@ class TestServiceConversion:
         is why converted escort/travel packages could pass their condition and
         start (the actor stands up) yet never actually travel.
         """
-        from tes5_import.quest_converter import (
+        from tes5_import.dialogue.quest import (
             QUEST_PRIORITY_MAX, compute_quest_priorities, convert_QUST)
         # Authored priorities spanning TES4's range, staged and zero-stage.
         quests = []
@@ -2135,7 +2135,7 @@ class TestServiceConversion:
                 assert pri[int(q['FormID'], 16)] == int(q['DATA.Priority']), \
                     'a staged quest must keep the priority its author wrote'
 
-        from tes5_import.quest_converter import ZERO_STAGE_TOP
+        from tes5_import.dialogue.quest import ZERO_STAGE_TOP
         zero = [pri[int(q['FormID'], 16)] for q in quests
                 if not int(q['StageCount'])]
         assert max(zero) <= ZERO_STAGE_TOP, \
@@ -2153,8 +2153,8 @@ class TestServiceConversion:
         generic greeting, journal stage correct, every record field verified
         individually correct — MG00General/MG04Restore/Arielle Jurard,
         2026-07-20)."""
-        from tes5_import.dialog_converter import build_dialog_groups
-        from tes5_import.text_reader import set_formid_index_offset
+        from tes5_import.dialogue.groups import build_dialog_groups
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(0)
         writer = PluginWriter(masters=['Skyrim.esm'])
 
@@ -2195,8 +2195,8 @@ class TestServiceConversion:
                   'INFO': [staged_info, container_info]}
         build_dialog_groups(by_type, writer, npc_to_vtyp={})
 
-        # Arbitration lives on QUST.DNAM.Priority — NOT on the topic's PNAM.
-        from tes5_import.dialog_converter import compute_quest_priorities
+        """Arbitration lives on QUST.DNAM.Priority, NOT on the topic's PNAM."""
+        from tes5_import.dialogue.quest import compute_quest_priorities
         pri = compute_quest_priorities(by_type)
         staged_prio = pri[0x00035713]
         container_prio = pri[0x00035714]
@@ -2224,8 +2224,8 @@ class TestServiceConversion:
         ...) arbitrate AMONG EACH OTHER too (two factions' idle chatter
         competing for the same generic NPC); losing that ordering would hand
         the decision to file order instead."""
-        from tes5_import.dialog_converter import build_dialog_groups
-        from tes5_import.text_reader import set_formid_index_offset
+        from tes5_import.dialogue.groups import build_dialog_groups
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(0)
         writer = PluginWriter(masters=['Skyrim.esm'])
 
@@ -2281,11 +2281,13 @@ class TestServiceConversion:
                   'INFO': [staged_info, high_info, low_info]}
         build_dialog_groups(by_type, writer, npc_to_vtyp={})
 
-        # Measured on QUST.DNAM.Priority — the byte the engine arbitrates on.
-        # (The topics' PNAM all stay at the vanilla 50.0 default, so ordering
-        # cannot be read there; see
-        # test_zero_stage_quest_never_outranks_staged_greeting.)
-        from tes5_import.dialog_converter import compute_quest_priorities
+        """A higher-priority container quest still loses to a staged one.
+
+        Measured on QUST.DNAM.Priority, the byte the engine
+        arbitrates on: the topics' PNAM all stay at the vanilla 50.0
+        default, so ordering cannot be read there.
+        """
+        from tes5_import.dialogue.quest import compute_quest_priorities
         pri = compute_quest_priorities(by_type)
         staged_prio = pri[0x00035713]
         high_prio = pri[0x00035715]
@@ -2356,8 +2358,8 @@ class TestOutfitSplit:
 
     def _index(self, **types):
         """Install a fresh item index from {sig: [rec, ...]}."""
-        from tes5_import.outfits import load_item_index
-        from tes5_import.text_reader import set_formid_index_offset
+        from tes5_import.actors.outfits import load_item_index
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(0)
         load_item_index(types)
 
@@ -2382,7 +2384,7 @@ class TestOutfitSplit:
         'contains non-armor objects' — they must stay in CNTO. Weapons must
         too: a survey of every vanilla Skyrim.esm OTFT found none containing a
         weapon — Skyrim's combat AI equips weapons from CNTO at runtime."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000001', 'Cuirass', self.BODY)],
             WEAP=[{'Signature': 'WEAP', 'FormID': '00000002', 'EditorID': 'Axe'}],
@@ -2397,7 +2399,7 @@ class TestOutfitSplit:
     def test_outfit_and_inventory_are_disjoint(self):
         """Skyrim adds the outfit ON TOP of CNTO, so an item in both is
         carried twice — the duplicate-inventory bug."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000001', 'Cuirass', self.BODY)],
             KEYM=[{'Signature': 'KEYM', 'FormID': '00000002', 'EditorID': 'Key'}],
@@ -2407,7 +2409,7 @@ class TestOutfitSplit:
 
     def test_armor_beats_clothing_for_a_contested_slot(self):
         """An NPC issued both armor and clothes was meant to wear the armor."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000001', 'SteelCuirass', self.BODY, value=180)],
             CLOT=[self._clot('00000002', 'Shirt', self.BODY, value=5)],
@@ -2421,7 +2423,7 @@ class TestOutfitSplit:
         not with plain CLOT records. A leveled list must claim the union of its
         leaves' slots or it silently wins the slot and the NPC wears the shirt.
         """
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000001', 'SteelCuirass', self.BODY, value=180)],
             CLOT=[self._clot('00000010', 'MiddleShirt', self.BODY | self.LEGS)],
@@ -2436,7 +2438,7 @@ class TestOutfitSplit:
         """A garment spanning body+legs that loses the body slot to a cuirass
         must not survive by winning legs — Skyrim would equip it and it would
         cover the chest again (the LL0VampireShirt case)."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000001', 'Cuirass', self.BODY, value=4800)],
             CLOT=[self._clot('00000002', 'Shirt', self.BODY | self.LEGS)],
@@ -2452,7 +2454,7 @@ class TestOutfitSplit:
         leveled-weapon actor unarmed. A weapon-only list is never outfit
         material (weapons are carried, not worn), so it must resolve as
         non-wearable rather than erroring out from the false cycle."""
-        from tes5_import.outfits import is_outfit_eligible, split_inventory
+        from tes5_import.actors.outfits import is_outfit_eligible, split_inventory
         self._index(
             WEAP=[{'Signature': 'WEAP', 'FormID': '00000010', 'EditorID': 'Staff'}],
             LVLI=[
@@ -2469,7 +2471,7 @@ class TestOutfitSplit:
 
     def test_mixed_leveled_list_stays_in_inventory(self):
         """A list that can roll gold/ingredients is not a valid outfit form."""
-        from tes5_import.outfits import is_outfit_eligible
+        from tes5_import.actors.outfits import is_outfit_eligible
         self._index(
             ARMO=[self._armo('00000010', 'Cuirass', self.BODY)],
             MISC=[{'Signature': 'MISC', 'FormID': '00000011', 'EditorID': 'Gold'}],
@@ -2480,13 +2482,13 @@ class TestOutfitSplit:
     def test_empty_leveled_list_is_not_outfit_eligible(self):
         """An outfit entry that resolves to nothing is the CK's
         'Unable to find valid outfit form'."""
-        from tes5_import.outfits import is_outfit_eligible
+        from tes5_import.actors.outfits import is_outfit_eligible
         self._index(LVLI=[self._lvli('00000001', 'LL0Empty', [])])
         assert is_outfit_eligible(0x01) is False
 
     def test_jewelry_does_not_contend(self):
         """Rings/amulets never conflict with armor, and an NPC wears two rings."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         ring_r, ring_l, amulet = 1 << 6, 1 << 7, 1 << 8
         self._index(CLOT=[
             self._clot('00000001', 'Ring1', ring_r),
@@ -2501,7 +2503,7 @@ class TestOutfitSplit:
         """Callers pass FormIDs from get_formid(), which has already applied the
         load-order offset (0x00xxxxxx → 0x01xxxxxx). An unmasked index lookup
         misses every record and the actor gets no outfit at all."""
-        from tes5_import.outfits import is_outfit_eligible
+        from tes5_import.actors.outfits import is_outfit_eligible
         self._index(ARMO=[self._armo('00000001', 'Cuirass', self.BODY)])
         assert is_outfit_eligible(0x01000001) is True
 
@@ -2514,7 +2516,7 @@ class TestOutfitSplit:
         the greaves roll nothing, so evicting the pants leaves the actor
         bare-legged. Keeping both lets the engine wear greaves when they roll
         and the pants otherwise."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000010', 'IronGreaves', self.LEGS, value=1000)],
             CLOT=[self._clot('00000011', 'Pants', self.LEGS, value=1)],
@@ -2535,7 +2537,7 @@ class TestOutfitSplit:
         (ChanceNone 0) still evicts the guaranteed clothing under it — that
         slot will always be filled by the armor, so the clothes would only
         double up. Only a *probabilistic* winner keeps the fallback."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000010', 'SteelGreaves', self.LEGS, value=1000)],
             CLOT=[self._clot('00000011', 'Pants', self.LEGS, value=1)],
@@ -2554,7 +2556,7 @@ class TestOutfitSplit:
         """A guarantee must hold all the way down. An outer list with
         ChanceNone 0 whose entry is a ChanceNone-75 sublist is NOT guaranteed,
         so it cannot evict a guaranteed peer sharing the slot."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000010', 'Greaves', self.LEGS, value=1000)],
             CLOT=[self._clot('00000011', 'Pants', self.LEGS, value=1)],
@@ -2574,7 +2576,7 @@ class TestOutfitSplit:
 
     def test_nothing_is_lost(self):
         """Every source item must reach the actor via exactly one channel."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(
             ARMO=[self._armo('00000001', 'Cuirass', self.BODY),
                   self._armo('00000002', 'Boots', self.FEET)],
@@ -2593,11 +2595,13 @@ class TestCKWarningFixes:
     """Regressions for the 2026-07 CK_WARNINGS sweep."""
 
     def test_engine_formids_not_remapped(self):
-        # PlayerRef 0x14 exists in NO data file (engine-hardcoded, same id in
-        # Skyrim) — remapping it to 0x01000014 dangles every package/alias
-        # reference to the player. Other low ids (Tamriel 0x3C!) are REAL
-        # Oblivion.esm records and must keep remapping.
-        from tes5_import.text_reader import set_formid_index_offset
+        """PlayerRef 0x14 is engine-hardcoded and must NOT be remapped.
+
+        Remapping it to 0x01000014 dangles every package/alias
+        reference to the player.  Other low ids (Tamriel 0x3C) are
+        REAL Oblivion.esm records and must keep remapping.
+        """
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(1)
         try:
             rec = {'A': '00000014', 'B': '00000100', 'C': '0000003C'}
@@ -2608,10 +2612,8 @@ class TestCKWarningFixes:
             set_formid_index_offset(0)
 
     def test_null_package_target_is_self(self):
-        # A type-0 "Specific Reference" with FormID 0 is the CK's "Unable to
-        # find Package Target Reference (00000000)"; vanilla's filler is
-        # type 6 = Self.
-        from tes5_import.pack_converter import _null_target
+        """A null package target becomes type 6 (Self), vanilla's filler."""
+        from tes5_import.packages.converter import _null_target
         assert struct.unpack('<iIi', _null_target())[0] == 6
 
     def test_player_ambush_becomes_forcegreet(self):
@@ -2628,10 +2630,10 @@ class TestCKWarningFixes:
           * PKDT interrupt flags must AUTHORISE speaking (vanilla 0xFEFF); the
             0x0000 default denies every interrupt and no greet can fire
         """
-        from tes5_import.pack_converter import (_choose, PackContext,
+        from tes5_import.packages.converter import (_choose, PackContext,
                                                 convert_flags, build_pkdt,
                                                 SPEED_RUN, T4_AMBUSH)
-        from tes5_import.pack_templates import FORCE_GREET
+        from tes5_import.packages.templates import FORCE_GREET
         rec = {'Signature': 'PACK', 'FormID': '0002C2F0',
                'EditorID': 'CGEmperorGreetPlayerInCell',
                'PKDT.Type': str(T4_AMBUSH), 'PKDT.Flags': '5124',
@@ -2680,8 +2682,8 @@ class TestCKWarningFixes:
         Find at an NPC (230 packages) is a greet, not an operate, and must
         keep sandboxing.
         """
-        from tes5_import.pack_converter import _choose, PackContext, T4_FIND
-        from tes5_import.pack_templates import ACTIVATE, TRAVEL
+        from tes5_import.packages.converter import _choose, PackContext, T4_FIND
+        from tes5_import.packages.templates import ACTIVATE, TRAVEL
 
         rec = {'Signature': 'PACK', 'FormID': '0007303D',
                'EditorID': 'CGRatAmbushAPushBricks',
@@ -2733,9 +2735,9 @@ class TestCKWarningFixes:
         Skyrim.esm, so the location resolved to nothing and the fighters
         stood still (measured live 2026-08-17).
         """
-        from tes5_import.pack_converter import _choose, PackContext, T4_FIND
-        from tes5_import.pack_templates import SANDBOX, TRAVEL
-        from tes5_import.text_reader import set_formid_index_offset
+        from tes5_import.packages.converter import _choose, PackContext, T4_FIND
+        from tes5_import.packages.templates import SANDBOX, TRAVEL
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(1)
         try:
             rec = {'Signature': 'PACK', 'FormID': '000292CD',
@@ -2806,9 +2808,9 @@ class TestCKWarningFixes:
         Object-ID Find is the NUMBER to find, i.e. Acquire's num-to-acquire.
         The search area is the authored PLDT when there is one, else the
         cell the items are placed in."""
-        from tes5_import.pack_converter import _choose, PackContext, T4_FIND
-        from tes5_import.pack_templates import ACQUIRE, SIT
-        from tes5_import.text_reader import set_formid_index_offset
+        from tes5_import.packages.converter import _choose, PackContext, T4_FIND
+        from tes5_import.packages.templates import ACQUIRE, SIT
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(1)
         try:
             staff = {'Signature': 'PACK', 'FormID': '00001111',
@@ -2859,7 +2861,7 @@ class TestCKWarningFixes:
         retaliates when attacked. TES5's default IS TES4 Defensive Combat, so
         the bit is dropped. 388 of 7,209 TES4 packages set it.
         """
-        from tes5_import.pack_converter import (convert_flags,
+        from tes5_import.packages.converter import (convert_flags,
                                                 T4_DEFENSIVE_COMBAT,
                                                 T5_IGNORE_COMBAT, T4_ALWAYS_RUN)
         flags, _ = convert_flags(T4_DEFENSIVE_COMBAT, 6, True)
@@ -2902,10 +2904,12 @@ class TestCKWarningFixes:
         assert struct.unpack_from('<I', spit, 16)[0] == 3  # CastType Scroll
 
     def test_aimed_ench_gets_projectile_mgef(self):
-        # An AIMED enchantment whose effects all map to projectile-less
-        # Alch* MGEFs fires NOTHING in game; the converter must synthesize an
-        # aimed MGEF clone with a projectile and swap it in.
-        from tes5_import import magic_effects
+        """An aimed ENCH over projectile-less MGEFs gets a synthesized clone.
+
+        Such an enchantment fires NOTHING in game, so the converter
+        must mint an aimed MGEF clone with a projectile and swap it in.
+        """
+        from tes5_import.actors import magic_effects as magic_effects
         from tes5_import.record_types.equipment import convert_ENCH
         magic_effects.set_tes4_effect_names([])   # reset cache
         writer = PluginWriter(masters=['Skyrim.esm'])
@@ -2931,17 +2935,17 @@ class TestCKWarningFixes:
         assert len(writer._top_groups['MGEF']) == 1
 
     def test_aimed_ench_using_converted_mgef_reaches_a_projectile(self):
-        # The crash this pins: an Aimed ENCH whose effects all have a null
-        # MGEF Projectile is an UNCONDITIONAL null-deref, not just a dud cast.
-        # MagicItem::GetCostliestEffectItem skips every projectile-less effect
-        # when delivery == Aimed and returns null; the combat-AI item rating
-        # function then does `mov rdi,[rax+0xC8]` with no null check.
-        # (Nehrim "Stab des Frosts" / EnStaffFrostDamage + FRDG, 2026-08-01.)
-        #
-        # The older test above exercises the VANILLA-alias fallback because it
-        # never registers converted MGEFs.  This one registers them, which is
-        # the normal path since convert_MGEF landed, and is what shipped broken.
-        from tes5_import import magic_effects
+        """An aimed ENCH over CONVERTED MGEFs still reaches a projectile.
+
+        This is the normal path since convert_MGEF landed, and is
+        what shipped broken; the test above exercises the vanilla-
+        alias fallback instead, because it registers no converted
+        MGEFs.  The failure is an unconditional null-deref, not a
+        dud cast.
+
+        See: docs/commentary/tes5_import_magic.md#aimed-ench-null-projectile
+        """
+        from tes5_import.actors import magic_effects as magic_effects
         from tes5_import.record_types.equipment import convert_ENCH
         from tes5_import.record_types.magic import (convert_MGEF,
                                                     register_mgef_formids)
@@ -3024,9 +3028,11 @@ class TestCKWarningFixes:
         assert counts == [100, 1]
 
     def test_footstep_sets_exist_in_skyrim(self):
-        # The old Light/Clothing constants (0x24238/0x24237) were FormIDs
-        # that do not exist in Skyrim.esm at all.
-        from tes5_import.skyrim_overrides import (
+        """Every footstep-set constant names a FormID that exists in Skyrim.esm.
+
+        The old Light/Clothing values (0x24238/0x24237) did not.
+        """
+        from tes5_import.base.equivalents import (
             CLOTHING_FOOTSTEP_SET, HEAVY_ARMOR_FOOTSTEP_SET,
             LIGHT_ARMOR_FOOTSTEP_SET)
         assert HEAVY_ARMOR_FOOTSTEP_SET == 0x00021487
@@ -3044,12 +3050,14 @@ class TestCKWarningFixes:
         assert name == 0x0000003B   # XMarker, not a marker-data-less MapMarker
 
     def test_doors_to_exteriors_never_claim_location(self):
-        # A city-gate/Oblivion-gate door leads OUT to an exterior; claiming
-        # the destination cell poisoned the worldspace's shared persistent
-        # dummy cell, giving EVERY persistent ref in Tamriel one gate's
-        # location ("Ref is not in its persistence location ..." x13, where
-        # the CK then hangs).
-        from tes5_import.locations import build_marker_locations
+        """A door to an exterior never claims the destination cell's location.
+
+        Claiming it poisoned the worldspace's shared persistent
+        dummy cell, giving EVERY persistent ref in Tamriel one
+        gate's location ("Ref is not in its persistence location"
+        x13), after which the CK hangs.
+        """
+        from tes5_import.base.locations import build_marker_locations
         writer = PluginWriter(masters=['Skyrim.esm'])
         writer.next_object_id = 0x01100000
         interior = {'Signature': 'CELL', 'FormID': '00000C01',
@@ -3099,7 +3107,7 @@ class TestGridlessWorldspaceCellPlacement:
     """
 
     def _build(self):
-        from tes5_import.import_main import _build_world_groups
+        from tes5_import.pipeline_records import _build_world_groups
         writer = PluginWriter(masters=['Skyrim.esm'])
         writer.next_object_id = 0x01100000
         wrld = {'Signature': 'WRLD', 'FormID': '0001D0BC',
@@ -3175,7 +3183,7 @@ class TestMasterWorldspaceAnchorWithOwnWorldspaces:
     MASTER_WRLD = 0x0000003C        # Oblivion.esm's Tamriel
 
     def _build(self):
-        from tes5_import.import_main import _build_world_groups
+        from tes5_import.pipeline_records import _build_world_groups
 
         class _Idx:
             """Minimal master index: serves the master's converted WRLD."""
@@ -3272,7 +3280,7 @@ class TestSayTopicRetarget:
 
     def test_retarget_to_reference(self):
         import struct
-        from tes5_import.dialog_conditions import convert_ctda
+        from tes5_import.base.conditions import convert_ctda
         out = convert_ctda(self._raw_ctda(), offset=1,
                            run_on_target_ref=0x14)
         assert out is not None
@@ -3282,7 +3290,7 @@ class TestSayTopicRetarget:
         assert out[0] & 0x02 == 0   # flag bit cleared
 
     def test_drop_run_on_target(self):
-        from tes5_import.dialog_conditions import convert_ctda
+        from tes5_import.base.conditions import convert_ctda
         assert convert_ctda(self._raw_ctda(), offset=1,
                             drop_run_on_target=True) is None
 
@@ -3313,7 +3321,7 @@ class TestSayTopicRetarget:
         disposition passed — still falls through to plain RunOn=Target.
         """
         import struct
-        from tes5_import.dialog_conditions import convert_ctda
+        from tes5_import.base.conditions import convert_ctda
         for func in (72, 68):
             raw = self._raw_ctda(func=func)
             # Never retargeted to the reference, under either disposition...
@@ -3344,7 +3352,7 @@ class TestSayTopicRetarget:
         never advanced past its first taunt.
         """
         import struct
-        from tes5_import.dialog_conditions import convert_ctda
+        from tes5_import.base.conditions import convert_ctda
         # GetIsRace(69) is exercised separately: its PARAM is race-mapped and
         # this fixture's dummy FormID is not a real TES4 race.
         for func in (70, 71, 73):
@@ -3357,14 +3365,14 @@ class TestSayTopicRetarget:
 
     def test_default_still_target(self):
         import struct
-        from tes5_import.dialog_conditions import convert_ctda
+        from tes5_import.base.conditions import convert_ctda
         out = convert_ctda(self._raw_ctda(), offset=1)
         run_on, reference = struct.unpack_from('<II', out, 20)
         assert run_on == 1 and reference == 0
 
     def test_subject_condition_untouched(self):
         import struct
-        from tes5_import.dialog_conditions import convert_ctda
+        from tes5_import.base.conditions import convert_ctda
         out = convert_ctda(self._raw_ctda(run_on_target=False), offset=1,
                            run_on_target_ref=0x14)
         run_on, reference = struct.unpack_from('<II', out, 20)
@@ -3379,7 +3387,7 @@ class TestSayTopicRetarget:
         fragments never ran — Pinarus lost his whole topic list, second cause
         after the identity-retarget bug)."""
         import struct
-        from tes5_import.dialog_conditions import convert_ctda
+        from tes5_import.base.conditions import convert_ctda
         type_byte = 0x02                              # run-on-target
         raw = struct.pack('<B3xfHHII4x', type_byte, 1.0, 72, 0, 0x00000007, 0)
         out = convert_ctda(raw, offset=1)
@@ -3405,7 +3413,7 @@ class TestAmbientChatterPacing:
     """
 
     def test_interrupt_flags_not_force_enabled(self):
-        from tes5_import.pack_converter import DEFAULT_INTERRUPT
+        from tes5_import.packages.converter import DEFAULT_INTERRUPT
         assert DEFAULT_INTERRUPT != 0xFFFF, \
             "0xFFFF is the CK's 'set all interrupt flags'; it forces every " \
             "NPC to be allowed to break off any activity to chatter"
@@ -3423,7 +3431,7 @@ class TestAmbientChatterPacing:
         With them denied the CharacterGen ambushes stood in a swords-out
         staring match until the player threw the first punch — TES4 packages
         never gate combat response at all."""
-        from tes5_import.pack_converter import DEFAULT_INTERRUPT
+        from tes5_import.packages.converter import DEFAULT_INTERRUPT
         assert DEFAULT_INTERRUPT & 0x04, 'Observe combat behavior must be on'
         assert DEFAULT_INTERRUPT & 0x40, 'Aggro Radius Behavior must be on'
         # 0x10 "Reaction to player actions" authorises spoken reaction
@@ -3433,7 +3441,7 @@ class TestAmbientChatterPacing:
 
     def test_pkdt_writes_the_interrupt_field(self):
         import struct
-        from tes5_import.pack_converter import build_pkdt, DEFAULT_INTERRUPT
+        from tes5_import.packages.converter import build_pkdt, DEFAULT_INTERRUPT
         b = build_pkdt(0, 2)
         assert len(b) == 12
         assert struct.unpack_from('<H', b, 8)[0] == DEFAULT_INTERRUPT
@@ -3442,7 +3450,7 @@ class TestAmbientChatterPacing:
         """Oblivion is far slower than Skyrim on both ambient clocks; without
         these the converted game runs Skyrim's pacing over Oblivion's much
         larger line pool."""
-        from tes5_import.constants import AMBIENT_GMST_OVERRIDES
+        from tes5_import.base.constants import AMBIENT_GMST_OVERRIDES
         # Skyrim.esm ships 5.0 / 10.0 for these two.
         assert AMBIENT_GMST_OVERRIDES['fAIGreetingTimer'][0] == 20.0
         assert AMBIENT_GMST_OVERRIDES['fIdleChatterCommentTimer'][0] == 100.0
@@ -3462,7 +3470,7 @@ class TestBarkResetTimer:
     """
 
     def test_reset_ticks_match_vanilla_half_hour(self):
-        from tes5_import.dialog_converter import (_BARK_RESET_TICKS,
+        from tes5_import.dialogue.converter import (_BARK_RESET_TICKS,
                                                   _BARK_RESET_HOURS)
         # The engine stores this as trunc(days * 65535); 1365 is the exact
         # value on 2809 of vanilla Skyrim.esm's 5287 HELO lines (53%).
@@ -3471,7 +3479,7 @@ class TestBarkResetTimer:
 
     def _enam(self, rec, *, is_bark):
         import struct
-        from tes5_import.dialog_converter import convert_INFO
+        from tes5_import.dialogue.converter import convert_INFO
         out = convert_INFO(rec, bark_dial_fids=set() if is_bark else None)
         pos = 24          # skip the record header; subrecords follow
         while pos + 6 <= len(out):
@@ -3513,59 +3521,59 @@ class TestNpcToNpcConversationDrop:
         return {'EditorID': edid, 'DATA.Type': str(dtype), 'FormID': fid}
 
     def test_npc_to_npc_topic_is_dropped(self):
-        import tes5_import.dialog_converter as dc
-        dc._SAY_TOPIC_DISPOSITIONS.clear()
-        dc._SAY_TOPIC_DISPOSITIONS[0x0000AAAA] = ('drop', None)   # unrelated
+        import tes5_import.dialogue.converter as dc
+        dc.SAY_TOPIC_DISPOSITIONS.clear()
+        dc.SAY_TOPIC_DISPOSITIONS[0x0000AAAA] = ('drop', None)   # unrelated
         try:
             assert dc.should_skip_dial(self._dial('SkingradNQDResponses'))
         finally:
-            dc._SAY_TOPIC_DISPOSITIONS.clear()
+            dc.SAY_TOPIC_DISPOSITIONS.clear()
 
     def test_script_driven_topic_is_kept(self):
         """CharGen's lines are spoken by an explicit Say/SayTo in a quest
         script — a real Skyrim Actor.Say(). Dropping Type-1 by DATA.Type alone
         would delete the whole tutorial conversation."""
-        import tes5_import.dialog_converter as dc
-        dc._SAY_TOPIC_DISPOSITIONS.clear()
-        dc._SAY_TOPIC_DISPOSITIONS[0x00001234] = ('drop', None)
+        import tes5_import.dialogue.converter as dc
+        dc.SAY_TOPIC_DISPOSITIONS.clear()
+        dc.SAY_TOPIC_DISPOSITIONS[0x00001234] = ('drop', None)
         try:
             assert not dc.should_skip_dial(
                 self._dial('CharGenMain', fid='00001234'))
         finally:
-            dc._SAY_TOPIC_DISPOSITIONS.clear()
+            dc.SAY_TOPIC_DISPOSITIONS.clear()
 
     def test_named_keeps_survive(self):
         """INFOGENERAL is Oblivion's Rumors channel (a real Skyrim player
         topic); HELLO/GOODBYE are engine bark channels that happen to carry
         DIAL Type 1."""
-        import tes5_import.dialog_converter as dc
-        dc._SAY_TOPIC_DISPOSITIONS.clear()
-        dc._SAY_TOPIC_DISPOSITIONS[0x0000BBBB] = ('drop', None)
+        import tes5_import.dialogue.converter as dc
+        dc.SAY_TOPIC_DISPOSITIONS.clear()
+        dc.SAY_TOPIC_DISPOSITIONS[0x0000BBBB] = ('drop', None)
         try:
             for name in ('INFOGENERAL', 'HELLO', 'GOODBYE'):
                 assert not dc.should_skip_dial(self._dial(name)), name
         finally:
-            dc._SAY_TOPIC_DISPOSITIONS.clear()
+            dc.SAY_TOPIC_DISPOSITIONS.clear()
 
     def test_empty_say_map_drops_nothing(self):
         """FAIL-SAFE: an empty map means the say-driven scan has not run yet
         (dialog_unlocks.build_unlock_plan calls should_skip_dial long before
         build_dialog_groups populates it). Treating that as 'nothing is
         script-driven' would drop all 293 scripted topics including CharGen."""
-        import tes5_import.dialog_converter as dc
-        dc._SAY_TOPIC_DISPOSITIONS.clear()
+        import tes5_import.dialogue.converter as dc
+        dc.SAY_TOPIC_DISPOSITIONS.clear()
         assert not dc.should_skip_dial(self._dial('SkingradNQDResponses'))
 
     def test_other_dial_types_unaffected(self):
         """Only Type 1 is NPC-to-NPC; Type 0 player topics must be untouched."""
-        import tes5_import.dialog_converter as dc
-        dc._SAY_TOPIC_DISPOSITIONS.clear()
-        dc._SAY_TOPIC_DISPOSITIONS[0x0000CCCC] = ('drop', None)
+        import tes5_import.dialogue.converter as dc
+        dc.SAY_TOPIC_DISPOSITIONS.clear()
+        dc.SAY_TOPIC_DISPOSITIONS[0x0000CCCC] = ('drop', None)
         try:
             assert not dc.should_skip_dial(
                 self._dial('SomePlayerTopic', dtype=0))
         finally:
-            dc._SAY_TOPIC_DISPOSITIONS.clear()
+            dc.SAY_TOPIC_DISPOSITIONS.clear()
 
 
 class TestQuestJournalPlatformText:
@@ -3573,7 +3581,7 @@ class TestQuestJournalPlatformText:
     stage; Oblivion picked one at runtime, Skyrim renders both (2026-07-24)."""
 
     def test_gamepad_variant_dropped_when_pc_variant_exists(self):
-        from tes5_import.quest_converter import pc_stage_texts
+        from tes5_import.dialogue.quest import pc_stage_texts
         out = pc_stage_texts([
             '',
             'Use the left stick to move around. The right stick turns you.',
@@ -3585,7 +3593,7 @@ class TestQuestJournalPlatformText:
 
     def test_control_tokens_expanded(self):
         """&sUActnX; is an Oblivion UI token; Skyrim prints it verbatim."""
-        from tes5_import.quest_converter import pc_stage_texts
+        from tes5_import.dialogue.quest import pc_stage_texts
         out = pc_stage_texts(
             ['To ready your weapon, &sUActnRdyitem;. To block, '
              '&sUActnBlock;.'])
@@ -3595,7 +3603,7 @@ class TestQuestJournalPlatformText:
     def test_ordinary_multi_entry_stage_untouched(self):
         """Only a clean gamepad/PC split may drop anything — a quest with two
         unrelated journal entries must keep both."""
-        from tes5_import.quest_converter import pc_stage_texts
+        from tes5_import.dialogue.quest import pc_stage_texts
         texts = ['Kill the bandit leader.', 'Return to Jauffre.']
         assert pc_stage_texts(texts) == texts
 
@@ -3649,7 +3657,7 @@ class TestActorScriptOnPlacedRef:
     """
 
     def test_reference_event_declaration_is_detected(self):
-        from tes5_import.object_scripts import _script_uses_reference_event
+        from tes5_import.base.object_scripts import _script_uses_reference_event
         assert _script_uses_reference_event('begin OnPackageDone CGRenoteToMarkerA')
         assert _script_uses_reference_event('scn X\r\nbegin gamemode\r\nend\r\nbegin onhit\r\nend')
         assert _script_uses_reference_event('begin OnActivate\nActivate')
@@ -3660,7 +3668,7 @@ class TestActorScriptOnPlacedRef:
         A bare substring match relocated scripts that merely mentioned an event
         name in a comment, moving records that had no reason to leave the base.
         """
-        from tes5_import.object_scripts import _script_uses_reference_event
+        from tes5_import.base.object_scripts import _script_uses_reference_event
         assert not _script_uses_reference_event('; comment mentioning onhit behaviour')
         assert not _script_uses_reference_event('begin MenuMode 1027')
         # not an actor event, and must not match on the 'onhit' substring
@@ -3688,7 +3696,7 @@ class TestActorScriptOnPlacedRef:
         in tests/test_script_converter.py).  This relocation half is still
         reverted, so the test continues to pin current behaviour.
         """
-        from tes5_import.object_scripts import (
+        from tes5_import.base.object_scripts import (
             _script_uses_reference_event, _script_uses_self_reference_call)
         assert not _script_uses_reference_event('begin GameMode\nset x to 1\nend')
         assert not _script_uses_reference_event('scn X\r\nbegin gamemode\r\nend')
@@ -3708,7 +3716,7 @@ class TestActorScriptOnPlacedRef:
         start cell because MQ00CelebroScript (`if GetStage MQ00 == 5 / enable`)
         declares no reference event and so was left on the base NPC_.
         """
-        from tes5_import.object_scripts import _script_uses_self_reference_call
+        from tes5_import.base.object_scripts import _script_uses_self_reference_call
         assert _script_uses_self_reference_call(
             'scn X\\r\\nbegin GameMode\\r\\nif ( GetStage MQ00 == 5 )'
             '\\r\\n\\tenable\\r\\nendif\\r\\nend')
@@ -3719,7 +3727,7 @@ class TestActorScriptOnPlacedRef:
         """Only BARE calls count.  `CelebroRef.Disable` targets someone else and
         works fine from the base; a commented-out `;evp` is not a call at all.
         """
-        from tes5_import.object_scripts import _script_uses_self_reference_call
+        from tes5_import.base.object_scripts import _script_uses_self_reference_call
         assert not _script_uses_self_reference_call(
             'begin OnActivate\\r\\n\\tCelebroRef.Disable\\r\\n\\tActivate\\r\\nend')
         assert not _script_uses_self_reference_call(
@@ -4449,7 +4457,7 @@ class TestClimateConversion:
         (WRLD -> CNAM -> CLMT -> WLST); skipping it orphans all of them.
         WTHR itself lives in its own serial phase (import_main 2b), not the
         generic dispatch, because it mints IMGS companions."""
-        from tes5_import.constants import IMPORT_DISPATCH, SKIP_TYPES
+        from tes5_import.registry import IMPORT_DISPATCH, SKIP_TYPES
         assert 'CLMT' not in SKIP_TYPES
         assert 'CLMT' in IMPORT_DISPATCH
         assert 'WTHR' not in SKIP_TYPES
@@ -4605,7 +4613,7 @@ class TestObjectBounds:
     def test_oversized_bounds_are_clamped_not_fatal(self):
         """A mesh over 32767 units raised struct.error, dropping the whole
         record and leaving every reference to it pointing at nothing."""
-        from tes5_import.writer import pack_obnd
+        from tes5_import.base.writer import pack_obnd
         vals = struct.unpack('<6h', pack_obnd(-40000, 0, 0, 40000, 0, 0)[6:])
         assert vals[0] == -32768
         assert vals[3] == 32767
@@ -5159,7 +5167,7 @@ class TestWeatherImageSpace:
         resolves against it, and CLMT then resolves against the weather."""
         import inspect
 
-        from tes5_import.writer import PluginWriter
+        from tes5_import.base.writer import PluginWriter
         src = inspect.getsource(PluginWriter)
         assert src.index("'IMGS'") < src.index("'WTHR'")
         assert src.index("'WTHR'") < src.index("'CLMT'")
@@ -5177,7 +5185,7 @@ class TestVanillaMgefDataSize:
     """
 
     def test_every_committed_blob_is_a_full_struct(self):
-        from tes5_import.vanilla_mgef_data import (
+        from tes5_import.generated.vanilla_mgef_data import (
             MGEF_DATA_SIZE,
             VANILLA_MGEF_DATA,
         )
@@ -5191,8 +5199,8 @@ class TestVanillaMgefDataSize:
 
     def test_aimed_variant_writes_a_full_length_data(self):
         """The synthesized clone must be a complete, correctly-patched MGEF."""
-        from tes5_import import magic_effects
-        from tes5_import.vanilla_mgef_data import MGEF_DATA_SIZE
+        from tes5_import.actors import magic_effects as magic_effects
+        from tes5_import.generated.vanilla_mgef_data import MGEF_DATA_SIZE
 
         class _Writer:
             def __init__(self):
@@ -5238,7 +5246,7 @@ class TestVanillaMgefDataSize:
         assert struct.unpack_from('<f', data, 112)[0] == pytest.approx(1.0)
 
     def test_short_blob_is_rejected_rather_than_written(self):
-        from tes5_import import magic_effects
+        from tes5_import.actors import magic_effects as magic_effects
         original = magic_effects.VANILLA_MGEF_DATA.get(0x00012F03)
         magic_effects.VANILLA_MGEF_DATA[0x00012F03] = ('Truncated', '00' * 96)
         magic_effects._cache.clear()
@@ -5283,7 +5291,7 @@ class TestMgefConversion:
     """
 
     def test_mgef_is_dispatched_not_skipped(self):
-        from tes5_import.constants import IMPORT_DISPATCH, SKIP_TYPES
+        from tes5_import.registry import IMPORT_DISPATCH, SKIP_TYPES
         assert 'MGEF' not in SKIP_TYPES
         assert 'MGEF' in IMPORT_DISPATCH
 
@@ -5372,7 +5380,7 @@ class TestMgefConversion:
         """
         import struct as _s
         from tes5_import.record_types import equipment
-        from tes5_import.skyrim_overrides import (SPELL_EQUIP_EITHER_HAND,
+        from tes5_import.base.equivalents import (SPELL_EQUIP_EITHER_HAND,
                                                   SPELL_EQUIP_VOICE)
 
         def _etyp(spit_type):
@@ -5771,7 +5779,7 @@ class TestOwnedGroupAnchoring:
         return orphans
 
     def _emit(self, records, master_records):
-        from tes5_import.overrides import emit_nested_overrides
+        from tes5_import.overrides.nested import emit_nested_overrides
         writer = self._Writer()
         emitted, orphaned, anchored = emit_nested_overrides(
             records, writer, self._MasterIndex(master_records))
@@ -5904,8 +5912,8 @@ class TestLandOverrides:
         return out
 
     def _apply(self, master_rec, plugin_rec):
-        from tes5_import.export_diff import diff_records
-        from tes5_import.override_builder import apply_changes
+        from tes5_import.overrides.diff import diff_records
+        from tes5_import.overrides.builder import apply_changes
         from tes5_import.record_types.world import convert_LAND
         base = convert_LAND(master_rec)
         changes = diff_records(master_rec, plugin_rec)
@@ -5946,7 +5954,7 @@ class TestLandOverrides:
         DLCBattlehornCastle's 16 LAND overrides whose real terrain was
         identical, emitting override records with no authored content.
         """
-        from tes5_import.export_diff import diff_records
+        from tes5_import.overrides.diff import diff_records
         master = self._land(VHGT=self._vhgt(delta=3, pad='d21b02'))
         plugin = self._land(VHGT=self._vhgt(delta=3, pad='000000'))
 
@@ -5992,12 +6000,12 @@ class TestLandOverrides:
         assert 'Layer[]' in changes
         assert unmapped == set(), f'Layer[] must be mappable, got {unmapped}'
         btxt = dict(self._subs(out))[b'BTXT']
-        from tes5_import.text_reader import remap_formid
+        from tes5_import.base.text_reader import remap_formid
         assert struct.unpack_from('<I', btxt)[0] == remap_formid(0x00002222), \
             "the authored base texture must replace the master's"
 
     def test_unchanged_land_is_dropped_entirely(self):
-        from tes5_import.export_diff import diff_records
+        from tes5_import.overrides.diff import diff_records
         rec = self._land(VHGT=self._vhgt(delta=2), VNML='00' * 3267)
         assert diff_records(rec, self._land(VHGT=self._vhgt(delta=2),
                                             VNML='00' * 3267)) == {}
@@ -6034,9 +6042,9 @@ class TestQuestObjectiveOverrideText:
         return out
 
     def test_objective_text_is_retranslated(self):
-        from tes5_import.export_diff import diff_records
-        from tes5_import.override_builder import apply_changes
-        from tes5_import.quest_converter import convert_QUST
+        from tes5_import.overrides.diff import diff_records
+        from tes5_import.overrides.builder import apply_changes
+        from tes5_import.dialogue.quest import convert_QUST
 
         master = self._quest('Merre Quest Ratten', 'Arbeit in der Mine')
         plugin = self._quest("Merre's Rat Quest", 'Work in the Mine')
@@ -6055,7 +6063,7 @@ class TestQuestObjectiveOverrideText:
 
     def test_derivation_matches_the_converter(self):
         """The helper must yield exactly the NNAMs convert_QUST emits."""
-        from tes5_import.quest_converter import (convert_QUST,
+        from tes5_import.dialogue.quest import (convert_QUST,
                                                  quest_objective_texts)
         rec = self._quest('Some journal line', 'A Quest')
         emitted = [v for s, v in self._subs(convert_QUST(rec)) if s == b'NNAM']
@@ -6077,8 +6085,8 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
 
     def _index_with_master(self, master_types=None, **types):
         """Index the plugin's records plus a master export, as import does."""
-        from tes5_import.outfits import load_item_index
-        from tes5_import.text_reader import set_formid_index_offset
+        from tes5_import.actors.outfits import load_item_index
+        from tes5_import.base.text_reader import set_formid_index_offset
         set_formid_index_offset(0)
         master_export = {}
         for recs in (master_types or {}).values():
@@ -6087,7 +6095,7 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
         load_item_index(types, master_export)
 
     def test_master_owned_armor_reaches_the_outfit(self):
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         # The wearables live in the MASTER; the plugin contains none of them.
         self._index_with_master(master_types={'ARMO': [
             self._armo('0002A17E', 'IronCuirass', self.BODY, value=100),
@@ -6103,7 +6111,7 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
 
     def test_plugin_record_wins_over_the_masters_same_id(self):
         """The plugin's own record overrides the master's at the same id."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         # Master says this id is a potion (never wearable); the plugin's own
         # export says it is armor. The plugin is authoritative.
         self._index_with_master(
@@ -6118,7 +6126,7 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
 
     def test_master_leveled_list_resolves_through_master_leaves(self):
         """An LVLI in the master whose leaves are also in the master."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index_with_master(master_types={
             'ARMO': [self._armo('0002B001', 'LeatherCuirass', self.BODY)],
             'LVLI': [self._lvli('0002B010', 'LL0Cuirass', ['0002B001'])],
@@ -6133,7 +6141,7 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
 
     def test_master_loot_still_stays_in_the_inventory(self):
         """Indexing the master must not sweep non-wearables into the outfit."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index_with_master(master_types={
             'ARMO': [self._armo('0002C001', 'Cuirass', self.BODY)],
             'ALCH': [{'Signature': 'ALCH', 'FormID': '0002C002'}],
@@ -6150,7 +6158,7 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
 
     def test_no_master_export_behaves_as_before(self):
         """A master's OWN run passes no master export and must be unaffected."""
-        from tes5_import.outfits import split_inventory
+        from tes5_import.actors.outfits import split_inventory
         self._index(ARMO=[self._armo('0002D001', 'Cuirass', self.BODY)])
 
         outfit, carried = split_inventory([(0x0002D001, 1)])
@@ -6357,7 +6365,7 @@ class TestLeveledActorShellDNAM:
     """
 
     def _dnam(self):
-        from tes5_import.leveled_actors import _shell_dnam
+        from tes5_import.actors.leveled_actors import _shell_dnam
         return _shell_dnam()
 
     def test_dnam_is_52_bytes(self):
@@ -6382,7 +6390,7 @@ class TestLeveledActorShellDNAM:
 
     def test_built_shell_carries_the_nonzero_dnam(self):
         """End-to-end: the packed NPC_ record, not just the helper."""
-        from tes5_import.leveled_actors import _build_shell
+        from tes5_import.actors.leveled_actors import _build_shell
         rec = _build_shell(0x00123456, 0x00654321, 0x00013746, 'TestList_Lvl')
         idx = rec.find(b'DNAM')
         assert idx != -1
@@ -6424,12 +6432,12 @@ class TestParentRefBecomesLinkedRef:
 
     def _with_bases(self, *fids):
         """Register bases as 'script calls GetParentRef' for one test."""
-        from tes5_import import object_scripts
+        from tes5_import.base import object_scripts as object_scripts
         object_scripts._GETPARENTREF_BASES.clear()
         object_scripts._GETPARENTREF_BASES.update(fids)
 
     def teardown_method(self):
-        from tes5_import import object_scripts
+        from tes5_import.base import object_scripts as object_scripts
         object_scripts._GETPARENTREF_BASES.clear()
 
     def test_enable_parent_is_mirrored_into_xlkr(self):
@@ -6487,42 +6495,42 @@ class TestPlayerFormIDIsReferenceOnly:
     PLAYER_REF = 0x00000014
 
     def setup_method(self):
-        from tes5_import import text_reader
+        from tes5_import.base import text_reader as text_reader
         self._saved = text_reader.get_formid_index_offset()
         text_reader.set_formid_index_offset(1)
 
     def teardown_method(self):
-        from tes5_import import text_reader
+        from tes5_import.base import text_reader as text_reader
         text_reader.set_formid_index_offset(self._saved)
 
     def test_own_player_id_shifts_into_our_space(self):
         """Oblivion's Player NPC_ becomes an inert 0x01000007, not an override."""
-        from tes5_import.text_reader import get_formid
+        from tes5_import.base.text_reader import get_formid
         out = get_formid({'FormID': '00000007'}, 'FormID')
         assert out == 0x01000007, (
             f'Oblivion Player NPC_ written at {out:08X}; at 00000007 it '
             f'overrides Skyrim.esm Player and breaks GetIsID(Player)')
 
     def test_reference_to_player_base_stays_pinned(self):
-        from tes5_import.text_reader import get_formid
+        from tes5_import.base.text_reader import get_formid
         assert get_formid({'X': '00000007'}, 'X') == self.PLAYER_BASE
 
     def test_reference_to_player_ref_stays_pinned(self):
-        from tes5_import.text_reader import get_formid
+        from tes5_import.base.text_reader import get_formid
         assert get_formid({'X': '00000014'}, 'X') == self.PLAYER_REF
 
     def test_own_playerref_id_also_shifts(self):
-        from tes5_import.text_reader import get_formid
+        from tes5_import.base.text_reader import get_formid
         assert get_formid({'FormID': '00000014'}, 'FormID') == 0x01000014
 
     def test_ordinary_record_unaffected_either_way(self):
         """UrielSeptim shifts identically as an own id and as a reference."""
-        from tes5_import.text_reader import get_formid
+        from tes5_import.base.text_reader import get_formid
         assert get_formid({'FormID': '00023F2E'}, 'FormID') == 0x01023F2E
         assert get_formid({'X': '00023F2E'}, 'X') == 0x01023F2E
 
     def test_remap_formid_flag_is_explicit(self):
-        from tes5_import.text_reader import remap_formid
+        from tes5_import.base.text_reader import remap_formid
         assert remap_formid(0x07, 1) == 0x07
         assert remap_formid(0x07, 1, is_own_id=True) == 0x01000007
 
@@ -6585,7 +6593,7 @@ class TestMeshBoundsCacheSchema:
     def test_schema_key_is_not_loaded_as_a_mesh(self):
         """The stamp is not a path key and must never become a bounds entry."""
         from asset_convert.collision.collision_extract import BOUNDS_SCHEMA_VERSION
-        from tes5_import.mesh_bounds import (load_mesh_bounds, get_mesh_obnd,
+        from tes5_import.base.mesh_bounds import (load_mesh_bounds, get_mesh_obnd,
                                              get_mesh_physics_flags)
         with tempfile.TemporaryDirectory() as td:
             p = self._write(td, {'tes4/a.nif': [0, 0, 0, 1, 1, 1, 2],
@@ -6615,19 +6623,19 @@ class TestObjectiveText:
 
     Skyrim renders two quest strings: the long CNAM log entry in the journal
     and a short imperative NNAM line on the objective HUD. TES4 authored only
-    one, so tes5_import/data/objective_short_text.json supplies the short form.
-    See tes5_import/objective_text.py.
+    one, so tes5_import/generated/objective_short_text.json supplies the short form.
+    See tes5_import/dialogue/objective_text.py.
     """
 
     def test_table_loads(self):
-        from tes5_import.objective_text import load_objective_text
+        from tes5_import.dialogue.objective_text import load_objective_text
         assert load_objective_text(quiet=True) > 6000
 
     def test_every_entry_within_the_engine_cap(self):
         """The objective field does NOT wrap -- it drops the tail. A shipped
         entry over the cap would be silently truncated on screen."""
         import json
-        from tes5_import.objective_text import _DATA_PATH, OBJECTIVE_MAX_CHARS
+        from tes5_import.dialogue.objective_text import _DATA_PATH, OBJECTIVE_MAX_CHARS
         with open(_DATA_PATH, encoding='utf-8') as fh:
             entries = json.load(fh)['entries']
         over = {k: v for k, v in entries.items()
@@ -6637,14 +6645,14 @@ class TestObjectiveText:
     def test_lookup_enforces_the_cap(self):
         """The cap is enforced at lookup, not merely trusted from the file, so
         a hand-edited table cannot push an over-long string into NNAM."""
-        from tes5_import import objective_text as ot
+        from tes5_import.dialogue import objective_text as ot
         ot._SHORT = {ot._key('src'): 'x' * 200}
         assert len(ot.short_objective('src')) == ot.OBJECTIVE_MAX_CHARS
         ot.load_objective_text(quiet=True)
 
     def test_unknown_text_falls_back_unchanged(self):
         """A plugin the table was not built for keeps the old behaviour."""
-        from tes5_import.objective_text import (load_objective_text,
+        from tes5_import.dialogue.objective_text import (load_objective_text,
                                                 short_objective)
         load_objective_text(quiet=True)
         novel = 'a journal entry that is certainly not in the curated table'
@@ -6654,7 +6662,7 @@ class TestObjectiveText:
         """Keys collapse runs of whitespace, so a source string that differs
         only in spacing still resolves."""
         import json
-        from tes5_import.objective_text import (_DATA_PATH,
+        from tes5_import.dialogue.objective_text import (_DATA_PATH,
                                                 load_objective_text,
                                                 short_objective)
         load_objective_text(quiet=True)
@@ -6666,7 +6674,7 @@ class TestObjectiveText:
         """An entry earns its place only by CHANGING the line; identical text
         would be pure weight, since the fallback yields the same string."""
         import json
-        from tes5_import.objective_text import _DATA_PATH, _key
+        from tes5_import.dialogue.objective_text import _DATA_PATH, _key
         with open(_DATA_PATH, encoding='utf-8') as fh:
             entries = json.load(fh)['entries']
         noop = [k for k, v in entries.items() if _key(k) == _key(v)]
@@ -6681,8 +6689,8 @@ class TestObjectiveText:
         changes, lookups start missing and every objective quietly reverts to
         the long journal paragraph with nothing logged.
         """
-        from tes5_import.quest_converter import quest_objective_texts
-        from tes5_import.objective_text import (load_objective_text,
+        from tes5_import.dialogue.quest import quest_objective_texts
+        from tes5_import.dialogue.objective_text import (load_objective_text,
                                                 short_objective)
         load_objective_text(quiet=True)
         rec = {
@@ -6715,7 +6723,8 @@ class TestObjectiveText:
         must route through short_objective.
         """
         import inspect
-        from tes5_import import dialog_converter, override_builder
+        from tes5_import.dialogue import converter as dialog_converter
+        from tes5_import.overrides import builder as override_builder
         for mod in (dialog_converter, override_builder):
             src = inspect.getsource(mod)
             for line in src.splitlines():

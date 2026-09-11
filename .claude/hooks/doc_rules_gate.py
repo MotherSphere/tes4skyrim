@@ -201,7 +201,7 @@ def gate_pending(path, text):
 def gate_bash(payload):
     """Route every shell command through the wrapper, which gates its writes.
 
-    A `deny` rule cannot carry an allowlist exception -- deny beats allow at
+    A `deny` rule cannot carry a whitelist exception -- deny beats allow at
     any specificity, and beats a hook's own `allow` decision too, so the
     wrapper could never be reached that way.  Exit 2 is evaluated BEFORE the
     permission rules, which makes this hook the only place the rule can live.

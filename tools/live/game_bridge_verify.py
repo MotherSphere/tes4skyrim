@@ -30,8 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tools.live.game_bridge import Bridge, BridgeError  # noqa: E402
-from tools.script import papyrus_tail  # noqa: E402
+from tools.live.game_bridge import Bridge, BridgeError
+from tools.script import papyrus_tail
 
 
 class Check:

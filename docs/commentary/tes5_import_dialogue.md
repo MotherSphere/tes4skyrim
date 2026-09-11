@@ -1,6 +1,6 @@
-# tes5_import/dialog_converter.py - dialogue and voice
+# tes5_import/dialogue/converter.py - dialogue and voice
 
-**Code:** `tes5_import/dialog_converter.py`, `script_convert/converter.py`, `tes5_import/npc_conversations.py`, `tes5_import/object_scripts.py`
+**Code:** `tes5_import/dialogue/converter.py`, `script_convert/converter.py`, `tes5_import/dialogue/conversations.py`, `tes5_import/base/object_scripts.py`
 
 ## Contents
 
@@ -102,11 +102,11 @@ game, see the `oblivion-dialog-system`, `skyrim-dialog-system`, and
   - **Diagnosis that finally cracked it**: in-game console `sqv <questID>` showed **all four aliases NONE** with the quest running at the right stage and the target ref alive and selectable — and the QF script's object properties were `None` too. Two independent systems failing identically ⇒ one shared cause upstream of both ⇒ VMAD. Verified against Skyrim.esm: vanilla `DBSideContract03`'s 643-byte QUST VMAD only parses to 643/643 once the trailing S16 is read. `tests/test_script_converter.py::test_vmad_quest_parses_to_exactly_its_length` now round-trips the VMAD and requires every byte be consumed — a truncated tail is invisible to every other check.
   - **Lesson**: when a record's scripts AND its aliases are both empty at runtime but the record looks perfect field-by-field, suspect a **truncated/misparsed binary tail**, not the individual fields. And `sqv` is the fastest way to find it — it prints alias fill state directly.
 - **Quest markers (targets)**: TES4 QSTA is QUEST-level (REFR + flags + GetStage conditions saying *when* that target's marker is live). TES5 QSTA is per-OBJECTIVE — and **vanilla leaves it UNCONDITIONAL**: across Skyrim.esm, objectives read `QOBJ FNAM NNAM QSTA [QSTA…]` with CTDAs a rare exception; the right target simply sits on the right objective, and the objective being *Displayed* is what selects the marker.
-  - So resolve Oblivion's gates at BUILD time rather than replaying them: `_target_live_at_stage()` (tes5_import/dialog_converter.py) evaluates each target's TES4 condition chain (AND of OR-groups; GetStage/GetStageDone understood, any other function treated as passing so a maybe never loses a marker) with GetStage == the objective's stage, and each objective emits only its live targets, with no CTDAs. FGC01Rats then walks Arvena→basement door→Arvena→Pinarus→…→Quill-Weave exactly as Oblivion did. (Carrying every target on every objective was a genuine defect, but it was NOT what suppressed the markers — the VMAD truncation above was.)
+  - So resolve Oblivion's gates at BUILD time rather than replaying them: `_target_live_at_stage()` (tes5_import/dialogue/converter.py) evaluates each target's TES4 condition chain (AND of OR-groups; GetStage/GetStageDone understood, any other function treated as passing so a maybe never loses a marker) with GetStage == the objective's stage, and each objective emits only its live targets, with no CTDAs. FGC01Rats then walks Arvena→basement door→Arvena→Pinarus→…→Quill-Weave exactly as Oblivion did. (Carrying every target on every objective was a genuine defect, but it was NOT what suppressed the markers — the VMAD truncation above was.)
   - **Aliases** (one forced-ref per unique target): `ALST, ALID, FNAM, ALFR, VTCK, ALED` — **VTCK is present on 2687/2687 vanilla forced-ref aliases and on all 255 vanilla objective+forced-ref quests; a 100% invariant we were omitting.** FNAM=0x0292 (Optional 0x0002 — a fill failure must not block quest start — + AllowDead + AllowDisabled + AllowReserved), an attested vanilla combination; the old 0x109A appears nowhere in vanilla. ANAM = alias count. Objectives: ONE per stage index (engine keys by index; index = stage so the generated `SetObjectiveDisplayed(stage)` matches). Layout: stages, objectives, ANAM, aliases.
 - **Known remaining gap — city map markers live in CHILD worldspaces**: Oblivion puts each city's map markers *inside* its city worldspace (AnvilWorld, ChorrolWorld, the IC districts — 37 markers total), and its map drew them. Skyrim's world map only renders markers in the root map worldspace (vanilla: 296/~300 marker-Locations anchor a marker in Tamriel 0x3C). So a converted Location whose MNAM marker sits in a child worldspace has nothing the *map* can draw (the compass, which works off the target ref's world position, is unaffected). Child worldspaces share Tamriel's coordinate space (AnvilWorld NAM0/NAM9 lie inside Tamriel's, grids match), so the fix is to anchor those Locations to a root-worldspace marker. Not yet implemented.
   - **Per-target QSTA conditions — export bug fixed 2026-07-11**: the QSTA→marker gating depends on the CTDAs that FOLLOW each QSTA in the TES4 stream (xEdit `wbDefinitionsTES4` QUST: `wbRArray('Targets', QSTA + wbCTDAs)`). The exporter previously used a flat `get_all_subrecords(rec,'CTDA')`, which (a) lost every per-target condition — so imported objectives carried all target aliases with NO gate and markers never advanced with the objective — and (b) mislabeled per-log-entry result-script CTDAs as quest-level `Condition[]`. `export_QUST` now walks the subrecord stream positionally, bucketing CTDAs into quest-level / per-log-entry / per-target and emitting `Target[i].Condition[k].Raw`. The importer's `convert_ctda_list(rec, prefix='Target[t].')` was already wired for this; it just had no data. Verified end-to-end on SE46 (funcs 58 GetStage / 79 GetQuestVariable / 84 GetDeadCount, quest FormID param remapped to output load order).
-  - **Interior-target markers need the cell's XLCN — fixed 2026-07-11**: with correct objectives+aliases+conditions, a target inside an interior STILL produced no compass/map marker (journal entry showed, no arrow). Skyrim resolves an interior ref's map position through its CELL's Location (`ref → CELL.XLCN → LCTN.MNAM → map-marker REFR`); with no XLCN there is nowhere to draw the marker, but the journal text (needing no position) still appears. The converter only XLCN'd interiors whose entrance door sat on a map marker (~12% of interiors), so almost every city-house/shop/back-room quest target had no marker. `tes5_import/locations.py build_marker_locations` now, after the marker pass: (1) links every exterior-teleport-reachable interior to the Location of the grid cell (or worldspace) its entrance door stands in, then (2) transitively propagates that Location through interior→interior doors to a fixed point so basements/upper floors inherit their building's Location. Interior XLCN coverage 12%→82% (1855 cells; remainder are doorless/test cells, as in vanilla). Chain verified for FGC01Rats stage-10 target Arvena (house + basement → TES4AnvilCastleGateLocation → "Anvil Castle Gate" marker).
+  - **Interior-target markers need the cell's XLCN — fixed 2026-07-11**: with correct objectives+aliases+conditions, a target inside an interior STILL produced no compass/map marker (journal entry showed, no arrow). Skyrim resolves an interior ref's map position through its CELL's Location (`ref → CELL.XLCN → LCTN.MNAM → map-marker REFR`); with no XLCN there is nowhere to draw the marker, but the journal text (needing no position) still appears. The converter only XLCN'd interiors whose entrance door sat on a map marker (~12% of interiors), so almost every city-house/shop/back-room quest target had no marker. `tes5_import/base/locations.py build_marker_locations` now, after the marker pass: (1) links every exterior-teleport-reachable interior to the Location of the grid cell (or worldspace) its entrance door stands in, then (2) transitively propagates that Location through interior→interior doors to a fixed point so basements/upper floors inherit their building's Location. Interior XLCN coverage 12%→82% (1855 cells; remainder are doorless/test cells, as in vanilla). Chain verified for FGC01Rats stage-10 target Arvena (house + basement → TES4AnvilCastleGateLocation → "Anvil Castle Gate" marker).
 - **QUST stage log entries**: exported as `Stage[i].LogCount + Stage[i].Log[j].{Flags,Text}`; imported with one QSDT (U8) + optional CNAM (string) per log entry
 
 ## Voice files, lip sync and audio
@@ -143,7 +143,7 @@ game, see the `oblivion-dialog-system`, `skyrim-dialog-system`, and
 - **Conversion stats**: 3817 DIAL topics (851 barks, 2966 conversation), 19278 INFOs, 954 DLBR branches, 1 DLVW view, 2908 quest-owned conversation topics, 27 fallback greetings
 - **Dialog filtering stats**: 18,761 INFOs with conditions, 20 conditionless (down from 958 before voice type fallback fix). 17,784 INFOs with GetIsVoiceType. 3,704 GetInCell CTDAs (preserved for location gating). 3,169 DLBR branches (555 Type 1 chain topics excluded). 9,365 INFOs quest-gated with GetQuestRunning (non-SGE QSTI quests).
 - **Quest running gating (QSTI restoration, 2026-07 design)**: In Oblivion, each INFO only shows while its OWN `QSTI.Quest` is running. Single-quest topics get this natively via quest ownership. For shared topics (owned by TES4DialogueGeneric), `_build_one_topic()` injects `GetQuestRunning(info's own QSTI.Quest)==1.0` as the FIRST CTDA on each INFO whose quest is non-SGE and ≠ the topic owner. **Gate by the INFO's OWN quest, never the DIAL's Quest[0]** — gating all of GREETING's children by one arbitrary Quest[0] blocks ALL greetings (a hard-won earlier lesson). SGE quests are exempt (running from new game via the .seq file).
-- **AddTopic unlock system (2026-07)**: Oblivion's CENTRAL visibility mechanic — a topic only appears once ADDED via an INFO's Add-Topics data list (export: `AddTopic[i]=` FormIDs, 1044 INFOs), an `AddTopic X` result-script command, a quest-stage script, or automatically when a spoken line's text mentions the topic's FULL name (Oblivion highlights + auto-adds mentioned names). Skyrim has no AddTopic → re-expressed via `tes5_import/dialog_unlocks.py`: one GLOB `TES4Unlock_<topic>` per gated topic (206); every INFO of a gated topic gets `GetGlobalValue(GLOB)==1` (func 74, same both games); every reveal event sets the global from a Papyrus fragment (INFO fragments fire OnEnd; reveal-only INFOs get a generated TIF fragment with just the SetValue call). The plan is built identically by the importer (GLOBs, conditions, VMAD property bindings) and script_convert/pipeline (fragment .psc bodies) — keys are low-24 FormIDs so it's load-order-offset independent. Gating rules (each violation caused a real in-game bug):
+- **AddTopic unlock system (2026-07)**: Oblivion's CENTRAL visibility mechanic — a topic only appears once ADDED via an INFO's Add-Topics data list (export: `AddTopic[i]=` FormIDs, 1044 INFOs), an `AddTopic X` result-script command, a quest-stage script, or automatically when a spoken line's text mentions the topic's FULL name (Oblivion highlights + auto-adds mentioned names). Skyrim has no AddTopic → re-expressed via `tes5_import/dialogue/unlocks.py`: one GLOB `TES4Unlock_<topic>` per gated topic (206); every INFO of a gated topic gets `GetGlobalValue(GLOB)==1` (func 74, same both games); every reveal event sets the global from a Papyrus fragment (INFO fragments fire OnEnd; reveal-only INFOs get a generated TIF fragment with just the SetValue call). The plan is built identically by the importer (GLOBs, conditions, VMAD property bindings) and script_convert/pipeline (fragment .psc bodies) — keys are low-24 FormIDs so it's load-order-offset independent. Gating rules (each violation caused a real in-game bug):
   - Gate ONLY topics explicitly added somewhere; mention-only topics stay ungated (name-match miss = dead content).
   - **Topics revealed by BARK lines (GREETING/HELLO) are NOT gated** — the bark fires on first contact, so in Oblivion they're effectively visible on first talk (Azzan's "Join the Fighters Guild" via his FG-ad greeting). Gating them makes topics go missing (fragment races the menu / a different greeting plays). 409 of 615 explicit targets are bark-revealed → 206 gated.
   - Gated TCLT targets keep the gate; their TCLT-parent INFOs are added as revealers.
@@ -168,7 +168,7 @@ game, see the `oblivion-dialog-system`, `skyrim-dialog-system`, and
   - Key functions: `build_getisid_ctda()` (func 72), `build_topic_npc_ctdas()`, `info_has_positive_getisid()`, `collect_topic_npc_fids()` in `dialog_misc.py`
 - **Dialog emulator**: `tools/dialog/dialog_emulator.py` — Simulates Skyrim dialog engine for validation. Modes: `--npc <edid>` (single NPC), `--batch --max-npcs N` (batch test), `--quest <edid>`, `--collisions`. Parses converted ESM, evaluates conditions, reports wrong-NPC matches.
 - **VMAD object-property binding is TYPE-CHECKED by the VM (2026-07-11)**: a property binds only if the target form's class matches the declared Papyrus type — `Actor Property` bound to an NPC_ **base** record silently reads None in-game (sqv shows `<name>_var = None`), while Quest/Cell/MiscObject properties bound to QUST/CELL/MISC records bind fine. The sqv filled/None pattern is the diagnostic: it tells you exactly which property TYPES are wrong. Fixes: `_RECORD_TYPE_PAPYRUS` types NPC_/CREA as **ActorBase** (TES4 scripts only ever pass base EditorIDs as arguments — SetEssential/AddItem/PlaceAtMe); the SetEssential handler emits `base.SetEssential(v)` directly (ref-style `(x as Actor).GetActorBase()` only when the arg resolves to ACHR/ACRE/REFR). Same latent bug class: DOOR/CONT/STAT/FURN/FLOR base records typed `ObjectReference` will also bind None — not yet fixed. `GetDeadCount` still forces Actor on possibly-base args.
-- **Script-typed properties require the script to actually be ATTACHED (2026-07-11)**: `TES4_FGQuestTrack Property FGInterimConversation` can only cast if quest 010474EC carries that script in its own VMAD. The conversion generated the .psc/.pex but never attached quest scripts (SCRI) to QUST records, and excluded NPC_/CREA from object-script attachment — so ALL such properties read None and TES4 quest GameMode logic never ran. Fixes: `build_quest_script_plan()` (tes5_import/object_scripts.py) resolves each QUST's SCRI to (script name, bound props) and `convert_QUST` splices it into the VMAD alongside the QF fragment script; NPC_/CREA are now in SCRIPTABLE_TYPES with the VMAD spliced after EDID in convert_NPC_/convert_CREA (scripts on a base instantiate per-reference, mirroring TES4 SCRI semantics).
+- **Script-typed properties require the script to actually be ATTACHED (2026-07-11)**: `TES4_FGQuestTrack Property FGInterimConversation` can only cast if quest 010474EC carries that script in its own VMAD. The conversion generated the .psc/.pex but never attached quest scripts (SCRI) to QUST records, and excluded NPC_/CREA from object-script attachment — so ALL such properties read None and TES4 quest GameMode logic never ran. Fixes: `build_quest_script_plan()` (tes5_import/base/object_scripts.py) resolves each QUST's SCRI to (script name, bound props) and `convert_QUST` splices it into the VMAD alongside the QF fragment script; NPC_/CREA are now in SCRIPTABLE_TYPES with the VMAD spliced after EDID in convert_NPC_/convert_CREA (scripts on a base instantiate per-reference, mirroring TES4 SCRI semantics).
 - **QUST VMAD with scripts but no fragments (vanilla-verified 2026-07-11)**: the fragments section is ALWAYS present — version=2, count=0, and an **empty** file name (MS12PostQuest, WIThief01, BardSongs). 856/974 vanilla QUST VMADs strict-parse with the wbVMADFragmentedQUST layout used by build_vmad_quest_fragments.
 - **🔴 A dependent plugin's BARK lines were nested under the MASTER's shared topic, bypassing the whole pipeline (2026-08-05)**: GREETING/HELLO are engine-named topics every plugin fills, so every one of Morroblivion's own greeting INFOs named the MASTER's `GREETING` DIAL as its parent. `overrides._attach_new_records` routes any new INFO under its `ParentDIAL` via `_NEW_NESTED_PARENT`, so all **2,727** of them were nested under Oblivion's single `GREETING_0102466E` and converted with a bare `convert_INFO(rec)` — **no voice gate, no quest gate, no unlock gate, no injected CTDAs at all** (0 of 2,727 had `GetIsVoiceType`, against 15,574 everywhere else). Worse, that master topic is owned by **Oblivion's Charactergen quest**, and DIAL.QNAM is a hard runtime gate, so every greeting in the game was gated on a quest that is not running — `tools/dialog/dialog_emulator.py` reported *"No greetings found! NPC will show fallback 'Hello.'"* for every one of the 3,607 actors. Vanilla splits GREETING into **271 per-quest topics** for exactly this reason (Skyrim honours ONE HELO topic per owning quest), and Morroblivion's 2,727 greetings span **384** distinct quests. Fix: `_is_bark_parent()` sends a new INFO whose master parent is a BARK topic back as `unattached`, so the normal builder emits this plugin's OWN per-quest bark topics fully gated; the parent DIAL is re-added to that batch (it was being dropped as an unchanged override, leaving the builder no topic to group under). After: `bark-topics=384` (was 0), `infos=19293` (was 16560), `voice-gated=18280`, ForceGreet bound 1, and Jiub reports **7 greetings** instead of 0. **Generalisable**: `_NEW_NESTED_PARENT` nesting is only correct when the master parent is a genuine container (a CELL). For a SHARED, engine-named parent it silently routes the plugin's content into the master's quest scope AND skips every gate the pipeline would have injected.
 - **Morroblivion `Say()` plays no line — VERIFIED-NOT-THE-CAUSE list (2026-08-05, OPEN)**: `tools/script/script_debug.py` proved the call side is healthy — `STAGE 1` fires, quest `run=TRUE`, `JiubSpeak` steps 1→2→3, and each tick logs `SAY ... spk=mwJiubREF 3d=TRUE` — but **zero FRAG lines**, i.e. the engine selects no INFO. Everything below was checked against xEdit AND a real Skyrim.esm dump and is CONFORMANT; do not re-investigate without new evidence:
@@ -200,13 +200,13 @@ game, see the `oblivion-dialog-system`, `skyrim-dialog-system`, and
 ## Known gaps and defects
 <a id="known-gaps-defects"></a>
 
-- **ACTUAL alias-fill / marker ROOT CAUSE (SOLVED 2026-07-11): top-level GROUP ORDER.** Our writer emitted the QUST top-group BEFORE CELL/WRLD/DIAL. The engine/CK loads top-level groups in file order and resolves a quest's forced-reference aliases (ALFR → ACHR/REFR) at the moment it loads the QUST group. With QUST first, the reference targets (which live in the later CELL/WRLD groups) are not in the form map yet, so EVERY forced ref fails: CK log `[QUESTS] Could not find forced ref (0103572C) for Ref Alias 'TES4Target03'.` (970 total, all our aliases). The alias then fills NONE and no marker draws. This is why the SAME alias resolved in a test ESP (target in Oblivion.esm = a MASTER, loaded first) but not in-file (QUST loaded before its own cells). Vanilla Skyrim.esm order is …CELL, WRLD, DIAL, **QUST** (QUST LAST). FIX: `_group_order()` in tes5_import/writer.py now places QUST after CELL/WRLD/DIAL. Diagnostic: dump top-level group order of the output vs Skyrim.esm and compare QUST's index to CELL/WRLD. General rule: mirror vanilla group order; any group resolved by a later system must precede its consumers. (Prior theories — VMAD trailing count, ActorBase property binding on QuillWeave, HEDR.numRecords undercount — were each real defects and fixed, but NONE was the marker cause; the user's tests falsified each.)
+- **ACTUAL alias-fill / marker ROOT CAUSE (SOLVED 2026-07-11): top-level GROUP ORDER.** Our writer emitted the QUST top-group BEFORE CELL/WRLD/DIAL. The engine/CK loads top-level groups in file order and resolves a quest's forced-reference aliases (ALFR → ACHR/REFR) at the moment it loads the QUST group. With QUST first, the reference targets (which live in the later CELL/WRLD groups) are not in the form map yet, so EVERY forced ref fails: CK log `[QUESTS] Could not find forced ref (0103572C) for Ref Alias 'TES4Target03'.` (970 total, all our aliases). The alias then fills NONE and no marker draws. This is why the SAME alias resolved in a test ESP (target in Oblivion.esm = a MASTER, loaded first) but not in-file (QUST loaded before its own cells). Vanilla Skyrim.esm order is …CELL, WRLD, DIAL, **QUST** (QUST LAST). FIX: `_group_order()` in tes5_import/base/writer.py now places QUST after CELL/WRLD/DIAL. Diagnostic: dump top-level group order of the output vs Skyrim.esm and compare QUST's index to CELL/WRLD. General rule: mirror vanilla group order; any group resolved by a later system must precede its consumers. (Prior theories — VMAD trailing count, ActorBase property binding on QuillWeave, HEDR.numRecords undercount — were each real defects and fixed, but NONE was the marker cause; the user's tests falsified each.)
 - **Secondary CK_WARNINGS worth a follow-up (NOT the marker cause)**: `[EDITOR] Editor ID 'X' is not unique … will be renamed` (129 LCTN, 68 BOOK, 42/29 SOUN, dup QUST/NPC_/FACT…) — duplicate EditorIDs across converted records; the CK auto-renames, which can break EDID→FormID lookups. `[CELLS] Ref is not in its persistence location 'TES4SkingradWestGateLocation'` (13) — a persistent ref whose cell XLCN location doesn't match its own persistence location. `[MASTERFILE] Missing base object for ref … Ref will be deleted` (~150 exterior refs) and `Could not find worldspace (FID) in load for Location` (512). These are independent quality issues surfaced by the CK's stricter load validation.
 - **Quest objectives never completed (SOLVED 2026-07-12)**: symptom — walk a quest (e.g. FGC01Rats) and every objective you pass stays un-ticked in the journal; the log just accumulates open bullets. **Cause is a semantic mismatch, not a record bug.** Oblivion's journal is an append-only **log**: `SetStage 20` appends entry 20 under entry 10 and 10 remains as history — it was never a checkbox, so Oblivion has *no* "objective completed" concept and nothing in the TES4 data ever says "step N is done". Skyrim's journal is a **set of objectives**, each independently Displayed/Completed/Failed, where a Displayed-but-not-Completed objective renders as an open bullet with a live compass marker. The converter emits one QOBJ per stage-with-log-text and the stage fragment only ever called `SetObjectiveDisplayed(stage)` — `SetObjectiveCompleted` was emitted *only* when the TES4 log entry had the quest-complete flag — so every objective the player walked through stayed open forever. **The completion points must be recovered from the quest TARGETS**: every TES4 QSTA carries `GetStage` conditions saying exactly which stages that target's compass marker is live at, which is Oblivion's own encoding of "the player still has this errand to run" (FGC01Rats: Arvena live at 10/30/55/65/90 = the report-back steps; Pinarus at 40–50 = the hunt; Quill-Weave at 70–80/105 = the stakeout). An objective is in progress while its markers are live and is finished at the first later stage where they go dark → `_superseded_stages()` in script_convert/pipeline.py reuses `dialog_converter._target_live_at_stage` (same gate evaluator the importer uses to place QSTA) and returns, per fragment, the objectives that stage closes; each objective is closed exactly ONCE, by the first stage that ends it.
   - **Do NOT "complete every lower-numbered objective"** (the obvious-looking fix). Quests legitimately hold several objectives open at once and have side branches that a higher-numbered stage does not supersede — a blanket sweep force-ticks them. Corpus check over the 262 quests with fragments: **1030 fragments display an objective while closing nothing** (it stays open in parallel) and **149 fragments close >1 objective at once** (parallel threads converging), across **98 quests**. FGC01Rats stages 40 and 50 are both open together (Pinarus's marker spans 40–50) and close together at 55.
   - **TES4 has no fail bit.** QSDT flag values across all of Oblivion are only 0 and 1 (histogram: 2605×0, 378×1), and 0x01 means "complete the **QUEST**", not "complete this objective" — 89 of 390 quests have several such stages (FGC01Rats: 100 success, 110 success-variant, 200 failure, all flag 1). So a complete-flagged stage emits `CompleteAllObjectives()` + `CompleteQuest()`: the engine closes whatever is still displayed on whichever branch the player actually took, and leaves the never-shown entries of the skipped branch alone. A static per-index sweep can't know the branch; `CompleteAllObjectives`/`IsObjectiveDisplayed` are both real natives (verified in vanilla `Quest.psc`, and the generated calls compile clean against the Skyrim SE headers).
 - **Say-driven scenes: the timer estimate is GONE (2026-08-16)**: every previous design (2026-07-25 park/release, per-owner thresholds, race-safe decrement, quest-scoped release, OnBegin re-charge) tried to reconstruct the length TES4's synchronous `Say` returned, and each had an edge where a line was cut, repeated, dropped or held. The rewrite gets the number from the engine: `set T to Say topic` → `T = TES4Polyfill.SayLine(speaker, topic, fallback)`, which blocks until the INFO's OnBegin fragment reports the selected line's measured length and returns it (+1s tail); every INFO carries a Begin/End fragment pair whose only fixed job is `LineBegan`/`LineEnded` on the speaker (state in script Actor Values, no owner analysis, no property binding); fragments never write a timer; the countdown is a plain `T = T - dt` again. Full contract, evidence and traps: [papyrus_conversion_notes.md — Say() timers](script_convert.md#say-timers--tes4polyfillsayline-2026-08-16).
-- **Oblivion has an NPC-to-NPC conversation SCHEDULER; Skyrim has none (SOLVED 2026-08-07)**: symptom — CharacterGen reaches stage 26 with the assassins dead and everyone in position, then stalls forever; the guards never start talking, and `setstage charactergen 27` from the console resumes it normally. The stage-26 result script only calls `evp` — **nothing in the plugin starts the conversation**. Oblivion's engine picks two nearby idle NPCs, has the initiator speak a `HELLO` line whose conditions name BOTH actors (`GetIsID(speaker)` subject-side + `GetIsID(listener)` **Run-on-Target**), then walks the `TCLT` chain alternating speakers per `DATA.NextSpeaker` until a `GOODBYE`, running each INFO's result script — and the quest payload rides that last result (`setstage charactergen 27`). No record conversion substitutes for the scheduler: on `HELO` Skyrim only ever evaluates against the PLAYER, so the target-side identity can never pass. **`ACAC` (subtype 92) is NOT the destination — it is "ActorCollidewithActor", the bump bark** (xEdit `f4se_plugin_xEdit` subtype table); routing heads there was tried 2026-08-07 and is still silent in-game, do not retry. Fix: `tes5_import/npc_conversations.py` replays the **quest-advancing** chains through the proven `Actor.Say()` path — head INFOs reparented onto synthesized hidden `TES4NPCConv<plugin>Topic<N>` topics, driven by a generated start-game-enabled `TES4NPCConv<plugin>` quest that polls each chain's compiled gate plus the scheduler's own preconditions (both loaded/alive/not-fighting/within 500u). Line selection stays with the engine (per-INFO CTDAs), so End fragments fire normally. 15 chains restored in Oblivion.esm (CharacterGen, MQ04, MQ15, **MQ16 endgame ×3**, MQConversations/MQ13, MS91 ×3, TG01, TG03, SEConversations ×3), 2 skipped, 99 VMAD properties. Flavor chatter stays dropped (TODO.txt #16). Full design, selection rules and traps: [ambient_dialogue_channel_plan.md](tes5_import_dialogue.md#the-npc-to-npc-conversation-scheduler). Regression: `tests/test_dialog.py::TestNpcConversationChains`.
+- **Oblivion has an NPC-to-NPC conversation SCHEDULER; Skyrim has none (SOLVED 2026-08-07)**: symptom — CharacterGen reaches stage 26 with the assassins dead and everyone in position, then stalls forever; the guards never start talking, and `setstage charactergen 27` from the console resumes it normally. The stage-26 result script only calls `evp` — **nothing in the plugin starts the conversation**. Oblivion's engine picks two nearby idle NPCs, has the initiator speak a `HELLO` line whose conditions name BOTH actors (`GetIsID(speaker)` subject-side + `GetIsID(listener)` **Run-on-Target**), then walks the `TCLT` chain alternating speakers per `DATA.NextSpeaker` until a `GOODBYE`, running each INFO's result script — and the quest payload rides that last result (`setstage charactergen 27`). No record conversion substitutes for the scheduler: on `HELO` Skyrim only ever evaluates against the PLAYER, so the target-side identity can never pass. **`ACAC` (subtype 92) is NOT the destination — it is "ActorCollidewithActor", the bump bark** (xEdit `f4se_plugin_xEdit` subtype table); routing heads there was tried 2026-08-07 and is still silent in-game, do not retry. Fix: `tes5_import/dialogue/conversations.py` replays the **quest-advancing** chains through the proven `Actor.Say()` path — head INFOs reparented onto synthesized hidden `TES4NPCConv<plugin>Topic<N>` topics, driven by a generated start-game-enabled `TES4NPCConv<plugin>` quest that polls each chain's compiled gate plus the scheduler's own preconditions (both loaded/alive/not-fighting/within 500u). Line selection stays with the engine (per-INFO CTDAs), so End fragments fire normally. 15 chains restored in Oblivion.esm (CharacterGen, MQ04, MQ15, **MQ16 endgame ×3**, MQConversations/MQ13, MS91 ×3, TG01, TG03, SEConversations ×3), 2 skipped, 99 VMAD properties. Flavor chatter stays dropped (TODO.txt #16). Full design, selection rules and traps: [ambient_dialogue_channel_plan.md](tes5_import_dialogue.md#the-npc-to-npc-conversation-scheduler). Regression: `tests/test_dialog.py::TestNpcConversationChains`.
 
 
 ## Ambient dialogue channels: diagnosis and plan of attack
@@ -253,7 +253,7 @@ a topic, not a bark.
 
 `fAIGreetingTimer = 5.0` and `fAIMinGreetingDistance` come from Skyrim.esm.
 The converter correctly puts `GMST` in `SKIP_TYPES`
-(`tes5_import/constants.py`), and the output contains **0 GMST records**, so
+(`tes5_import/base/constants.py`), and the output contains **0 GMST records**, so
 Skyrim's own timers govern. The cadence is therefore *not* a settings bug —
 it is correct Skyrim behaviour applied to a pool of lines that should never
 have been on that channel. Do not attempt to fix this by writing GMSTs.
@@ -263,7 +263,7 @@ have been on that channel. Do not attempt to fix this by writing GMSTs.
 ## Problem 1 — GREETING lines are on the ambient channel
 <a id="problem-1-greeting-lines-are"></a>
 
-`tes5_import/dialog_converter.py:859-860` maps both channels to one subtype:
+`tes5_import/dialogue/converter.py:859-860` maps both channels to one subtype:
 
 ```python
 'GREETING':       (73, b'HELO', 7),
@@ -405,7 +405,7 @@ destination is worse than silence. So they are **skipped at conversion**, not
 emitted-but-hidden.
 
 **Change:** add Oblivion `Type=1` Conversation topics to the skip path in
-`should_skip_dial` (`tes5_import/dialog_converter.py`), excluding the four that
+`should_skip_dial` (`tes5_import/dialogue/converter.py`), excluding the four that
 are genuinely something else:
 
 - `INFOGENERAL` → `Rumors`/`RUMO` — a real Skyrim player topic; already correct.
@@ -431,6 +431,7 @@ This is the reason to skip properly rather than to suppress `BNAM`.
 dropped families can be restored via Step 4.
 
 #### ⚠ The trap that nearly broke CharacterGen
+<a id="script-driven-type-1-topics"></a>
 
 A drop keyed on `DATA.Type == 1` alone is **wrong**. Measured against the real
 export, **293 of the 535 Type-1 topics are script-driven** — spoken by an
@@ -615,7 +616,7 @@ normally, which is what isolated the chain as the only broken link.)
 | Route the head to `ACAC` (subtype 92) | ❌ **Wrong — do not retry.** `ACAC` is **"ActorCollidewithActor"**, the bump-into-someone bark. It is not a conversation channel. Tried 2026-08-07; still silent in-game. Source: the engine subtype table in `references/xEdit/Tools/xSE/f4se_plugin_xEdit/f4se_plugin_xEdit-20180628.txt` — `108;"ActorCollidewithActor";108;"ACAC";7;0;0`. **Its presence in Skyrim.esm (3 topics) was mistaken for evidence it was the ambient-conversation channel; that inference was wrong.** |
 | Full `SCEN` synthesis | Correct in principle but needs actor pairing Oblivion never records — see the deferred Step 4 above. |
 
-### What is implemented: `tes5_import/npc_conversations.py`
+### What is implemented: `tes5_import/dialogue/conversations.py`
 
 These chains are **identity-pinned** — the head names both actors — so the
 proven `Actor.Say()` machinery (which already drives every scripted CharGen
@@ -858,6 +859,14 @@ pool widening as regard improves.
 
 ## 2. AddTopic — 586 gated topics
 <a id="2-addtopic-586-gated-topics"></a>
+<a id="addtopic-unlock-globals"></a>
+
+**A script `AddTopic` is the THIRD reveal route**, after an INFO fragment and a
+quest-stage fragment, and it is load-bearing rather than cosmetic:
+`TGReadWantedPoster` and `TG00MysteriousNoteScript` are how the player first
+learns of the Gray Fox. `script_convert.commands.add_topic` emits the same
+`SetValue(1)` on the topic's `TES4Unlock_<topic>` global; an UNGATED topic is
+already visible, so it compiles to a no-op note.
 
 **The gap.** In Oblivion a conversation topic is invisible until something adds
 it: an INFO's `AddTopic` list, an `AddTopic X` result script, or a quest stage.
@@ -963,7 +972,7 @@ VTYP, place it at the emitter's authored position, and call a plain
 third parameter and is the faithful conversion of TES4's fourth argument --
 the voice comes from inside the player's head at full volume, which is how
 Oblivion delivered the Arena announcer, the Daedric princes and Mankar
-Camoran. See `tes5_import/speaker_activators.py`, `TES4Polyfill.SayScene`.
+Camoran. See `tes5_import/dialogue/speak_as.py`, `TES4Polyfill.SayScene`.
 
 🛑 **Do not get clever with the delivery.** Two alternatives were built and
 both KILLED THE AUDIO outright, which is strictly worse than any subtitle
@@ -1034,10 +1043,31 @@ remap changes which funcs fall in the drop set. Instrument the call site.
 loss. When a topic reports `ERROR info under ...`, the INFOs under it are gone,
 not degraded -- get the traceback before theorising.
 
+### How a speaker activator is built
+<a id="speaker-activator-construction"></a>
+
+**Code:** `tes5_import/dialogue/speak_as.py` — one module, scan through build.
+
+- **Scan then build.** `scan_speak_as_calls` finds the `Say` call sites,
+  `build_speaker_activators` mints a TACT + placed REFR for each. These were two
+  modules (`talking_activators` / `speaker_activators`); they are one feature and
+  the scan half had exactly one consumer.
+- **The in-head flag collapses.** A site appearing both with and without the
+  flag is recorded as in-head: the flag is per CALL and the converter passes it
+  through, so the record set only needs the `(emitter, voice, topic)` triple.
+- **The REFR is a CLONE of the emitter's own**, with `NAME` repointed at the new
+  TACT. That carries cell, position and rotation across without re-deriving any
+  of it; `_CLONE_DROP_PREFIXES` strips what must not be inherited (teleports,
+  ownership, locks, enable-parents, scale, counts). Flag 1024 is Persistent.
+- **An actor with no voice type is skipped.** There is no folder to read voice
+  files from, so the speaker would be as silent as the marker it replaces.
+- **Order matters:** it appends REFRs to `by_type`, so it must run BEFORE the
+  CELL/WRLD builders place them — like the leveled-actor shells.
+
 ## <a id="adopting-a-masters-synthesized-records"></a>Adopting a master's synthesized records
 
 **Code:** `tes5_import/import_main.py` (`_adopt_master_special_records`),
-`tes5_import/synth_records.py`
+`tes5_import/base/owned_records.py`
 
 The conversion synthesizes records TES4 has no source for — globals, factions,
 menus, formlists, and one VTYP per voiced race. A **root master** creates them;
@@ -1093,7 +1123,7 @@ fixed window in the middle of the reserved gap, ahead of the null-LAND repair.
 
 ## <a id="the-conversion-owned-globals"></a>The conversion-owned globals
 
-**Code:** `tes5_import/synth_records.py`
+**Code:** `tes5_import/base/owned_records.py`
 
 Oblivion state that Skyrim exposes no way to read. Each is a GlobalVariable the
 converted scripts read and write, registered in `WELL_KNOWN_PROPERTIES` so VMAD
@@ -1140,7 +1170,7 @@ layout, leaving every crime worth 0. See `convert_FACT` in
 
 ## <a id="synthesized-menus-factions-and-formlists"></a>Synthesized menus, factions and formlists
 
-**Code:** `tes5_import/synth_records.py`
+**Code:** `tes5_import/base/owned_records.py`
 
 ### Chargen menus need FIXED ids
 
@@ -1241,7 +1271,7 @@ Iteration is sorted because the output ESM must stay byte-reproducible.
 ## <a id="adopting-a-masters-synthesized-records"></a>Adopting a master's synthesized records
 
 **Code:** `tes5_import/import_main.py` (`_adopt_master_special_records`),
-`tes5_import/synth_records.py`
+`tes5_import/base/owned_records.py`
 
 The conversion synthesizes records TES4 has no source for — globals, factions,
 menus, formlists, and one VTYP per voiced race. A **root master** creates them;
@@ -1307,7 +1337,7 @@ converted .psc files declare -- the same TES4Fame/TES4Unlock binding pattern.
 
 ## <a id="addtopic-unlock-gates"></a>AddTopic unlock gates: what reveals a topic
 
-**Code:** `tes5_import/dialog_unlocks.py`
+**Code:** `tes5_import/dialogue/unlocks.py`
 
 ### Explicit reveals versus mentions
 
@@ -1393,3 +1423,65 @@ Azzan, `contract` stood or fell purely on its own INFO conditions while
 who did not click Contract lost every topic and was left with the generic
 INFOGENERAL pool ("Rumors"), which is exactly the reported symptom. Keeping the
 gate makes the reveal explicit and idempotent from BOTH revealer kinds.
+
+## <a id="info-fragment-emission"></a>INFO fragment emission: one decision function
+
+**Code:** `tes5_import/dialogue/converter.py:_info_vmad`
+
+Whether an INFO gets a `TES4_TIF__<fid>` fragment is decided by
+`info_needs_fragment` -- the SAME function `script_convert`'s emitter calls. The
+two used to each decide it independently and disagreed more than once: a flag bit
+with no `.pex` function behind it, or a function nothing attaches. It must never
+be re-derived locally.
+
+Emission is not unconditional. The engine BINDS an INFO's fragment when it
+SELECTS that line -- load and link the `.pex`, resolve properties -- before
+anything is spoken, so a fragment with no behaviour is a cost paid on the
+dialogue path itself.
+
+`reveal_props` and `service_menu` are the caller's already-resolved answers to
+the "reveals unlock globals?" and "opens a service menu?" questions that
+`info_needs_fragment` otherwise looks up in its maps, so they are handed over as
+single-entry maps rather than recomputed.
+
+## <a id="info-enam-reset-timer"></a>INFO ENAM: the re-play lockout timer
+
+**Code:** `tes5_import/dialogue/converter.py:_info_enam`
+
+ENAM is Flags(U16) + Reset(U16). The reset field is what stops an NPC repeating a
+line: once spoken, that INFO is ineligible until the timer expires. Beyond
+Skyrim's Arcane University documents the flip side -- when every Greeting is on a
+timer, the NPC falls back to generic dialogue.
+
+TES4 has NO equivalent field (Oblivion INFO DATA is only
+DialogType/NextSpeaker/Flags), so leaving it 0 looked like a faithful translation
+of something Oblivion does not record. But 0 means no lockout at all: every
+eligible line stays permanently re-playable, the engine re-picks from the whole
+pool on each greeting attempt, and NPCs quip on repeat. All 5,636 converted HELO
+lines had reset=0, where vanilla sets a real value on 65% of its greetings.
+
+Units: the engine reads the second field as trunc(days * 65535)
+(`docs/reference/dialogue_engine_contracts.md` -- `TESTopicInfo::LoadForm` mulss
+by 65535.0), so the CK's "hours until reset" H is stored as H/24 * 65535.
+Vanilla's values decode to clean hours: 1365=0.5h (its most common, 2809 of 5287
+HELO lines = 53%), 2730=1h, 10922=4h, 32767=12h, 65535=24h.
+
+SAY-ONCE lines (flag 0x04) are already permanently locked after one play, so a
+reset would only weaken them; they keep 0.
+
+## <a id="info-tclt-choice-filter"></a>INFO TCLT: which choice links survive
+
+**Code:** `tes5_import/dialogue/converter.py:_info_tclt`
+
+A bark INFO keeps only choices that point at a CONVERSATION topic -- the vanilla
+greeting-to-CUST-response pattern (Skyrim HELO->CUST TCLT, e.g.
+`C03SkorQuestStartBranchTopic`). A choice that points at another bark is dropped,
+because barks are split/merged by (quest, subtype) in the bark pass and the link
+would dangle at a sub-topic that no longer exists under that FormID.
+
+Dropping the conversation ones too was a real regression: it left greetings with
+a line but no selectable response (FGC01Rats -- Arvena asks what happened but the
+player cannot answer).
+
+Choices into a zero-INFO topic are dropped as well. Those topics are never
+emitted (`EMPTY_DIAL_FIDS`) and Oblivion never showed them either.

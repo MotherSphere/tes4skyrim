@@ -4,9 +4,9 @@ Shared helper functions for TES5 record converters.
 
 import struct
 
-from ..mesh_bounds import get_mesh_obnd
-from ..text_reader import get_float, get_formid, get_int, get_str
-from ..writer import (
+from ..base.mesh_bounds import get_mesh_obnd
+from ..base.text_reader import get_float, get_formid, get_int, get_str
+from ..base.writer import (
     pack_float_subrecord,
     pack_formid_subrecord,
     pack_obnd,
@@ -39,7 +39,13 @@ def prefix_path(path: str) -> str:
 
 def _common_header_subs(rec: dict, need_obnd: bool = True, need_full: bool = True,
                         obnd_sig: str = '', obnd_override: tuple = None) -> bytes:
-    """Build common leading subrecords: EDID, OBND, FULL.
+    """Build common leading subrecords: EDID, VMAD, OBND, FULL.
+
+    VMAD carries the converted TES4 object script (SCPT via SCRI) when
+    one was bound, and Skyrim orders it right after EDID.
+
+    The `object_scripts` import stays INSIDE the body.
+    See: docs/reference/tes5_import_architecture.md#object-scripts-import-is-deferred
 
     obnd_sig: record type signature for type-aware OBND defaults.
     obnd_override: explicit (x1,y1,z1,x2,y2,z2) tuple; skips mesh lookup.
@@ -48,9 +54,7 @@ def _common_header_subs(rec: dict, need_obnd: bool = True, need_full: bool = Tru
     edid = get_str(rec, 'EditorID')
     if edid:
         subs += pack_string_subrecord('EDID', edid)
-    # VMAD — converted TES4 object script (SCPT via SCRI), if one was bound.
-    # Skyrim order places VMAD right after EDID, before OBND.
-    from ..object_scripts import get_object_vmad
+    from ..base.object_scripts import get_object_vmad
     subs += get_object_vmad(get_formid(rec, 'FormID'))
     if need_obnd:
         bounds = obnd_override if obnd_override is not None else _resolve_obnd(rec, obnd_sig)
@@ -190,7 +194,7 @@ def _convert_biped_flags(tes4_flags: int) -> int:
     the cycle equipment_falloutnv -> common -> equipment_falloutnv.
     See: docs/commentary/asset_convert_armor.md#biped-slot-conversion
     """
-    from ..constants import BIPED_SLOT_MAP, BIPED_SLOT_EXTRA
+    from ..base.constants import BIPED_SLOT_MAP, BIPED_SLOT_EXTRA
     from .equipment_falloutnv import biped_slot_tables
     slot_map, slot_extra = biped_slot_tables(BIPED_SLOT_MAP, BIPED_SLOT_EXTRA)
     tes5 = 0

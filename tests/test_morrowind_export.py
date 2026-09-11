@@ -359,7 +359,7 @@ def test_wrld_climate_names_a_record_that_exists():
     See: docs/commentary/tes5_import_landscape.md#wrld-climate
     """
     from tes5_import.record_types.world import _world_climate
-    from tes5_import.text_reader import set_formid_index_offset
+    from tes5_import.base.text_reader import set_formid_index_offset
     set_formid_index_offset(1)
     try:
         assert _world_climate({'CNAM.Vanilla': '00000812'}) == 0x812

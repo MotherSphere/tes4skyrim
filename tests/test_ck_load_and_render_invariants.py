@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tes5_import.record_types.items import convert_STAT, convert_TREE
-from tes5_import.tes5_reader import GRP_WORLD_CHILDREN, records, walk
+from tes5_import.base.tes5_reader import GRP_WORLD_CHILDREN, records, walk
 
 PLUGIN = 'Oblivion.esm'
 CELL_SIZE = 4096.0
@@ -75,7 +75,7 @@ BIG_OBND = (-900, -900, -900, 900, 900, 900)
 @pytest.fixture
 def big_mesh(monkeypatch):
     """Give a known model path large cached bounds, and hand back the record."""
-    from tes5_import import mesh_bounds
+    from tes5_import.base import mesh_bounds as mesh_bounds
     from tes5_import.record_types.common import prefix_path
 
     model = 'Architecture' + chr(92) + 'HugeTestWall.nif'

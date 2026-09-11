@@ -11,7 +11,7 @@ uses and Oblivion stores as 0-100 scalars.
 See: docs/commentary/tes5_import_falloutnv_actors.md
 """
 
-from ..text_reader import get_formid, get_int, get_str
+from ..base.text_reader import get_formid, get_int, get_str
 
 #: Template Flags bits (wbDefinitionsCommon.pas:7715).
 _USE_AI_DATA = 1 << 4

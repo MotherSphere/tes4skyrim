@@ -27,7 +27,7 @@ from script_convert.command_rows import (
     COMMAND_ROWS, HANDLED_COMMANDS, ACTOR_VALUE_MAP_LOW,
     BARE_NO_EQUIV_COMMANDS
 )
-from script_convert.resolve import _digit_stripped_formid
+from script_convert.resolve import digit_stripped_formid
 
 #: A raw FormID operand: TES4 scripts name a form by id as readily as by
 #: EditorID (`additem 0000000f 500` is how Morrowind_ob hands out gold).  The
@@ -296,9 +296,7 @@ def _record(conv, expr: str, low: str):
 
     fid = xref.edid_to_formid.get(low, '')
     if not fid:
-        # A Papyrus identifier cannot start with a digit, so a Morroblivion
-        # record named `0<name>` arrives here already stripped.
-        fid = _digit_stripped_formid(xref, low)
+        fid = digit_stripped_formid(xref, low)
     if not fid:
         # Stale source spelling -- recover it from this record's SCRO table.
         alias = conv._scro_alias_for(expr)

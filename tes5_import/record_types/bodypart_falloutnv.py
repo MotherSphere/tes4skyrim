@@ -21,9 +21,8 @@ import struct
 from asset_convert.character.skyrim_overrides_falloutnv import bone_map_for
 from asset_convert.havok.hkx_skeleton import BONE_RENAMES
 
-from ..constants import IMPORT_DISPATCH
-from ..text_reader import get_formid, get_int, get_str, remap_formid
-from ..writer import (pack_obnd, pack_record, pack_string_subrecord,
+from ..base.text_reader import get_formid, get_int, get_str, remap_formid
+from ..base.writer import (pack_obnd, pack_record, pack_string_subrecord,
                       pack_subrecord)
 from .common import prefix_path
 from .world_falloutnv import is_fallout_source
@@ -106,13 +105,15 @@ def convert_BPTD(rec: dict, writer=None, converted_types=None) -> bytes:
     """FNV BPTD -> TES5 BPTD (EDID MODL MODT, then per part BPTN BPNN BPNT
     BPNI BPND NAM1 NAM4 NAM5), Torso and Head parts only.
 
-    `converted_types` names the record types this import converts (default:
-    the dispatch table), so BPND references to unconverted DEBR/EXPL/IPDS
-    records are nulled. NAM1 is written empty: the engine loads a non-empty
-    limb model path itself, and the SKSE plugin spawns the limb from the
-    sidecar instead.
+    `converted_types` defaults to the dispatch table; BPND refs to
+    unconverted DEBR/EXPL/IPDS are nulled. NAM1 is written empty -- the
+    SKSE plugin spawns the limb from the sidecar.
+
+    Registry import is function-local, breaking the cycle equipment ->
+    equipment_falloutnv -> this -> registry -> equipment.
     """
     if converted_types is None:
+        from ..registry import IMPORT_DISPATCH
         converted_types = IMPORT_DISPATCH
     raw_fid = int(rec.get('FormID', '0'), 16)
     humanoid = raw_fid in HUMAN_BODY_PART_DATA

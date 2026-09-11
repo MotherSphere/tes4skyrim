@@ -27,7 +27,7 @@ import sys
 from collections import Counter
 
 from output_layout import paths
-from tes5_import.tes5_reader import REC_HDR, records, subrecords
+from tes5_import.base.tes5_reader import REC_HDR, records, subrecords
 
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, SCRIPT_DIR)

@@ -7,7 +7,7 @@ in world.py.
 
 import struct
 
-from ..text_reader import get_hex_bytes
+from ..base.text_reader import get_hex_bytes
 from .common import (
     TES4_DEFAULT_MUSIC_ENUM,
     get_float,

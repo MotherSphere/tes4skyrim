@@ -30,9 +30,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from asset_convert.collision import collision_extract as ce
 from tes5_import.navmesh import build, params
-from tes5_import.pgrd_to_navm import (_collect_doors,
+from tes5_import.navmesh.from_pgrd import (collect_doors,
                                       load_door_centroids)
-from tes5_import.text_reader import (
+from tes5_import.base.text_reader import (
     parse_export_directory, group_records_by_type, get_float, get_int, get_str,
 )
 
@@ -361,7 +361,7 @@ def main():
             name = 'ext_%d_%d' % (gx, gy)
         refrs = refr_by_cell.get(fid, [])
         doors = [(x, y, z, r, tp, w)
-                 for (x, y, z, r, _f, tp, w) in _collect_doors(refrs, door_fids)]
+                 for (x, y, z, r, _f, tp, w) in collect_doors(refrs, door_fids)]
         jobs.append(((name or fid)[:34],
                      refrs, nodes, edges, land, gx, gy, doors))
 

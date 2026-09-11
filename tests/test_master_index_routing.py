@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import.override_merge import ChainedMasterIndex, MasterIndex
+from tes5_import.overrides.master_index import ChainedMasterIndex, MasterIndex
 
 
 def _sub(sig, payload):

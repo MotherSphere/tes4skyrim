@@ -102,7 +102,7 @@ def test_new_core_module_is_never_unmatched():
 # ── Packaging is a consequence, never a standalone reason ─────────────────
 
 def test_packaging_follows_a_producing_step():
-    assert set(rn.PACKAGING_STEPS) <= set(steps("tes5_import/import_main.py"))
+    assert set(rn.PACKAGING_STEPS) <= set(steps("tes5_import/pipeline.py"))
 
 
 def test_patch_skyrim_alone_does_not_drag_in_packaging():

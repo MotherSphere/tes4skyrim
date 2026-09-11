@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import.writer import (GROUP_HEADER_SIZE, _merge_owned_groups,
+from tes5_import.base.writer import (GROUP_HEADER_SIZE, _merge_owned_groups,
                                 pack_group, pack_record)
 
 

@@ -244,7 +244,7 @@ worldspace, or REFR references; the only "lava" strings in Skyrim.esm are
 Olava the Feeble.
 
 **Our implementation**: `asset_convert/lava_surface.py` generates the plane,
-`tes5_import/lava_placement.py` places it. Oblivion's `oblivionlava06.dds` is
+`tes5_import/actors/lava_placement.py` places it. Oblivion's `oblivionlava06.dds` is
 already full colour (DXT1 blocks decode to `(230,97,49)`, `(222,64,32)`; mean
 channel spread 151/255), so it goes straight into `source_texture` and the
 greyscale-to-palette path is NOT used — setting `slsf_1_greyscale_to_palette_color`

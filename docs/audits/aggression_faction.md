@@ -503,7 +503,7 @@ carrying TES4 flags `528388` = Must Complete (0x04) | Always Sneak (0x1000) |
 No Idle Anims (0x80000).
 
 `T4_MUST_COMPLETE (0x04)` maps straight to `T5_MUST_COMPLETE (0x04)` via
-`_FLAG_MAP` in `tes5_import/pack_converter.py:136`. The two flags share a bit
+`_FLAG_MAP` in `tes5_import/packages/converter.py:136`. The two flags share a bit
 and a name but not a contract:
 
 | | Meaning |

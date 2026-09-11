@@ -14,7 +14,7 @@ import subprocess
 import sys
 import textwrap
 
-from tes5_import.export_diff import diff_records
+from tes5_import.overrides.diff import diff_records
 
 MASTER = {
     'Signature': 'REFR', 'FormID': '01841792', 'NAME': '02200072',
@@ -41,7 +41,7 @@ def test_key_order_survives_hash_randomization():
     script = textwrap.dedent(f'''
         import sys
         sys.path.insert(0, {__import__('os').path.dirname(__import__('os').path.dirname(__import__('os').path.abspath(__file__)))!r})
-        from tes5_import.export_diff import diff_records
+        from tes5_import.overrides.diff import diff_records
         print(",".join(diff_records({MASTER!r}, {PLUGIN!r})))
     ''')
     orders = []

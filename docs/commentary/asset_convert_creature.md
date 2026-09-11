@@ -1,6 +1,6 @@
 # asset_convert/havok/creature_pipeline.py - creature conversion
 
-**Code:** `asset_convert/collision/collision.py`, `asset_convert/havok/hkx_ragdoll.py`, `asset_convert/havok/animation_data.py`, `tes5_import/creature_races.py`
+**Code:** `asset_convert/collision/collision.py`, `asset_convert/havok/hkx_ragdoll.py`, `asset_convert/havok/animation_data.py`, `tes5_import/actors/creature_races.py`
 
 ## Contents
 
@@ -234,7 +234,7 @@ The whole chain is implemented and wired as pipeline **Phase 4b: Creatures**
     clip never binds), and the character.hkx must carry the
     `m_worldFromModelFeedbackGain` driver properties — but none of those
     matter until the resource tree gives the ragdoll bodies to add.
-- `tes5_import/creature_races.py` — Phase 0f: generated RACE/ARMA/ARMO per
+- `tes5_import/actors/creature_races.py` — Phase 0f: generated RACE/ARMA/ARMO per
   unique (creature folder, NIFZ body set), layouts mirrored from real
   Skyrim.esm DogRace/SkinDog/NakedDogAA dumps; ATKE = the generated
   `attackStart_TES4_*` events; `convert_CREA` RNAM → the generated race
@@ -1353,7 +1353,7 @@ anything, and every generated creature ARMA had **no SNDD at all** — measured
 before the fix: 0 IPCT / 0 IPDS / 0 FSTP / 0 FSTS in the entire output, 63 of 63
 creature ARMAs with `SNDD=NONE`.
 
-Implemented in `tes5_import/creature_footsteps.py`, following the vanilla
+Implemented in `tes5_import/actors/creature_footsteps.py`, following the vanilla
 `NPCWolfFootFrontWalk*` chain exactly:
 - **IPCT** = EDID + DATA(24) + DODT(36) + SNAM→SNDR. No model; footstep impacts
   are sound-only.
@@ -1729,7 +1729,7 @@ creature is fully proven.
   PACK is in SKIP_TYPES but convert_CREA/convert_NPC_ passed the TES4 PKID FormIDs
   through, so every actor's package list pointed at records that don't exist (vanilla
   creatures each carry exactly one package, DefaultMasterPackageCreature). Fix
-  (`tes5_import/packages.py` + import Phase 0g): creatures get PKID
+  (`tes5_import/packages/actor_wiring.py` + import Phase 0g): creatures get PKID
   DefaultMasterPackageCreature (0010F2A5) + DPLT DefaultMasterPackageListCreature
   (0010F2A6); humanoids get DefaultSandboxCurrentLocation1024 (000BFB6B) standing in for
   wander/eat/sleep-type TES4 packages + DPLT DefaultMasterPackageList (00021E81).
@@ -1758,7 +1758,7 @@ creature is fully proven.
   Skyrim.esm). A behavior file with no IDLE records receives NO events at all: after the
   MOVT fix the dog translated (movement controller live) but played idle forever and
   never attacked. `sae` works regardless because it bypasses the routing. Fix:
-  `tes5_import/creature_idles.py` (called from build_creature_races, once per project)
+  `tes5_import/actors/creature_idles.py` (called from build_creature_races, once per project)
   emits the vanilla-dog leaf set (move/turn/stagger/recoil/idle-stop/reset/death-wait +
   the conditioned swim root/start/stop tree, DATA bytes + IsSwimming CTDA copied
   verbatim) with DNAM = our generated behavior path. Attack events are NOT IDLE-routed —
@@ -1951,7 +1951,7 @@ creature is fully proven.
   `creature_races._build_movts` emits matching MOVT records (SPED now computed
   per creature from clip root motion — see the too-fast fix bullet above) —
   graph↔record consistency by construction, like ATKE.
-- **Record side (`tes5_import/creature_races.py`, import Phase 0f)**: one generated RACE +
+- **Record side (`tes5_import/actors/creature_races.py`, import Phase 0f)**: one generated RACE +
   skin ARMO + per-body-part ARMA per unique (creature folder, NIFZ body set) — layouts
   byte-mirrored from real Skyrim.esm dumps of DogRace(000131EE)/SkinDog(0004B2C9)
   /NakedDogAA(0004B2CA); RACE DATA = the 164-byte dog template patched at offsets 36/40/44
@@ -2633,7 +2633,7 @@ Guarded by `TestAnimGroupFallback` in `tests/test_creature_anim.py`.
 Rebuilding creatures after the §9 fix made the nix hound walk, but
 **incredibly slowly** in game. The clips were correct; the RECORD was not.
 
-`_movt_sped()` (`tes5_import/creature_races.py`) reads `proj['speeds']` from
+`_movt_sped()` (`tes5_import/actors/creature_races.py`) reads `proj['speeds']` from
 the creature project manifest and falls back to the vanilla dog's
 `_DOG_WALK = 74.54` when a speed is missing. Before §9 the nix hound had no
 gait clip at all, so every `speeds` entry was `null` and its MOVT shipped

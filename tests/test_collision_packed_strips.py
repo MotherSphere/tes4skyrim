@@ -29,7 +29,7 @@ apply_patches()
 
 NifFormat = pytest.importorskip('pyffi.formats.nif').NifFormat
 
-from asset_convert.collision import collision  # noqa: E402
+from asset_convert.collision import collision
 
 
 def _tri_strips_shape(tris, material=0):

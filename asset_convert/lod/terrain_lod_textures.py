@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 
 from asset_convert.game_paths import win_join
-from tes5_import.tes5_reader import records
+from tes5_import.base.tes5_reader import records
 
 # 4096 game units per cell; landscape diffuse repeats every 2 cells in Skyrim.
 # Oblivion authored the same, so one .dds spans a 2x2 cell region at UV [0,1].

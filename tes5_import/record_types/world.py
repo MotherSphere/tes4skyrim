@@ -3,18 +3,18 @@
 import math
 import struct
 
-from ..constants import (
+from ..base.constants import (
     MAP_MARKER_TYPE_MAP,
     MATT_MAP,
     SKYRIM_MAP_MARKER_LCRT,
     map_lock_level,
 )
-from ..locations import WORLD_NAMES
-from ..skyrim_overrides import TES4_MARKER_FORMID_TO_SKYRIM
+from ..base.locations import WORLD_NAMES
+from ..base.equivalents import TES4_MARKER_FORMID_TO_SKYRIM
 from .world_falloutnv import (marker_substitute, parent_use_flags,
                               tes5_world_flags, world_map_offset)
 from .items import get_base_origin_shift
-from ..text_reader import get_hex_bytes, remap_formid
+from ..base.text_reader import remap_formid
 from .common import (
     TES4_DEFAULT_MUSIC_ENUM,
     prefix_path,
@@ -41,10 +41,7 @@ from .common import (
 _TES4_DEFAULT_CLIMATE = 0x0000015F
 
 
-# Interior CELL FormID -> LCTN FormID of the map-marker location it belongs to.
-# Populated by tes5_import.locations before the cell groups are built; the CELL
-# converter reads it to emit XLCN, which is what lets entering a dungeon
-# discover its location (and so reveal its map marker).
+#: Interior CELL FormID -> LCTN FormID; set by `base.locations`, emitted as XLCN.
 _CELL_LOCATION: dict = {}
 
 # (WRLD FormID, grid X, grid Y) -> LCTN FormID naming that exterior cell square.
@@ -848,6 +845,110 @@ def _refr_base_formid(rec: dict, name_raw: int) -> int:
     return marker if marker is not None else get_formid(rec, 'NAME')
 
 
+def _refr_xtel(rec: dict) -> bytes:
+    """The XTEL teleport-door subrecord, or b'' when the ref has no XTEL.
+
+    TES5 XTEL is 32 bytes: Door(4) + Pos(12) + Rot(12) + Flags(4), flags
+    always 0 for converted doors.  An exterior destination whose grid square
+    holds no cell crashes the CK, so it falls back to the target door's own
+    placement -- where Oblivion put the player anyway.
+
+    See: docs/commentary/tes5_import_world.md#teleport-doors-by-worldspace
+    """
+    xtel_door = get_formid(rec, 'XTEL.Door')
+    if not xtel_door:
+        return b''
+    px = get_float(rec, 'XTEL.PosX')
+    py = get_float(rec, 'XTEL.PosY')
+    pz = get_float(rec, 'XTEL.PosZ')
+    rx = _safe_angle(get_float(rec, 'XTEL.RotX'))
+    ry = _safe_angle(get_float(rec, 'XTEL.RotY'))
+    rz = _safe_angle(get_float(rec, 'XTEL.RotZ'))
+    dest = _DOOR_PLACEMENT.get(xtel_door)
+    if dest:
+        dw, dx, dy, dz = dest
+        if dw and (dw, _ref_grid(px), _ref_grid(py)) not in _WORLD_GRID_CELLS:
+            px, py, pz = dx, dy, dz
+    return pack_subrecord('XTEL', struct.pack(
+        '<IffffffI', xtel_door, px, py, pz, rx, ry, rz, 0))
+
+
+def _refr_xloc(rec: dict):
+    """The XLOC lock subrecord and whether this is a keyless barrier door.
+
+    Returns (bytes, barrier_door).  XLOC is 20 bytes in TES5 and the lock is
+    transferred faithfully -- TES4 level 100 becomes Requires Key (255).  AI
+    passage through a locked barrier door is granted by OWNERSHIP, never by
+    weakening the lock.
+
+    See: docs/commentary/tes5_import_actors.md#barrier-door-ownership
+    """
+    lock_level = get_int(rec, 'XLOC.Level', -1)
+    if lock_level < 0:
+        return b'', False
+    barrier_door = False
+    lock_key = get_formid(rec, 'XLOC.Key')
+    lock_flags = get_int(rec, 'XLOC.Flags')
+    tes5_level = map_lock_level(lock_level, leveled=bool(lock_flags & 0x4))
+    if tes5_level == 255 and not lock_key:
+        from ..base.object_scripts import base_is_consume_door
+        barrier_door = base_is_consume_door(rec.get('NAME', ''))
+    return pack_subrecord('XLOC', struct.pack(
+        '<BxxxIBxxx8x', tes5_level, lock_key, lock_flags)), barrier_door
+
+
+def _refr_map_marker(rec: dict) -> bytes:
+    """The map-marker block: XMRK, FNAM, optional FULL, TNAM and XLRT.
+
+    XLRT binds the reference to its Location as that Location's map marker;
+    without it the engine cannot tie the marker to the Location the player
+    discovers.  396/397 vanilla map markers carry MapMarkerRefType.
+
+    See: docs/commentary/tes5_import_world.md#exclusive-lcec-cell-ownership
+    """
+    subs = pack_subrecord('XMRK', b'')
+    subs += pack_uint8_subrecord('FNAM', map_marker_flags(rec))
+    marker_full = get_str(rec, 'MapMarker.FULL')
+    if marker_full:
+        subs += pack_string_subrecord('FULL', marker_full)
+    marker_type = get_int(rec, 'MapMarker.Type')
+    subs += pack_subrecord('TNAM', struct.pack(
+        '<BB', MAP_MARKER_TYPE_MAP.get(marker_type, 0), 0))
+    return subs + pack_formid_subrecord('XLRT', SKYRIM_MAP_MARKER_LCRT)
+
+
+def _refr_data(rec: dict, scale) -> bytes:
+    """The DATA position/rotation subrecord, with furniture-origin shift.
+
+    Marker-bearing models are re-origined to the floor inside the NIF, so
+    their placed references drop by the same amount along the model's local
+    Z: world visuals stay identical while the REFR z lands where the engine
+    anchors seated actors (asset_convert/nif/furniture_markers.py).
+    """
+    px = get_float(rec, 'PosX')
+    py = get_float(rec, 'PosY')
+    pz = get_float(rec, 'PosZ')
+    rx = _safe_angle(get_float(rec, 'RotX'))
+    ry = _safe_angle(get_float(rec, 'RotY'))
+    rz = _safe_angle(get_float(rec, 'RotZ'))
+    shift = get_base_origin_shift(rec.get('NAME', '') or '')
+    if shift:
+        s = scale if scale and scale != 1.0 else 1.0
+        if abs(rx) < 1e-4 and abs(ry) < 1e-4:
+            pz -= shift * s
+        else:
+            wx = (math.cos(rx) * math.sin(ry) * math.cos(rz)
+                  + math.sin(rx) * math.sin(rz))
+            wy = (math.cos(rx) * math.sin(ry) * math.sin(rz)
+                  - math.sin(rx) * math.cos(rz))
+            wz = math.cos(rx) * math.cos(ry)
+            px -= shift * s * wx
+            py -= shift * s * wy
+            pz -= shift * s * wz
+    return pack_subrecord('DATA', struct.pack(
+        '<ffffff', px, py, pz, rx, ry, rz))
+
+
 def convert_REFR(rec: dict) -> bytes:
     """REFR — placed object reference.
 
@@ -856,9 +957,12 @@ def convert_REFR(rec: dict) -> bytes:
     ... XSCL ... XMRK/FNAM/FULL/TNAM ... XLRT ... DATA
 
     A keyless barrier door with no authored owner is owned to the
-    plugin-origin faction, which is what lets converted AI walk through it.
+    plugin-origin faction; TES4 XACT/ONAM is deliberately not transferred.
 
     See: docs/commentary/tes5_import_actors.md#barrier-door-ownership
+
+    The `object_scripts` import stays INSIDE the body.
+    See: docs/reference/tes5_import_architecture.md#object-scripts-import-is-deferred
     """
     subs = b''
     edid = get_str(rec, 'EditorID')
@@ -880,49 +984,10 @@ def convert_REFR(rec: dict) -> bytes:
     if name_fid:
         subs += pack_formid_subrecord('NAME', name_fid)
 
-    # TES4 XACT/ONAM ("Open by Default") are deliberately NOT transferred:
-    # in Skyrim they make the door SPAWN open, but Oblivion doors carrying
-    # them still spawn closed (in-game verified — every CG portcullis stood
-    # open at load).  TES4 opens such doors via the AI bypass instead; see
-    # the consume-door handling at XLOC below.
+    subs += _refr_xtel(rec)
 
-    # Teleport door (XTEL)
-    xtel_door = get_formid(rec, 'XTEL.Door')
-    if xtel_door:
-        px = get_float(rec, 'XTEL.PosX')
-        py = get_float(rec, 'XTEL.PosY')
-        pz = get_float(rec, 'XTEL.PosZ')
-        rx = _safe_angle(get_float(rec, 'XTEL.RotX'))
-        ry = _safe_angle(get_float(rec, 'XTEL.RotY'))
-        rz = _safe_angle(get_float(rec, 'XTEL.RotZ'))
-        # An exterior destination whose grid square holds no cell crashes the
-        # CK outright (see set_teleport_grid).  The authored fallback is the
-        # target door's OWN placement — where Oblivion would have put the
-        # player anyway, since it teleports to the door's parent cell and
-        # never uses these coordinates to find it.
-        dest = _DOOR_PLACEMENT.get(xtel_door)
-        if dest:
-            dw, dx, dy, dz = dest
-            if dw and (dw, _ref_grid(px), _ref_grid(py)) not in _WORLD_GRID_CELLS:
-                px, py, pz = dx, dy, dz
-        # TES5 XTEL is 32 bytes: Door(4) + Pos(12) + Rot(12) + Flags(4)
-        # Flags: 0x0001 = No Alarm. Always 0 for converted doors.
-        subs += pack_subrecord('XTEL', struct.pack('<IffffffI', xtel_door, px, py, pz, rx, ry, rz, 0))
-
-    # Lock — XLOC is 20 bytes in TES5: Level(1)+pad(3)+Key(4)+Flags(1)+pad(3)+pad(8)
-    # Transferred faithfully; TES4 level 100 becomes Requires Key (255) — see
-    # map_lock_level.  AI passage through locked barrier doors is granted via
-    # OWNERSHIP (the synthesized XOWN below), never by weakening the lock.
-    barrier_door = False
-    lock_level = get_int(rec, 'XLOC.Level', -1)
-    if lock_level >= 0:
-        lock_key = get_formid(rec, 'XLOC.Key')
-        lock_flags = get_int(rec, 'XLOC.Flags')
-        tes5_level = map_lock_level(lock_level, leveled=bool(lock_flags & 0x4))
-        if tes5_level == 255 and not lock_key:
-            from ..object_scripts import base_is_consume_door
-            barrier_door = base_is_consume_door(rec.get('NAME', ''))
-        subs += pack_subrecord('XLOC', struct.pack('<BxxxIBxxx8x', tes5_level, lock_key, lock_flags))
+    lock_bytes, barrier_door = _refr_xloc(rec)
+    subs += lock_bytes
 
     # XLCN — Persistent Location. Only persistent refs carry it (they are the
     # quest-target-eligible ones); it lets the quest/map-marker system place a
@@ -938,27 +1003,7 @@ def convert_REFR(rec: dict) -> bytes:
         xesp_flags = get_int(rec, 'XESP.Flags')
         subs += pack_subrecord('XESP', struct.pack('<II', xesp_ref, xesp_flags))
 
-    # XLKR — Linked Reference.  TES4 has no such field; its `GetParentRef`
-    # returns the ENABLE PARENT instead (xEdit names XESP 'Enable Parent', and
-    # the UESP modding guide states the idiom directly: "make the container its
-    # Parent Ref", then `set rCont to GetParentRef`).  Skyrim exposes no getter
-    # for the enable parent, so script_convert maps GetParentRef ->
-    # GetLinkedRef(), which reads XLKR.
-    #
-    # Nothing wrote XLKR, so every converted GetParentRef resolved to None.
-    # That is why the Vilverin pressure plate did nothing when stepped on: its
-    # body ran, but `target = GetLinkedRef()` was None, so `target.Activate()`
-    # never reached the mace and the trap hung in the air.  Mirroring the
-    # enable parent into XLKR restores the link the script expects.
-    #
-    # Layout (xEdit + a real Skyrim.esm dump, 11287 vanilla uses): 8 bytes,
-    # {Keyword/Ref, Ref} with the keyword slot NULL for a plain link — vanilla
-    # writes 00000000 there on the general case.
-    #
-    # Only emitted when the base record's script actually calls GetParentRef:
-    # XESP is ordinary enable-parenting on 9157 Oblivion refs, and turning all
-    # of those into linked refs would invent links the game never had.
-    from ..object_scripts import base_uses_parent_ref
+    from ..base.object_scripts import base_uses_parent_ref
     if xesp_ref and base_uses_parent_ref(rec.get('NAME', '')):
         subs += pack_subrecord('XLKR', struct.pack('<II', 0, xesp_ref))
 
@@ -980,19 +1025,7 @@ def convert_REFR(rec: dict) -> bytes:
     # Map Marker (XMRK + FNAM + FULL + TNAM, then XLRT).
     is_map_marker = get_str(rec, 'MapMarker') == '1'
     if is_map_marker:
-        subs += pack_subrecord('XMRK', b'')
-        subs += pack_uint8_subrecord('FNAM', map_marker_flags(rec))
-        marker_full = get_str(rec, 'MapMarker.FULL')
-        if marker_full:
-            subs += pack_string_subrecord('FULL', marker_full)
-        marker_type = get_int(rec, 'MapMarker.Type')
-        tes5_marker = MAP_MARKER_TYPE_MAP.get(marker_type, 0)
-        subs += pack_subrecord('TNAM', struct.pack('<BB', tes5_marker, 0))
-        # XLRT — Location Ref Type.  Binds this reference to its Location as
-        # that Location's map marker; without it the engine cannot tie the
-        # marker to the Location the player discovers.  396/397 vanilla map
-        # markers carry MapMarkerRefType here.
-        subs += pack_formid_subrecord('XLRT', SKYRIM_MAP_MARKER_LCRT)
+        subs += _refr_map_marker(rec)
 
     # XNDP — Navmesh Door Link: the navmesh triangle this door stands on.
     # Emitted last, immediately before DATA, which is where all 1,706 vanilla
@@ -1004,33 +1037,7 @@ def convert_REFR(rec: dict) -> bytes:
         subs += pack_subrecord('XNDP', struct.pack('<Ihxx', navm_fid,
                                                    tri_index))
 
-    # Position/Rotation (DATA)
-    px = get_float(rec, 'PosX')
-    py = get_float(rec, 'PosY')
-    pz = get_float(rec, 'PosZ')
-    rx = _safe_angle(get_float(rec, 'RotX'))
-    ry = _safe_angle(get_float(rec, 'RotY'))
-    rz = _safe_angle(get_float(rec, 'RotZ'))
-
-    # Furniture origin compensation: marker-bearing models are re-origined
-    # to the floor (+shift inside the NIF), so their placed references drop
-    # by the same amount along the model's local Z — world visuals stay
-    # identical while the REFR z lands at the floor, where the engine
-    # anchors seated actors.  See asset_convert/nif/furniture_markers.py.
-    shift = get_base_origin_shift(rec.get('NAME', '') or '')
-    if shift:
-        s = scale if scale and scale != 1.0 else 1.0
-        if abs(rx) < 1e-4 and abs(ry) < 1e-4:
-            pz -= shift * s
-        else:
-            # Local +Z in world for Bethesda euler (R = Rz·Ry·Rx)
-            wx = math.cos(rx) * math.sin(ry) * math.cos(rz) + math.sin(rx) * math.sin(rz)
-            wy = math.cos(rx) * math.sin(ry) * math.sin(rz) - math.sin(rx) * math.cos(rz)
-            wz = math.cos(rx) * math.cos(ry)
-            px -= shift * s * wx
-            py -= shift * s * wy
-            pz -= shift * s * wz
-    subs += pack_subrecord('DATA', struct.pack('<ffffff', px, py, pz, rx, ry, rz))
+    subs += _refr_data(rec, scale)
 
     flags = get_int(rec, 'RecordFlags')
     if is_map_marker:
@@ -1041,18 +1048,17 @@ def convert_REFR(rec: dict) -> bytes:
 
 
 def convert_ACHR(rec: dict) -> bytes:
-    """ACHR — placed NPC reference. TES4 ACRE also maps here."""
+    """ACHR — placed NPC reference. TES4 ACRE also maps here.
+
+    The `object_scripts` import stays INSIDE the body.
+    See: docs/reference/tes5_import_architecture.md#object-scripts-import-is-deferred
+    """
     subs = b''
     edid = get_str(rec, 'EditorID')
     if edid:
         subs += pack_string_subrecord('EDID', edid)
 
-    # VMAD — a converted actor script relocated onto this placed reference so a
-    # GetVMScriptVariable package condition (which reads the property off the ref
-    # named in its param1, not the base actor) can pass and the quest package can
-    # win (see object_scripts._relocate_actor_scripts_to_refs). Skyrim order:
-    # EDID VMAD NAME ...
-    from ..object_scripts import get_object_vmad
+    from ..base.object_scripts import get_object_vmad
     vmad = get_object_vmad(get_formid(rec, 'FormID'))
     if vmad:
         subs += vmad

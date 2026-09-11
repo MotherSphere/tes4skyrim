@@ -18,7 +18,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from tes5_import.text_reader import parse_export_file  # noqa: E402
+from tes5_import.base.text_reader import parse_export_file
 
 # TES4 condition function names (from wbDefinitionsTES4.pas, the ones that
 # matter for dialogue debugging; unknown indices print as Func<N>).
@@ -87,8 +87,6 @@ def build_fid_index(export_dir: Path) -> dict:
     """FormID(hex str) -> 'EDID (SIG)' from every export file present."""
     idx = {}
     for txt in export_dir.glob('*.txt'):
-        if txt.name in ('FormID_Mapping.txt',):
-            continue
         try:
             for rec in parse_export_file(str(txt)):
                 fid = rec.get('FormID')

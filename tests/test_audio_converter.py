@@ -232,7 +232,7 @@ def test_pack_fuz_layout():
 
 def test_load_lip_text_roundtrip(tmp_path):
     """The importer's liptext writer output parses back, escapes intact."""
-    from tes5_import.import_main import _write_lip_text
+    from tes5_import.pipeline_finalize import _write_lip_text
     texts = {(0x00A1B2, 1): 'Attack! I will tear you apart!',
              (0x00A1B2, 2): 'Line with\nnewline and\ttab and \\backslash',
              (0x123456, 1): 'Plain line.'}

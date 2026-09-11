@@ -38,7 +38,7 @@ import struct
 import sys
 from collections import defaultdict
 
-from tes5_import.tes5_reader import walk
+from tes5_import.base.tes5_reader import walk
 
 # Creation Kit rejects an exterior cell whose |X| or |Y| exceeds this and tries
 # to DELETE it during "Initializing References" (the compare is literally

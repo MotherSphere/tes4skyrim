@@ -24,11 +24,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tes5_import.text_reader import (parse_export_directory,
+from tes5_import.base.text_reader import (parse_export_directory,
                                       group_records_by_type,
                                       set_formid_index_offset)
-from tes5_import import pgrd_to_navm
-from tes5_import.navm_edge_links import build_edge_links, NavMeshView, _extract_nvnm, SEAM_BAND
+from tes5_import.navmesh import from_pgrd as pgrd_to_navm
+from tes5_import.navmesh.edge_links import build_edge_links, NavMeshView, extract_nvnm, SEAM_BAND
 
 _CELL = 4096.0
 
@@ -129,7 +129,7 @@ def main():
                   f"(intercell {len(ic)}/{raw_ic})")
             continue
         navm_cache[fid] = (navm_bytes, meta)
-        blob, _, _ = _extract_nvnm(navm_bytes)
+        blob, _, _ = extract_nvnm(navm_bytes)
         view = NavMeshView(fid, blob)
         sb = _seam_border_counts(view)
         print(f"  grid({gx},{gy}) fid={fid:#x}: {len(view.verts)}v "
@@ -155,7 +155,7 @@ def main():
     link_pairs = set()
     for f, (nb, meta) in navm_cache.items():
         grid_of[f] = (meta.get('grid_x'), meta.get('grid_y'))
-        blob, _, _ = _extract_nvnm(nb)
+        blob, _, _ = extract_nvnm(nb)
         view = NavMeshView(f, blob)
         for typ, other, _tri in view.links:
             if other in parent:

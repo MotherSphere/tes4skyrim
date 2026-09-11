@@ -78,8 +78,8 @@ _REPO_ROOT = os.path.dirname(_TOOLS_DIR)
 sys.path.insert(0, _REPO_ROOT)
 sys.path.insert(0, _TOOLS_DIR)
 
-import tools.esm.tes5_esm_reader as t5r  # noqa: E402
-from tes5_import.writer import (  # noqa: E402
+import tools.esm.tes5_esm_reader as t5r
+from tes5_import.base.writer import (
     FORM_VERSION_SSE,
     HEDR_VERSION_SSE,
     pack_record,

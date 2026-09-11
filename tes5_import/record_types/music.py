@@ -27,8 +27,8 @@ Vanilla census (Skyrim.esm, 258 MUST / 50 MUSC) drove the shape:
 import json
 import struct
 
-from ..tes5_reader import records
-from ..writer import pack_record, pack_string_subrecord, pack_subrecord
+from ..base.tes5_reader import records
+from ..base.writer import pack_record, pack_string_subrecord, pack_subrecord
 
 # CNAM track types (xEdit wbDefinitionsTES5.pas:7203).  These are hashes, not
 # an ordinal enum -- writing 0/1/2 here produces a track the engine ignores.

@@ -26,7 +26,7 @@ from collections import Counter, defaultdict
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _ROOT)
-from tools.esm.tes5_esm_reader import read_tes5_file  # noqa: E402
+from tools.esm.tes5_esm_reader import read_tes5_file
 
 DEFAULT = os.path.join('output', 'Oblivion.esm', 'Oblivion.esm')
 BAD_FSTS = {0x00024237, 0x00024238}
@@ -161,7 +161,7 @@ def main():
         if s.get('DATA') and len(s['DATA'][0]) >= 0x4C:
             mgef_proj[r.form_id] = struct.unpack_from(
                 '<I', s['DATA'][0], 0x48)[0]
-    from tes5_import.vanilla_mgef_data import VANILLA_MGEF_DATA
+    from tes5_import.generated.vanilla_mgef_data import VANILLA_MGEF_DATA
     for fid, (_e, hexdata) in VANILLA_MGEF_DATA.items():
         mgef_proj[fid] = struct.unpack_from(
             '<I', bytes.fromhex(hexdata), 0x48)[0]

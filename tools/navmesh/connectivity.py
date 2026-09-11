@@ -33,9 +33,9 @@ import struct
 import sys
 from collections import Counter
 
-from tes5_import.tes5_reader import REC_HDR
-from tes5_import.tes5_reader import records as reader_records
-from tes5_import.tes5_reader import subrecords as reader_subrecords
+from tes5_import.base.tes5_reader import REC_HDR
+from tes5_import.base.tes5_reader import records as reader_records
+from tes5_import.base.tes5_reader import subrecords as reader_subrecords
 
 EDGE_LINK_SIZE = 10          # Type U32 + Navmesh U32 + Triangle S16
 DOOR_TRI_SIZE = 10           # Triangle S16 + CRC U32 + Door FormID U32

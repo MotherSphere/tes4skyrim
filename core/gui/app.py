@@ -140,9 +140,6 @@ def style_titlebar(root) -> None:
 
 DND_AVAILABLE = False
 
-#: Plugins shown before the import picker gets its own scrolling viewport.
-PICKER_MAX_ROWS = 8
-
 
 def make_root():
     """The Tk root, drag-and-drop capable when tkinterdnd2 is installed.

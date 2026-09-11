@@ -1,6 +1,6 @@
 # asset_convert/character/facegen_tri.py - faces, skin tone and tints
 
-**Code:** `asset_convert/character/facegen_egt.py`, `tes5_import/npc_face_mapper.py`, `tests/test_import.py`
+**Code:** `asset_convert/character/facegen_egt.py`, `tes5_import/actors/npc_face_mapper.py`, `tests/test_import.py`
 
 ## Contents
 
@@ -17,7 +17,7 @@
 
 How a converted NPC gets its skin color, why the old approach was wrong, and
 the measurements that settle it. Implemented in
-`tes5_import/npc_face_mapper.py` (`load_race_skin_tones`, `_pick_skin_tone`)
+`tes5_import/actors/npc_face_mapper.py` (`load_race_skin_tones`, `_pick_skin_tone`)
 and `asset_convert/character/facegen_egt.py`.
 
 ## The symptom

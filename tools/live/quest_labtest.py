@@ -47,7 +47,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 sys.path.insert(0, str(ROOT))
 
-from tools.live.game_bridge import Bridge, BridgeError  # noqa: E402
+from tools.live.game_bridge import Bridge, BridgeError
 
 STATE = ROOT / 'temp' / 'labtest_state.json'
 
@@ -145,7 +145,7 @@ def find_quest(plugin: str, quest: str) -> dict:
 def decode_condition(raw_hex: str) -> dict | None:
     """Decode one 24-byte TES4 CTDA blob.
 
-    Layout (same as tes5_import/dialog_conditions.py, verified live):
+    Layout (same as tes5_import/base/conditions.py, verified live):
         [0]   type/flags   [4:8] comparison float
         [8:10] function u16 [12:16] param1 u32  [16:20] param2 u32
     """

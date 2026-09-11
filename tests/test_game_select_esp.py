@@ -25,7 +25,7 @@ from tools.release.make_game_select_esp import (BUTTONS, FID_MESG, FID_QUST, FID
                                         FUNC_GET_GLOBAL_VALUE, SCRIPT_NAME,
                                         MQ101_SCRIPT_NAME, build_plugin,
                                         _skip_script_entry)
-from tes5_import.tes5_reader import records
+from tes5_import.base.tes5_reader import records
 
 
 def _parse(data):

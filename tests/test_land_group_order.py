@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import.overrides import emit_nested_overrides
+from tes5_import.overrides.nested import emit_nested_overrides
 
 
 def _rec(sig, fid, payload=b''):

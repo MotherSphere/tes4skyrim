@@ -46,8 +46,7 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Reference RecordFlags. 0x400/0x800 are read back out of the pipeline's own
-# writers (tes5_import/import_main.py uses 0x400 for Persistent throughout).
+#: Reference RecordFlags, mirroring what tes5_import/pipeline.py writes.
 FLAG_PERSISTENT = 0x00000400
 FLAG_DISABLED = 0x00000800
 

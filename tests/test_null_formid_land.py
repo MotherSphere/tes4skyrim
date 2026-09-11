@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import.import_main import _repair_null_land_formids
+from tes5_import.pipeline import _repair_null_land_formids
 
 
 class TestNullFormIdDedup:

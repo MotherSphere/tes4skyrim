@@ -12,9 +12,9 @@ See: docs/commentary/tes5_import_actors.md
 import re
 import struct
 
-from ..constants import (DEFAULT_RACE, RACE_MAP, TES4_SKILL_TO_TES5,
+from ..base.constants import (DEFAULT_RACE, RACE_MAP, TES4_SKILL_TO_TES5,
                          TES5_SKILL_ORDER)
-from ..skyrim_overrides import (ATTRIBUTE_SKILL_MAP, TES4_RACE_FID_TO_EDID,
+from ..base.equivalents import (ATTRIBUTE_SKILL_MAP, TES4_RACE_FID_TO_EDID,
                                 VOICE_TYPE_MAP)
 from .actors_falloutnv import aidt_tiers
 from .common import (

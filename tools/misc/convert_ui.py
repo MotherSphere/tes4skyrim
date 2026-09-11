@@ -41,10 +41,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from asset_convert.ui import ui_cursor                      # noqa: E402
-from asset_convert.ui import ui_menus                       # noqa: E402
-from asset_convert.sources.bsa_extract import read_bsa_files     # noqa: E402
-from output_layout import finished_dir                   # noqa: E402
+from asset_convert.ui import ui_cursor
+from asset_convert.ui import ui_menus
+from asset_convert.sources.bsa_extract import read_bsa_files
+from output_layout import finished_dir
 
 MOD_NAME = "Oblivion UI"
 MESSAGE_BOX_SWF = r'interface\messagebox.swf'

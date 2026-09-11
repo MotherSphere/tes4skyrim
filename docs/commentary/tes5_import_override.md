@@ -1,6 +1,6 @@
-# tes5_import/overrides.py - plugins with masters
+# tes5_import/overrides/nested.py - plugins with masters
 
-**Code:** `tes5_import/export_diff.py`, `tes5_import/master_manifest.py`, `tes5_import/override_builder.py`, `tes5_import/override_merge.py`
+**Code:** `tes5_import/overrides/diff.py`, `tes5_import/overrides/manifest.py`, `tes5_import/overrides/builder.py`, `tes5_import/overrides/master_index.py`
 
 ## Contents
 
@@ -13,6 +13,7 @@
 - [A PGRD is never an override: it converts to a NEW NAVM](#pgrd-never-override-converts-new)
 - [Deleting a master's record: the three shapes](#deleting-masters-record-three-shapes)
 - [A quest-owned package must never be in an NPC's PKID list](#quest-owned-package-must-never)
+- [The nested-override emission passes](#nested-override-emission-passes)
 
 Linked from [CLAUDE.md](../../CLAUDE.md).
 
@@ -962,3 +963,36 @@ Measured one-per-process on `output/Oblivion.esm`, `MasterIndex` costs
 itself is **0.46s** against a 0.36s floor, so the reader is not where that
 goes: it is the caller's own per-record work, and it buys a scan that reads
 XXXX payloads correctly and cannot leak a parent id.
+
+## The nested-override emission passes
+<a id="nested-override-emission-passes"></a>
+
+`emit_nested_overrides` runs five ordered passes over `by_path`, split into
+`_sort_land_first`, `_build_emitted_at` and `_emit_paths`. **The split is
+mechanical: every pass keeps the iteration order, sort key and dict insertion
+order it had, because those decide emission order and FormID allocation.**
+
+- **Bucketing.** Records with no known nesting are counted as orphans and
+  skipped rather than emitted flat, where the engine would never index them.
+  `by_path`'s insertion order comes from the caller's record order and feeds
+  the top-level `sorted({p[0] for p in by_path})` walk.
+- **`_sort_land_first`.** LAND leads every type-9 group — see
+  [LAND must be first](#land-first-in-type-9) for the 15,564/15,564 census and
+  the Tamriel (-7,-32) symptom. The sort is **stable**: only the LAND moves,
+  every other body keeps its relative order.
+- **`_build_emitted_at`.** A record already being emitted at a path serves as
+  its own anchor, so it is never pulled from the master a second time. The same
+  pass backfills the master's LAND into a type-9 group this plugin emits
+  without one — measured on ElsweyrAnequina.esp, **8 cells** emitted a type-9
+  group holding one REFR or ACHR and no LAND and rendered as blank ground with
+  the references still floating. The backfill `insert(0, ...)`s so the LAND
+  still leads. Full reasoning: [unchanged LAND shadowing](#unchanged-land-shadowing).
+- **`_emit_paths`.** The anchoring walk. A record's own children group must
+  directly FOLLOW that record (`CELL, GRUP(6, cell), CELL, GRUP(6, cell)`), so
+  the records and their owned groups are interleaved rather than emitted in two
+  runs. An owned group whose owner this plugin does not override gets that
+  owner's bytes pulled from the master immediately before the group; each such
+  FormID is recorded in `anchored_fids` so the WRLD builder, which runs
+  afterwards, cannot anchor it again — see [anchor once](#anchor-once).
+  ElsweyrAnequina wrote Tamriel's WRLD twice for exactly that reason (xEdit:
+  "Skipped Load: Duplicate FormID [0100003C]").

@@ -7,18 +7,7 @@ import re
 # Constants
 # ===========================================================================
 
-# Papyrus base class for a TES4 script attached to the PLAYER BASE record
-# (NPC_ 0x00000007).  Oblivion let a plugin script the player that way -- Nehrim
-# puts its whole XP/level/gold system AND `SetStage MQ00 1` (the intro's only
-# starter) there.  Skyrim cannot: the acting player is PlayerRef 0x14, whose
-# signature is PLYR (not ACHR, so a plugin cannot author an override of it), and
-# its base is Skyrim's own Player 0x07 -- never the converted plugin's shifted
-# copy, which no actor ever instantiates.  Vanilla's mechanism for "code that
-# runs on the player forever" is a start-game-enabled quest holding a reference
-# alias forced to 0x14 (71 vanilla QUSTs do exactly this); the script rides that
-# alias.  `Self` there is the ReferenceAlias, so every implicit-self call is
-# routed through GetReference()/GetActorReference() -- see
-# ScriptConverter._implicit_self and tes5_import.object_scripts.
+#: TES4 player-base script rides a QUST alias. See: docs/commentary/script_convert.md#player-base-script-needs-quest-alias
 PLAYER_ALIAS_EXTENDS = 'ReferenceAlias'
 
 from script_convert.reserved_names import papyrus_reserved
@@ -603,9 +592,10 @@ SERVICE_MENU_CALL = {
 # ===========================================================================
 
 #: Moved to resolve.py; re-exported so the docs/ §5 boundary is unchanged.
-from script_convert.resolve import (  # noqa: E402
-    resolve_property_formid, _digit_stripped_formid,
+from script_convert.resolve import (
+    resolve_property_formid, digit_stripped_formid,
 )
+__all__ = ['resolve_property_formid', 'digit_stripped_formid']
 
 
 #: TES4 block types whose body becomes the OnUpdate poll.

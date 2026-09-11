@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import.writer import _merge_owned_groups, pack_group, pack_record
+from tes5_import.base.writer import _merge_owned_groups, pack_group, pack_record
 
 
 def _grup(gtype, label, body):

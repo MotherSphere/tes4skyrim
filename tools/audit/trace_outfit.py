@@ -1,6 +1,6 @@
 """Trace how an actor's TES4 inventory is split into OTFT (worn) + CNTO (carried).
 
-Reuses the real tes5_import.outfits logic so what it prints is exactly what the
+Reuses the real tes5_import.actors.outfits logic so what it prints is exactly what the
 converter does. Given an export dir and an actor EditorID (or FormID), it shows
 every inventory line classified as outfit/carried, the biped slots each wearable
 claims, and — crucially — which wearables lost a slot-conflict and got demoted
@@ -25,9 +25,9 @@ import sys
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(
     _os.path.abspath(__file__)))))
-from tes5_import.text_reader import parse_export_directory
-from tes5_import import outfits
-from tes5_import.text_reader import get_int
+from tes5_import.base.text_reader import parse_export_directory
+from tes5_import.actors import outfits as outfits
+from tes5_import.base.text_reader import get_int
 
 
 def _load_master_export(export_dir: str) -> dict:
@@ -48,14 +48,11 @@ def _load_master_export(export_dir: str) -> dict:
                 _, _, val = line.partition('=')
                 if val.strip():
                     names.append(val.strip())
-    # Masters resolve through the registry: an imported mod's plugins live
-    # inside their mod's folder, so the parent of a record dir is not the
-    # export root and a plain join finds nothing.
-    from tes5_import.overrides import _export_root, _master_export_dir
-    root = _export_root(export_dir)
+    from tes5_import.overrides.nested import export_root, master_export_dir
+    root = export_root(export_dir)
     out = {}
     for name in names:
-        mdir = _master_export_dir(root, name)
+        mdir = master_export_dir(root, name)
         if not os.path.isdir(mdir):
             print(f'  WARNING: master export not found ({mdir}); '
                   f'its items cannot be classified')

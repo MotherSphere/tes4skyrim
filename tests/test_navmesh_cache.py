@@ -21,14 +21,13 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asset_convert.collision.collision_extract as ce
-from tes5_import import import_main as im
 from tes5_import.navmesh import pool as navm_pool
-from tes5_import.pgrd_to_navm import _geom_hash
+from tes5_import.navmesh.from_pgrd import geom_hash
 from tools.navmesh import navmesh_cache as nc
 from tools.navmesh import navmesh_cache_hook as hook
 from tools.navmesh import navmesh_adopt as adopt
-from tes5_import import navm_verify
-from tes5_import.pgrd_to_navm import geom_equal, geom_quantize
+from tes5_import.navmesh import cache_audit as navm_verify
+from tes5_import.navmesh.from_pgrd import geom_equal, geom_quantize
 
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -105,12 +104,12 @@ def test_one_changed_mesh_spares_other_cells(monkeypatch):
     cell_a = [_refr(0x111111)]
     cell_b = [_refr(0x222222)]
 
-    a1 = _geom_hash(refr_recs=cell_a, base_model_by_fid=models, **HASH_ARGS)
-    b1 = _geom_hash(refr_recs=cell_b, base_model_by_fid=models, **HASH_ARGS)
+    a1 = geom_hash(refr_recs=cell_a, base_model_by_fid=models, **HASH_ARGS)
+    b1 = geom_hash(refr_recs=cell_b, base_model_by_fid=models, **HASH_ARGS)
 
     _fake_collision(monkeypatch, {'a.nif': _soup(99), 'b.nif': _soup(2)})
-    a2 = _geom_hash(refr_recs=cell_a, base_model_by_fid=models, **HASH_ARGS)
-    b2 = _geom_hash(refr_recs=cell_b, base_model_by_fid=models, **HASH_ARGS)
+    a2 = geom_hash(refr_recs=cell_a, base_model_by_fid=models, **HASH_ARGS)
+    b2 = geom_hash(refr_recs=cell_b, base_model_by_fid=models, **HASH_ARGS)
 
     assert a1 != a2, 'cell placing the changed mesh must miss'
     assert b1 == b2, 'cell placing only unchanged meshes must still hit'
@@ -125,9 +124,9 @@ def test_geom_hash_is_refr_order_independent_for_collision(monkeypatch):
     _fake_collision(monkeypatch, {'a.nif': _soup(1), 'b.nif': _soup(2)})
     models = {0x111111: 'a.nif', 0x222222: 'b.nif'}
     refrs = [_refr(0x111111), _refr(0x222222)]
-    h1 = _geom_hash(refr_recs=refrs, base_model_by_fid=models, **HASH_ARGS)
+    h1 = geom_hash(refr_recs=refrs, base_model_by_fid=models, **HASH_ARGS)
     _fake_collision(monkeypatch, {'b.nif': _soup(2), 'a.nif': _soup(1)})
-    h2 = _geom_hash(refr_recs=refrs, base_model_by_fid=models, **HASH_ARGS)
+    h2 = geom_hash(refr_recs=refrs, base_model_by_fid=models, **HASH_ARGS)
     assert h1 == h2
 
 
@@ -178,16 +177,18 @@ def test_content_hash_ignores_key_order(monkeypatch):
 def test_gate_watches_every_tag_source():
     """Every file feeding the tag must be gated, or a push ships a dead cache.
 
-    navmesh.pool.navmesh_geom_cache hashes tes5_import/navmesh/*.py plus
-    pgrd_to_navm.py; the hook's NAVMESH_PATHS must cover exactly those.
+    navmesh.pool.navmesh_geom_cache hashes tes5_import/navmesh/*.py minus
+    pool._TAG_EXCLUDE; the hook must gate exactly that set.
     """
     watched = set(hook.NAVMESH_PATHS)
-    assert 'tes5_import/pgrd_to_navm.py' in watched
     assert 'tes5_import/navmesh/' in watched
-    # Anything new in the navmesh package is covered by the directory prefix.
     for src in glob.glob(os.path.join(REPO, 'tes5_import', 'navmesh', '*.py')):
         rel = os.path.relpath(src, REPO).replace('\\', '/')
+        if os.path.basename(src) in navm_pool._TAG_EXCLUDE:
+            assert hook.touches_navmesh([rel]) == [], rel
+            continue
         assert any(rel.startswith(w) for w in watched), rel
+        assert hook.touches_navmesh([rel]), rel
 
 
 def test_gate_covers_cache_defining_modules():
@@ -199,17 +200,17 @@ def test_gate_covers_cache_defining_modules():
     assert 'tes5_import/navmesh/' in hook.NAVMESH_PATHS
     assert 'collision_digest' in \
         hook.NAVMESH_FUNCS['asset_convert/collision/collision_extract.py']
-    assert 'tes5_import/import_main.py' not in hook.NAVMESH_FUNCS
+    assert 'tes5_import/pipeline.py' not in hook.NAVMESH_FUNCS
 
 
 def test_gate_ignores_post_cache_stitching():
     """navm_edge_links runs AFTER the cache, so it must not gate a push."""
-    assert hook.touches_navmesh(['tes5_import/navm_edge_links.py']) == []
+    assert hook.touches_navmesh(['tes5_import/navmesh/edge_links.py']) == []
 
 
 def test_gate_matches_expected_paths():
     assert hook.touches_navmesh(['tes5_import/navmesh/corridor.py'])
-    assert hook.touches_navmesh(['tes5_import/pgrd_to_navm.py'])
+    assert hook.touches_navmesh(['tes5_import/navmesh/from_pgrd.py'])
     assert hook.touches_navmesh(['docs/x.md', 'tools/y.py']) == []
 
 

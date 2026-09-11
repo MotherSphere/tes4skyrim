@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tes5_import import overrides as OV
+from tes5_import.overrides import nested as OV
 
 
 class _Ctx:
@@ -159,9 +159,7 @@ def test_land_cache_is_reused(monkeypatch):
     monkeypatch.setattr('tes5_import.record_types.world.convert_LAND', _boom)
 
     ctx = _Ctx(parent_path, parent_out)
-    # text_reader.get_formid shifts the index byte by the module offset, so key
-    # the cache with the same value _convert_land will look up.
-    from tes5_import.text_reader import get_formid
+    from tes5_import.base.text_reader import get_formid
     rec = {'Signature': 'LAND', 'FormID': '0202B026',
            'ParentCELL': '0102E086', 'ParentWRLD': '0000003C'}
     ctx.land_cache = {get_formid(rec, 'FormID'): (True, _land_record(0x0302B026))}

@@ -303,7 +303,7 @@ def collision_from_data(data) -> Optional[dict]:
 def bounds_from_data(data):
     """AABB over every NiTriShapeData vertex, as an OBND 6-tuple, or None.
 
-    Lives here rather than in tes5_import.mesh_bounds so that one parsed NIF can
+    Lives here rather than in tes5_import.base.mesh_bounds so that one parsed NIF can
     produce BOTH the bounds and the collision soup — see scan_mesh_data.
     """
     import math

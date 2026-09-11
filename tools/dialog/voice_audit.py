@@ -2,6 +2,10 @@
 """
 Audit ESM -> voice-file mappings for the converted plugin.
 
+The naming rule is IMPORTED from the converter, never mirrored here: a
+local copy silently drifted from the converter's and made this audit
+agree with the very bug it was written to catch.
+
 For every INFO in the built TES5 ESM, recomputes the voice filename the
 engine will look up at runtime (Sound\\Voice\\<plugin>\\<VTYP>\\
 <questEDID_topicEDID truncated>_<fid8 lo24>_<respnum>.fuz|.xwm) and checks it
@@ -42,10 +46,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from tools.esm.tes5_esm_reader import (read_tes5_file, _get, _all, _zstring,
                                    master_edids)
-# Import the naming rule rather than mirroring it — a local copy silently
-# drifted from the converter's and made this audit agree with a bug it was
-# supposed to catch.
-from tes5_import.dialog_converter import voice_file_prefix
+from tes5_import.dialogue.converter import voice_file_prefix
 
 FUNC_GET_IS_VOICE_TYPE = 426
 FUNC_GET_IS_ID = 72

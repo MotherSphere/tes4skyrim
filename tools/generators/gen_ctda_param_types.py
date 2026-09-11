@@ -11,7 +11,7 @@ became FormID 0x01000020 and crashed the dialogue menu).
 Usage:
     python tools/generators/gen_ctda_param_types.py \\
         ../tesconversion/references/xEdit/Core/wbDefinitionsTES5.pas \\
-        -o tes5_import/ctda_param_types.py
+        -o tes5_import/generated/ctda_param_types.py
 
     # inspect a single function instead of generating
     python tools/generators/gen_ctda_param_types.py <pas> --func 277

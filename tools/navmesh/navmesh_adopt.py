@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 
 from tools.navmesh import navmesh_cache as nc
-from tes5_import import navm_verify
+from tes5_import.navmesh import cache_audit as navm_verify
 
 ADOPT_OK = 0
 ADOPT_REFUSED = 1
@@ -95,7 +95,7 @@ def load_plugin(plugin: str, offset: int = 1):
     """
     from tools.navmesh.job_trace import _load
     from output_layout import assets_for
-    from tes5_import import navm_worker
+    from tes5_import.navmesh import worker as navm_worker
     export_dir = os.path.join('export', plugin)
     im, _bt, door_fids, base_model_by_fid, jobs = _load(export_dir, offset)
     collision = str(assets_for(export_dir) / 'collision_cache.bin')
@@ -115,8 +115,8 @@ def prove(jobs: list, geom_cache, sample: int) -> tuple:
     tag change invalidated, so requiring it to match would refuse every
     adoption before comparing a single vertex.
     """
-    from tes5_import import navm_worker
-    from tes5_import.pgrd_to_navm import cached_geometry, geom_equal
+    from tes5_import.navmesh import worker as navm_worker
+    from tes5_import.navmesh.from_pgrd import cached_geometry, geom_equal
     picked = list(jobs)
     navm_verify.mark_jobs(picked, sample)
     checked, bad = 0, []
@@ -146,8 +146,8 @@ def commit(jobs: list, cache_dir: str) -> tuple:
 
     See: docs/commentary/tes5_import_navmesh.md#verifying-a-cache-against-fresh-geometry
     """
-    from tes5_import import navm_worker
-    from tes5_import.pgrd_to_navm import cell_geom_key
+    from tes5_import.navmesh import worker as navm_worker
+    from tes5_import.navmesh.from_pgrd import cell_geom_key
     by_key = {j['key']: j for j in jobs}
     done = skipped = 0
     for path in entry_paths(cache_dir):

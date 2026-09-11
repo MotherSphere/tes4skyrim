@@ -36,7 +36,7 @@ Sources: `references/Skyrim.esm/RACE.txt` (84 non-vampire/child races) and every
 > covers "the many formids that could possibly use one race".
 
 The table is implemented as data in
-[vanilla_creature_swap.py](../../tes5_import/vanilla_creature_swap.py); inspect
+[vanilla_creature_swap.py](../../tes5_import/actors/vanilla_creature_swap.py); inspect
 coverage with `tools/creature/creature_swap_report.py`. Every Skyrim.esm FormID below was
 verified against the dump.
 

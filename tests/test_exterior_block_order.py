@@ -30,7 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tes5_import.navmesh.pool import grid_sort_key as _grid_sort_key
-from tes5_import.overrides import _group_sort_key
+from tes5_import.overrides.nested import _group_sort_key
 
 
 def _label(x, y):

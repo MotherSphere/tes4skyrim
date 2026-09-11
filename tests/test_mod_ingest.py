@@ -970,7 +970,7 @@ def test_a_master_inside_a_group_folder_still_resolves(tmp_path):
     silent-failure mode.
     """
     import os
-    from tes5_import.overrides import _export_root, _master_export_dir
+    from tes5_import.overrides.nested import export_root, master_export_dir
 
     # A two-plugin mod, so its members nest inside the group folder.
     entries = _mod_entries('TWMP/Data/')
@@ -988,9 +988,9 @@ def test_a_master_inside_a_group_folder_still_resolves(tmp_path):
     # must be found.
     for start in (export / 'Oblivion.esm',
                   source_registry.record_dir(export, 'MapMarkers.esp')):
-        root = _export_root(str(start))
+        root = export_root(str(start))
         assert os.path.isfile(os.path.join(root, 'sources.json')), start
-        found = _master_export_dir(root, 'MyMod.esp')
+        found = master_export_dir(root, 'MyMod.esp')
         assert os.path.isdir(found), f'{start}: master not found at {found}'
 
 

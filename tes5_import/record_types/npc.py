@@ -7,12 +7,12 @@ See: docs/commentary/tes5_import_actors.md
 
 import struct
 
-from ..constants import TES5_SKILL_ORDER
-from ..creature_races import TES5_HEALTH_LEVEL_BONUS
-from ..npc_face_mapper import build_face_tail_subs, build_pnam_subs
-from ..outfits import split_inventory
-from ..packages import CSTY_DEFAULT, DPLT_NPC_LIST, npc_packages
-from ..skyrim_overrides import map_hair_color
+from ..base.constants import TES5_SKILL_ORDER
+from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
+from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
+from ..actors.outfits import split_inventory
+from ..packages.actor_wiring import CSTY_DEFAULT, DPLT_NPC_LIST, npc_packages
+from ..base.equivalents import map_hair_color
 from .actor_common import (GOLD001_FID, NAM5_UNKNOWN, SOUND_LEVEL_NORMAL,
                            build_aidt, build_outfit, get_origin_faction_fid,
                            get_trainer_class_fid, get_trainer_faction_fid,
@@ -290,7 +290,7 @@ def convert_NPC_(rec: dict, writer=None) -> bytes:
     if edid:
         subs += pack_string_subrecord('EDID', edid)
 
-    from ..object_scripts import get_object_vmad
+    from ..base.object_scripts import get_object_vmad
     subs += get_object_vmad(get_formid(rec, 'FormID'))
     subs += pack_obnd(-12, -12, 0, 12, 12, 60)
     subs += pack_subrecord('ACBS', npc_acbs(rec))
@@ -465,7 +465,7 @@ def convert_HAIR(rec: dict, *, writer=None) -> bytes:
                                              output_model_path,
                                              output_tri_path, variant_edid)
     from asset_convert.character.head_fit import fit_race_for_hair
-    from ..hair_variants import hair_buckets_for, hair_has_tri
+    from ..actors.hair_variants import hair_buckets_for, hair_has_tri
 
     model = get_str(rec, 'Model.MODL')
     source_fid = get_formid(rec, 'FormID')

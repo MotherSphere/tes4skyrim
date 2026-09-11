@@ -19,7 +19,7 @@ import struct
 
 import pytest
 
-from tes5_import.dialog_conditions import (
+from tes5_import.base.conditions import (
     CTDA_OR,
     FUNC_GET_IS_VOICE_TYPE,
     FUNC_GET_QUEST_RUNNING,
@@ -31,26 +31,11 @@ from tes5_import.dialog_conditions import (
     needs_origin_gate,
     read_getisid_fids,
 )
-from tes5_import.dialog_converter import (
-    DIAL_TYPE_COMBAT,
-    DIAL_TYPE_CONVERSATION,
-    DIAL_TYPE_DETECTION,
-    DIAL_TYPE_MISC,
-    DIAL_TYPE_PERSUASION,
-    DIAL_TYPE_SERVICE,
-    DIAL_TYPE_TOPIC,
-    _EDID_SUBTYPE,
-    build_dialog_groups,
-    classify_topic,
-    convert_DIAL,
-    convert_INFO,
-    make_dlbr,
-    make_dlvw,
-    should_skip_dial,
-)
-from tes5_import.quest_converter import convert_QUST
-from tes5_import.tes5_reader import records
-from tes5_import.text_reader import set_formid_index_offset
+from tes5_import.dialogue.converter import DIAL_TYPE_COMBAT, DIAL_TYPE_CONVERSATION, DIAL_TYPE_DETECTION, DIAL_TYPE_MISC, DIAL_TYPE_PERSUASION, DIAL_TYPE_SERVICE, DIAL_TYPE_TOPIC, _EDID_SUBTYPE, classify_topic, convert_DIAL, convert_INFO, make_dlbr, make_dlvw, should_skip_dial
+from tes5_import.dialogue.groups import build_dialog_groups
+from tes5_import.dialogue.quest import convert_QUST
+from tes5_import.base.tes5_reader import records
+from tes5_import.base.text_reader import set_formid_index_offset
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +272,7 @@ class TestCTDAConversion:
 
     def test_formid_param_table_matches_xedit(self):
         """Spot-check the generated table against xEdit's TES5 definitions."""
-        from tes5_import.ctda_param_types import CTDA_FORMID_PARAMS
+        from tes5_import.generated.ctda_param_types import CTDA_FORMID_PARAMS
         assert CTDA_FORMID_PARAMS[72] == frozenset({1})      # GetIsID
         assert CTDA_FORMID_PARAMS[59] == frozenset({1})      # GetStageDone
         assert CTDA_FORMID_PARAMS[60] == frozenset({1, 2})   # GetFactionRankDiff
@@ -307,8 +292,8 @@ class TestCTDAConversion:
         CTDA removed.  Without it, any miss in the choice chain hid the
         Emperor's whole post-birthsign topic (all 13 INFOs failed together)
         and the quest soft-locked at stage 44."""
-        from tes5_import.dialog_converter import _strip_chargen_choice_gate
-        from tes5_import.writer import (pack_record, pack_subrecord,
+        from tes5_import.dialogue.groups import _strip_chargen_choice_gate
+        from tes5_import.base.writer import (pack_record, pack_subrecord,
                                         pack_string_subrecord)
         glob_fid = 0x0118E177
         gate = struct.pack('<B3xIHHIIII I', 0,
@@ -337,7 +322,7 @@ class TestCTDAConversion:
         registered, the condition becomes GetGlobalValue(<choice GLOB>) ==
         menu index + 1 — the same value the converted ShowBirthsignMenu
         writes on selection."""
-        from tes5_import.dialog_conditions import set_chargen_choice
+        from tes5_import.base.conditions import set_chargen_choice
         glob_fid = 0x0118E177
         set_chargen_choice({224: (glob_fid, {0x01FD93: 5})})
         try:
@@ -946,7 +931,7 @@ class TestQuestOwnership:
                 if lenQ > 10: Q, T = Q[:10], T[:15]
                 else:         T = T[:25 - lenQ]
         """
-        from tes5_import.dialog_converter import voice_file_prefix
+        from tes5_import.dialogue.converter import voice_file_prefix
         # <= 25 combined: used verbatim. The old quest[:10] cap mangled
         # these into mg04restor_/fgd00joinf_ so the audio was never found.
         assert voice_file_prefix('MG04Restore', 'MG04Choice1A') \
@@ -1103,7 +1088,7 @@ class TestAddTopicUnlocks:
         }
 
     def test_unlock_plan(self):
-        from tes5_import.dialog_unlocks import build_unlock_plan
+        from tes5_import.dialogue.unlocks import build_unlock_plan
         plan = build_unlock_plan(self._by_type())
         # ratsTOPIC gated (data list); stageTopic gated (stage script AddTopic);
         # choiceTopic NOT gated (only a TCLT target, never explicitly added);
@@ -1133,7 +1118,7 @@ class TestAddTopicUnlocks:
         the bark fires on first contact, so in Oblivion it's effectively
         visible immediately (Azzan's 'Join the Fighters Guild' via his FG-ad
         greeting). A gate only risks the fragment racing the topic menu."""
-        from tes5_import.dialog_unlocks import build_unlock_plan
+        from tes5_import.dialogue.unlocks import build_unlock_plan
         bt = self._by_type()
         # stageTopic is otherwise revealed only by the quest-stage script; give
         # it a bark revealer and drop the stage one so the bark is its sole
@@ -1156,7 +1141,7 @@ class TestAddTopicUnlocks:
         detached it from the join, desynchronising the menu.  So a topic with
         BOTH revealer kinds keeps its gate — the reveal is then explicit and
         idempotent from either side."""
-        from tes5_import.dialog_unlocks import build_unlock_plan
+        from tes5_import.dialogue.unlocks import build_unlock_plan
         # ratsTOPIC is already added by the `contract` conversation INFO.
         bt = self._with_greeting(self._by_type(), '000B0002')
         plan = build_unlock_plan(bt)
@@ -1171,7 +1156,7 @@ class TestAddTopicUnlocks:
         """A gated topic that is also a choice target keeps its gate but the
         TCLT-parent INFO becomes a revealer, so taking the choice unlocks it
         permanently (Oblivion: choices work regardless of added state)."""
-        from tes5_import.dialog_unlocks import build_unlock_plan
+        from tes5_import.dialogue.unlocks import build_unlock_plan
         bt = self._by_type()
         # make choiceTopic explicitly added by the stage script too
         bt['QUST'][0]['Stage[0].Log[0].ResultScript'] = \
@@ -1185,7 +1170,7 @@ class TestAddTopicUnlocks:
         """A TCLT-target topic never explicitly added is choice-only in
         Oblivion — its branch must be Normal (DNAM=0), not Top-Level, or it
         leaks into the topic menu (e.g. Azzan's 'Yes. Sign me up.')."""
-        from tes5_import.dialog_unlocks import build_unlock_plan, \
+        from tes5_import.dialogue.unlocks import build_unlock_plan, \
             create_unlock_globals
         set_formid_index_offset(1)
         try:
@@ -1250,14 +1235,14 @@ class TestAddTopicUnlocks:
             set_formid_index_offset(0)
 
     def test_gates_and_revealer_vmads_in_output(self):
-        from tes5_import.dialog_unlocks import build_unlock_plan
-        from tes5_import.dialog_conditions import FUNC_GET_GLOBAL_VALUE
+        from tes5_import.dialogue.unlocks import build_unlock_plan
+        from tes5_import.base.conditions import FUNC_GET_GLOBAL_VALUE
         set_formid_index_offset(1)
         try:
             by_type = self._by_type()
             plan = build_unlock_plan(by_type)
             writer = _FakeWriter()
-            from tes5_import.dialog_unlocks import create_unlock_globals
+            from tes5_import.dialogue.unlocks import create_unlock_globals
             globals_map = create_unlock_globals(writer, plan)
             build_dialog_groups(by_type, writer, npc_to_vtyp={},
                                 unlock_plan=plan, unlock_globals=globals_map)
@@ -1394,7 +1379,7 @@ class TestPluginAuthoredRaceConditionsSurvive:
 
     def _params(self, race_fid: int) -> list:
         import struct
-        from tes5_import.dialog_conditions import convert_ctda_list_with_strings
+        from tes5_import.base.conditions import convert_ctda_list_with_strings
         rec = {'FormID': '010628F9', 'ConditionCount': '1',
                'Condition[0].Raw': self._race_ctda(race_fid)}
         out = convert_ctda_list_with_strings(rec, {}, 0x01000000)
@@ -1402,14 +1387,14 @@ class TestPluginAuthoredRaceConditionsSurvive:
 
     def test_plugin_authored_race_is_kept_not_dropped(self):
         """mwBMRieklingRace -> the same DEFAULT_RACE its NPCs converted to."""
-        from tes5_import.constants import DEFAULT_RACE
+        from tes5_import.base.constants import DEFAULT_RACE
         assert self._params(0x01A804D3) == [DEFAULT_RACE]
 
     def test_vanilla_race_keeps_its_own_skyrim_race(self):
         """WoodElf must NOT collapse onto the fallback -- that separation is
         what keeps the Riekling gate off Fargoth."""
-        from tes5_import.constants import DEFAULT_RACE
-        from tes5_import.skyrim_overrides import RACE_MAP
+        from tes5_import.base.constants import DEFAULT_RACE
+        from tes5_import.base.equivalents import RACE_MAP
         got = self._params(0x000223C8)           # WoodElf
         assert got == [RACE_MAP['WoodElf']]
         assert got != [DEFAULT_RACE]
@@ -1436,7 +1421,7 @@ class TestVmConditionsEvaluateLast:
                 + bytes(4)).hex()
 
     def _convert(self, raws):
-        from tes5_import.dialog_conditions import convert_ctda_list_with_strings
+        from tes5_import.base.conditions import convert_ctda_list_with_strings
         rec = {'FormID': '01000001', 'ConditionCount': str(len(raws))}
         for i, raw in enumerate(raws):
             rec[f'Condition[{i}].Raw'] = raw
@@ -1483,22 +1468,22 @@ class TestPlayerScriptQuest:
     never the converted plugin's shifted copy."""
 
     def _fake_plan(self, scripts):
-        from tes5_import import object_scripts
+        from tes5_import.base import object_scripts as object_scripts
         object_scripts._PLAYER_ALIAS_SCRIPTS.clear()
         object_scripts._PLAYER_ALIAS_SCRIPTS.extend(scripts)
 
     def test_no_quest_when_no_player_script(self):
-        from tes5_import.dialog_converter import _make_player_script_quest
+        from tes5_import.dialogue.converter import make_player_script_quest
         self._fake_plan([])
         writer = _FakeWriter()
-        assert _make_player_script_quest(writer) == 0
+        assert make_player_script_quest(writer) == 0
         assert writer.records == []
 
     def test_quest_is_sge_with_a_playerref_alias(self):
-        from tes5_import.dialog_converter import _make_player_script_quest
+        from tes5_import.dialogue.converter import make_player_script_quest
         self._fake_plan([('TES4_GlobalplayerScript', {})])
         writer = _FakeWriter()
-        fid = _make_player_script_quest(writer)
+        fid = make_player_script_quest(writer)
         assert fid
         sig, rec = writer.records[0]
         assert sig == 'QUST'
@@ -1516,10 +1501,10 @@ class TestPlayerScriptQuest:
     def test_subrecord_order_matches_vanilla(self):
         """EDID VMAD FULL DNAM — unanimous across all 912 vanilla QUSTs that
         carry a VMAD."""
-        from tes5_import.dialog_converter import _make_player_script_quest
+        from tes5_import.dialogue.converter import make_player_script_quest
         self._fake_plan([('TES4_GlobalplayerScript', {})])
         writer = _FakeWriter()
-        _make_player_script_quest(writer)
+        make_player_script_quest(writer)
         rec = writer.records[0][1]
         order = [rec[i:i + 4] for i in range(24, len(rec))
                  if rec[i:i + 4] in (b'EDID', b'VMAD', b'FULL', b'DNAM')]
@@ -1532,10 +1517,10 @@ class TestPlayerScriptQuest:
         import sys as _sys, os as _os
         _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..'))
         from tools.dialog.quest_walkthrough import parse_vmad, parse_qust_alias_scripts
-        from tes5_import.dialog_converter import _make_player_script_quest
+        from tes5_import.dialogue.converter import make_player_script_quest
         self._fake_plan([('TES4_GlobalplayerScript', {})])
         writer = _FakeWriter()
-        fid = _make_player_script_quest(writer)
+        make_player_script_quest(writer)
         vmad = _find_subrecord(writer.records[0][1], b'VMAD')
         top, tail = parse_vmad(vmad)
         assert top == []
@@ -1556,7 +1541,7 @@ class TestQuestFragmentPropertiesAllBind:
     """
 
     def _resolve(self, declared, well_known=None):
-        from tes5_import.quest_converter import _resolve_declared_properties
+        from tes5_import.dialogue.quest import _resolve_declared_properties
         return _resolve_declared_properties(declared, well_known)
 
     def test_player_binds_to_playerref(self):
@@ -1567,7 +1552,7 @@ class TestQuestFragmentPropertiesAllBind:
         assert self._resolve({'PlayerRef'}) == {'PlayerRef': 0x14}
 
     def test_engine_global_keeps_vanilla_formid(self):
-        from tes5_import.object_scripts import ENGINE_GLOBAL_FORMIDS
+        from tes5_import.base.object_scripts import ENGINE_GLOBAL_FORMIDS
         out = self._resolve({'GameHour'})
         assert out['GameHour'] == ENGINE_GLOBAL_FORMIDS['gamehour']
 
@@ -1664,7 +1649,7 @@ class TestNpcConversationChains:
         }
 
     def _plan(self, **kw):
-        from tes5_import.npc_conversations import build_conversation_plan
+        from tes5_import.dialogue.conversations import build_conversation_plan
         return build_conversation_plan(self._by_type(**kw),
                                        plugin_stem='Test')
 
@@ -1717,7 +1702,7 @@ class TestNpcConversationChains:
         assert any('unsupported gate' in why for _fid, why in plan['skipped'])
 
     def test_generated_psc_shape(self):
-        from tes5_import.npc_conversations import generate_driver_psc
+        from tes5_import.dialogue.conversations import generate_driver_psc
         plan = self._plan()
         psc = generate_driver_psc(plan, {'info:000AAA31': 3.0})
         assert psc.startswith('ScriptName TES4NPCConvTest extends Quest')
@@ -1738,7 +1723,7 @@ class TestNpcConversationChains:
         """Every Conv* property the psc declares must be bound by
         chain_property_bindings + the caller's T0 — name-for-name."""
         import re as _re
-        from tes5_import.npc_conversations import (chain_property_bindings,
+        from tes5_import.dialogue.conversations import (chain_property_bindings,
                                                    generate_driver_psc)
         plan = self._plan()
         chain = plan['chains'][0]
@@ -1752,7 +1737,7 @@ class TestNpcConversationChains:
     def test_overlapping_chains_are_mutually_exclusive(self):
         """Two heads opening the same authored talk must retire each other,
         or the whole conversation replays (MS91 Weebam-Na/Mazoga)."""
-        from tes5_import.npc_conversations import (build_conversation_plan,
+        from tes5_import.dialogue.conversations import (build_conversation_plan,
                                                    generate_driver_psc)
         by_type = self._by_type()
         second = self._info(0x000AAA33, self.HELLO_D, 'You wanted me?', [
@@ -1778,7 +1763,7 @@ class TestForceGreetOncePerDay:
         CGBaurusGreetPlayer re-fired forever and stalled CharacterGen 56.
         Vanilla ships 0x400 on 57 of its 302 ForceGreet-template packages,
         including quest-gated ones, so restoring it is vanilla-legal."""
-        from tes5_import.pack_converter import convert_PACK, PackContext
+        from tes5_import.packages.converter import convert_PACK, PackContext
         rec = {'Signature': 'PACK', 'FormID': '0002C2F1',
                'EditorID': 'CGBaurusGreetPlayer',
                'PKDT.Type': '0', 'PKDT.Flags': '5124',
@@ -1796,7 +1781,7 @@ class TestForceGreetOncePerDay:
     def test_non_forcegreet_quest_gated_still_strips_once_per_day(self):
         """The Renault fix must survive: an ordinary quest-gated package
         (UseItemAt/Travel) still loses the daily latch."""
-        from tes5_import.pack_converter import (convert_flags, T4_ONCE_PER_DAY,
+        from tes5_import.packages.converter import (convert_flags, T4_ONCE_PER_DAY,
                                                 T5_ONCE_PER_DAY)
         flags, _ = convert_flags(T4_ONCE_PER_DAY, 2, True, quest_gated=True)
         assert not (flags & T5_ONCE_PER_DAY)
@@ -1814,7 +1799,7 @@ class TestSaySpeakAsIdentityGate:
 
     Keyed on the TOPIC, never the NPC -- SEThadon is a real actor who speaks
     his own lines AND lends his identity to a marker-spoken shout.
-    See tes5_import/talking_activators.py.
+    See tes5_import/dialogue/speak_as.py.
     """
 
     ARENA_ANNOUNCER_DIAL = 0x046652
@@ -1832,7 +1817,7 @@ class TestSaySpeakAsIdentityGate:
         return rec
 
     def test_identity_gate_dropped_in_speak_as_topic(self):
-        from tes5_import import dialog_conditions as dc
+        from tes5_import.base import conditions as dc
         dc.set_speak_as_topics({self.ARENA_ANNOUNCER_DIAL})
         try:
             out = dc.convert_ctda(self._ctda(72, 0x00046653), offset=0,
@@ -1843,14 +1828,14 @@ class TestSaySpeakAsIdentityGate:
 
     def test_playable_race_gate_dropped_in_speak_as_topic(self):
         """The QUST-level gate ArenaAnnouncer carries."""
-        from tes5_import import dialog_conditions as dc
+        from tes5_import.base import conditions as dc
         out = dc.convert_ctda(self._ctda(254, 0), offset=0,
                               in_speak_as_topic=True)
         assert out is None
 
     def test_identity_gate_survives_outside_a_speak_as_topic(self):
         """A normal speaker keeps its authored identity gate."""
-        from tes5_import import dialog_conditions as dc
+        from tes5_import.base import conditions as dc
         out = dc.convert_ctda(self._ctda(72, 0x0001C1A2), offset=0,
                               in_speak_as_topic=False)
         assert out is not None
@@ -1858,7 +1843,7 @@ class TestSaySpeakAsIdentityGate:
     def test_thadons_own_lines_are_untouched(self):
         """SEThadon lends his identity to a marker shout in ANOTHER topic;
         that must not weaken the lines he delivers himself."""
-        from tes5_import import dialog_conditions as dc
+        from tes5_import.base import conditions as dc
         dc.set_speak_as_topics({0x07B20F})       # some other, speak-as topic
         try:
             rec = self._info(dial=0x0000D2,      # Thadon's own topic
@@ -1872,13 +1857,13 @@ class TestSaySpeakAsIdentityGate:
 
     def test_target_run_identity_is_not_touched_by_this_rule(self):
         """RunOnTarget identities have their own, separate handling."""
-        from tes5_import import dialog_conditions as dc
+        from tes5_import.base import conditions as dc
         out = dc.convert_ctda(self._ctda(72, 0x00046653, run_on_target=True),
                               offset=0, in_speak_as_topic=True)
         assert out is not None
 
     def test_is_speak_as_record_reads_the_parent_topic(self):
-        from tes5_import import dialog_conditions as dc
+        from tes5_import.base import conditions as dc
         dc.set_speak_as_topics({self.ARENA_ANNOUNCER_DIAL})
         try:
             assert dc.is_speak_as_record(
@@ -1889,7 +1874,7 @@ class TestSaySpeakAsIdentityGate:
             dc.set_speak_as_topics(set())
 
     def test_scanner_finds_the_announcer_topic_not_the_npc(self):
-        from tes5_import.talking_activators import scan_speak_as_topics
+        from tes5_import.dialogue.speak_as import scan_speak_as_topics
         by_type = {
             'DIAL': [{'FormID': '00046652', 'EditorID': 'Announcer'}],
             'NPC_': [{'FormID': '00046653', 'EditorID': 'ArenaMouth'}],
@@ -1899,7 +1884,7 @@ class TestSaySpeakAsIdentityGate:
         assert scan_speak_as_topics(by_type) == {0x046652}
 
     def test_scanner_ignores_a_plain_say(self):
-        from tes5_import.talking_activators import scan_speak_as_topics
+        from tes5_import.dialogue.speak_as import scan_speak_as_topics
         by_type = {
             'DIAL': [{'FormID': '000000C8', 'EditorID': 'GREETING'}],
             'SCPT': [{'SCTX': 'SomeRef.Say GREETING'}],
@@ -1923,12 +1908,12 @@ class TestDropNonActorSpeakerCtdas:
                            0, 0, run_on, 0, 0xFFFFFFFF)
 
     def _block(self):
-        from tes5_import.dialog_conditions import (_NON_ACTOR_SPEAKER_DROP,
+        from tes5_import.base.conditions import (NON_ACTOR_SPEAKER_DROP,
                                                    CTDA_OR)
         from tes5_import.record_types.common import pack_subrecord
-        drop_func = sorted(_NON_ACTOR_SPEAKER_DROP)[0]
-        keep_func = max(_NON_ACTOR_SPEAKER_DROP) + 1
-        assert keep_func not in _NON_ACTOR_SPEAKER_DROP
+        drop_func = sorted(NON_ACTOR_SPEAKER_DROP)[0]
+        keep_func = max(NON_ACTOR_SPEAKER_DROP) + 1
+        assert keep_func not in NON_ACTOR_SPEAKER_DROP
         blob = pack_subrecord('CTDA', self._ctda(drop_func))
         blob += pack_subrecord('CIS2', b'::foo_var\x00')
         blob += pack_subrecord('CTDA', self._ctda(keep_func,
@@ -1936,8 +1921,8 @@ class TestDropNonActorSpeakerCtdas:
         return blob, keep_func
 
     def test_repacks_kept_conditions(self):
-        from tes5_import.dialog_converter import _drop_non_actor_speaker_ctdas
-        from tes5_import.dialog_conditions import CTDA_OR
+        from tes5_import.dialogue.groups import _drop_non_actor_speaker_ctdas
+        from tes5_import.base.conditions import CTDA_OR
         blob, keep_func = self._block()
         out = _drop_non_actor_speaker_ctdas(blob)
         # Exactly one CTDA survives: the dropped one took its CIS2 with it.
@@ -1948,9 +1933,9 @@ class TestDropNonActorSpeakerCtdas:
         assert not (out[6] & CTDA_OR)
 
     def test_all_dropped_yields_empty(self):
-        from tes5_import.dialog_converter import _drop_non_actor_speaker_ctdas
-        from tes5_import.dialog_conditions import _NON_ACTOR_SPEAKER_DROP
+        from tes5_import.dialogue.groups import _drop_non_actor_speaker_ctdas
+        from tes5_import.base.conditions import NON_ACTOR_SPEAKER_DROP
         from tes5_import.record_types.common import pack_subrecord
         blob = pack_subrecord('CTDA',
-                              self._ctda(sorted(_NON_ACTOR_SPEAKER_DROP)[0]))
+                              self._ctda(sorted(NON_ACTOR_SPEAKER_DROP)[0]))
         assert _drop_non_actor_speaker_ctdas(blob) == b''

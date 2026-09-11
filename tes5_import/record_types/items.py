@@ -2,8 +2,8 @@
 
 import struct
 
-from ..constants import LOD_SIZE_THRESHOLD
-from ..mesh_bounds import get_mesh_physics_flags
+from ..base.constants import LOD_SIZE_THRESHOLD
+from ..base.mesh_bounds import get_mesh_physics_flags
 from .common import (
     VENDOR_KYWD,
     _common_header_subs,
@@ -599,15 +599,19 @@ def convert_TREE(rec: dict) -> bytes:
 
 
 def convert_LIGH(rec: dict) -> bytes:
-    """LIGH — Light. TES5 order: EDID OBND MODL FULL DATA FNAM SNAM"""
+    """LIGH — Light. TES5 order: EDID VMAD OBND MODL FULL DATA FNAM SNAM
+
+    TES4 attaches quest scripts to lights, so VMAD is spliced in here;
+    without it a converted script exists but is attached to nothing.
+
+    The `object_scripts` import stays INSIDE the body.
+    See: docs/reference/tes5_import_architecture.md#object-scripts-import-is-deferred
+    """
     subs = b''
     edid = get_str(rec, 'EditorID')
     if edid:
         subs += pack_string_subrecord('EDID', edid)
-    # VMAD — LIGH supports object scripts in Skyrim, and TES4 attaches quest
-    # scripts to lights (SE06FlameOfAgnon's SetStage lives on one); without
-    # this splice the converted script existed but was attached to nothing.
-    from ..object_scripts import get_object_vmad
+    from ..base.object_scripts import get_object_vmad
     subs += get_object_vmad(get_formid(rec, 'FormID'))
     subs += pack_obnd(*_resolve_obnd(rec, 'LIGH'))
     model = get_str(rec, 'Model.MODL')

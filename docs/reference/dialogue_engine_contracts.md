@@ -17,7 +17,7 @@ at `D:\Other Games\Skyrim Anniversary Edition\SkyrimSE.exe` is **not** packed â€
 than printing garbage.
 
     python tools/disasm/dialog_engine_extract.py --subtypes
-    python tools/disasm/dialog_engine_extract.py --json tes5_import/dialog_engine_tables.json
+    python tools/disasm/dialog_engine_extract.py --json tes5_import/generated/dialog_engine_tables.json
 
 RTTI type names survive in both builds, so `tools/disasm/skyrim_disasm.py --find` still
 locates classes (`TESTopic`, `TESTopicInfo`, `MenuTopicManager`,
@@ -52,7 +52,7 @@ at:
 
 This is information xEdit does not carry at all: its subtype list is sorted
 alphabetically and records no category membership and no ordering. The full
-103-row table is checked in as `tes5_import/dialog_engine_tables.json`.
+103-row table is checked in as `tes5_import/generated/dialog_engine_tables.json`.
 
 ## SNAM decides the subtype and the category; DATA does not
 

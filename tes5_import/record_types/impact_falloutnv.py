@@ -8,7 +8,7 @@ See: docs/commentary/tes4_export_falloutnv.md#impacts
 
 import struct
 
-from ..writer import (pack_formid_subrecord, pack_record,
+from ..base.writer import (pack_formid_subrecord, pack_record,
                       pack_string_subrecord, pack_subrecord)
 from .common import get_formid, get_int, get_str, prefix_path
 from .projectile_falloutnv import sndr_of

@@ -160,7 +160,7 @@ def _closed_by(rec: dict, fragments: list) -> tuple:
 
     See: docs/commentary/script_convert.md#journal-objective-completion
     """
-    from tes5_import.quest_converter import target_live_at_stage
+    from tes5_import.dialogue.quest import target_live_at_stage
 
     targets = _quest_targets(rec)
     obj_stages = sorted({s for s, _j, text, *_ in fragments if text})

@@ -3,9 +3,9 @@
 import re
 import struct
 
-from ..constants import ENCH_CAST_TYPE_MAP, ENCH_TYPE_MAP, WEAPON_TYPE_MAP, ARMA_BODY_COVERAGE_EXTRA
-from ..magic_effects import aimed_variant, has_projectile
-from ..skyrim_overrides import (
+from ..base.constants import ENCH_CAST_TYPE_MAP, ENCH_TYPE_MAP, WEAPON_TYPE_MAP, ARMA_BODY_COVERAGE_EXTRA
+from ..actors.magic_effects import aimed_variant, has_projectile
+from ..base.equivalents import (
     ARMA_ADDITIONAL_RACES,
     ARMA_ADDITIONAL_RACES_NONBEAST,
     ARMA_BEAST_RACES,

@@ -11,7 +11,7 @@ pathgrids exist), so the landmass rendered fine and nothing in it could path.
 from collections import Counter
 
 
-from tes5_import import overrides
+from tes5_import.overrides import nested as overrides
 
 
 class _FakeMasterIndex:

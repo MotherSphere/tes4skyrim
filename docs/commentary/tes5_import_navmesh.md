@@ -47,7 +47,7 @@ LAND/landscape-texture record structure. For terrain LOD generation see
 
 TES4 PGRD (per-cell pathgrid of nodes+edges) is converted to a TES5 NAVM per
 cell PLUS a single top-level NAVI (Navmesh Info Map). Implemented in
-`tes5_import/pgrd_to_navm.py` (`convert_PGRD`) and `tes5_import/navi_builder.py`
+`tes5_import/navmesh/from_pgrd.py` (`convert_PGRD`) and `tes5_import/navmesh/navi.py`
 (`build_navi_record`), wired in `import_main.py` Phase 4 for both interior
 (`_build_cell_groups`) and exterior (`_build_world_groups`) cells.
 
@@ -1341,7 +1341,9 @@ exterior cells regenerate automatically.
 
 <a id="land-split-for-the-grid-rasterizer"></a>**`split_land=True` keeps LAND terrain separate** (`gather_cell_geometry`). Terrain is a regular grid of large triangles, and the generic scalar rasterizer spends most of an exterior cell's build time on it, so the caller sends it down the vectorized grid-rasterizer path instead.
 
-<a id="wild-placements-are-dropped"></a>**A REFR placed beyond `_MAX_PLACEMENT` (1e7) contributes no collision** (`_finite_placement`). Such a ref is nowhere near the pathgrid so it could contribute nothing usable, and a non-finite or absurd placement crashed a worker and failed the whole Nehrim import with a bare `BrokenProcessPool`. The ref itself is still converted and written normally by the record path.
+<a id="wild-placements-are-dropped"></a>**A REFR placed beyond `MAX_PLACEMENT` (1e7) contributes no collision** (`_finite_placement`). Such a ref is nowhere near the pathgrid so it could contribute nothing usable, and a non-finite or absurd placement crashed a worker and failed the whole Nehrim import with a bare `BrokenProcessPool`. The ref itself is still converted and written normally by the record path.
+
+Oblivion's worldspaces span roughly ±2e5 units (a 4096-unit cell grid at ±32 blocks), so the 1e7 threshold is ~50x the whole map and cannot be a real placement. **This is not defensive padding.** Nehrim genuinely ships refs whose position the CS never initialised: **17 REFRs across 10 base objects carry PosY = 8.936455989415117e+17** (with PosX = 1.68e-36), e.g. REFR `001E57C4` in cell `001E4FEC`. Placing one stretches the cell's triangle soup to 8.9e17 units wide, which blew the native TriGrid's dense bucket grid to **5.4e14 buckets — a 4-billion-GB allocation** whose `std::bad_alloc` aborted the pool worker.
 
 ## LAND Record Structure
 <a id="land-record-structure"></a>
@@ -1636,6 +1638,68 @@ the per-plugin copy**, so after an import-side change the game still loads the
 older AutoConvertLOD mesh until a LOD run regenerates it. Verify the copy that
 actually wins before concluding a cloud-bank change had no effect.
 
+## <a id="split-only-the-meshes-that-need-it"></a>Split only the interiors that actually need it
+
+**Code:** `navmesh/split.py` — `split_disconnected_interiors`,
+`_has_cross_component_door_pair`, `_component_fids`, `_split_one_mesh`.
+
+A cell's disconnection is only the CharacterGen-class bug (see that module's
+docstring) when a same-cell teleport pair has its two ends in DIFFERENT
+components — the one case the engine cannot route without a split. Most
+disconnected interiors have no such pair: two unrelated rooms that never
+teleport to each other. Splitting those serves no pathing purpose and only
+multiplies the NAVM/NVMI records the CK revalidates on load.
+
+**Measured on Oblivion.esm: 352 cells have multiple components, but only 18
+have a genuine same-cell door pair spanning them.** With all 352 split the CK
+hung in *"Initializing References"* (confirmed live, and unaffected by fixing
+an unrelated portal-link bug) — variance the plugin cannot be blamed for once
+every check passes. Splitting only the 18 that need it is the generic fix, not
+a size cap.
+
+🛑 **Sibling FormIDs key on AUTHORED data, never on component order.**
+Component order is DERIVED: it falls out of triangle connectivity, so any
+change upstream of triangulation renumbers every component and would move the
+ids. `_component_fids` therefore keys each sibling on the sorted door REFRs its
+triangles touch — TES4 ids that survive re-triangulation — falling back to the
+ordinal only for a component with no door, which carries no door state to lose.
+Moving one of these ids breaks saves.
+
+## <a id="collision-geometry-and-the-cache-hit"></a>Collision geometry, and what `convert_PGRD` keeps inline
+
+**Code:** `from_pgrd._cell_graph` / `_cell_frame` / `_cell_geometry`,
+`convert_PGRD`.
+
+`convert_PGRD` reads as four phases: the pathgrid graph, the cell frame, the
+collision geometry, then NVNM packing and the `meta` dict. The first three are
+helpers; packing stays inline because it is the record contract this module
+exists to own.
+
+**The graph helper is shared with the cache key, and must stay shared.**
+`_cell_graph` returns the points and edges INCLUDING the synthetic PGRI exit
+nodes, and that exact tuple feeds `geom_hash`. `convert_PGRD` used to carry its
+own inline COPY of the same logic; any divergence between the two silently
+invalidates every cached entry, which is why `cell_geom_key` and the converter
+now call one function. Equivalence of the two forms was verified across the
+explicit-PGRR, nearest-neighbour-fallback, exterior-with-PGRI, single-node and
+decline branches before the copy was removed.
+
+**A single pathgrid node is only viable WITH a PGRI link.** One node with no
+in-cell edge can never form a ribbon, but one node with cross-cell links can:
+the synthetic exit edges lay cross-seam stubs. **53 exterior cells shipped with
+no navmesh at all** under the old `< 2`-points gate, leaving holes in the
+cross-cell network exactly where a road crosses a cell corner.
+
+**Verts are rounded to float32 BEFORE the cache store** (`_cell_geometry`). The
+cache holds float32, NVNM packs float32, so rounding at build time is what makes
+a fresh build and a later cache hit produce byte-identical NVNMs. Moving the
+rounding after the store would make the two paths disagree in the low bits.
+
+🛑 **`geom_key` is the hash VALUE; `geom_hash` is the module FUNCTION.** Naming
+a local after the function shadows it — the call then resolves to `None`,
+raising `'NoneType' object is not callable` per cell and **silently producing 61
+empty navmeshes with every XNDP door link dropped**, which no test caught.
+
 ## The shared navmesh cache — design rationale
 <a id="shared-navmesh-cache-design-rationale"></a>
 
@@ -1647,10 +1711,88 @@ bandwidth per *month* — about three clones).
 
 Commands are in [CLAUDE.md](../../CLAUDE.md#shared-navmesh-cache).
 
+### <a id="door-triangle-tie-break"></a>The door triangle tie-break is AREA, not index
+
+A door point lies **on** the threshold, which after constraint recovery is a
+shared triangle EDGE — so two or more triangles legitimately contain it and the
+choice is a genuine tie.
+
+Breaking that tie by triangle INDEX picked an arbitrary winner. On the
+**CharacterGen assassins' cell door** the same geometry yielded either a
+**1,586-unit triangle or a 572-unit sliver** depending only on iteration order,
+and the sliver is too narrow for an actor to stand on (vanilla door triangles:
+**min 992, median 9,614**).
+
+`_containing_triangle` therefore prefers the **largest** containing triangle,
+which is both standable and deterministic. Heights within a step (32 units) are
+treated as the same floor and ranked by area, so a sliver never wins over the
+real door triangle beside it.
+
+### <a id="nvnm-xxxx-size-protocol"></a>An NVNM over 64 KB needs the XXXX size protocol
+
+A subrecord's own length field is 16-bit. When a payload exceeds 65,535 bytes
+the format writes a **4-byte `XXXX` subrecord carrying the REAL size**, and the
+following subrecord's own length field reads 0.
+
+`edge_links.extract_nvnm` must honour that or an oversized NVNM reads as empty
+and the whole mesh silently skips edge linking. This was invisible while meshes
+were small, but the interior-lattice triangulation pushed **119 exterior meshes
+past the limit** and every one of them shipped as a cross-cell island.
+
+`pack_subrecord` re-emits the `XXXX` prefix on write, so the one the reader
+consumed is deliberately dropped rather than carried through.
+
+### <a id="what-gates-a-push"></a>What gates a push, and why the lists are generous
+
+`NAVMESH_PATHS` names the sources whose **bytes feed the cache tag**, and must
+stay in step with `pool.navmesh_geom_cache` — a test asserts they agree.
+
+`NAVMESH_FUNCS` is different: those files do **not** feed the tag, but hold
+code that can change *what* gets cached or *how it is keyed*. Listing a
+function there makes the CHECK run; it does not by itself block anything. A
+block happens only if the check then finds the cache was built by different
+code (`cache_matches_tag`), so over-triggering costs a fast stamp comparison
+and nothing else — a cache that is already correct always passes.
+
+**That asymmetry is why the lists can stay generous: a missed trigger ships a
+dead cache, an extra trigger costs microseconds.**
+
+Attribution uses git's `-U0` hunk headers, which name the enclosing function
+(the same technique `release_notes.py` uses to attribute `convert.py` per
+phase). It exists to keep the *reported reason* honest — so the hook says "you
+changed `_gather_navm_jobs`" rather than "you changed `pipeline.py`" — not to
+suppress checks.
+
+**`navmesh/edge_links.py` is excluded from the tag** (`pool._TAG_EXCLUDE`).
+`build_edge_links` stitches cross-cell portals into the NVNM *after* geometry
+comes out of the cache, so editing it changes the written mesh but never the
+cached geometry. Note that the restructure moved this file **under the
+`tes5_import/navmesh/` prefix**, so every edit to it now gates a push via
+`NAVMESH_PATHS` unless `NAVMESH_EXCLUDE` keeps listing it. That is a permanent,
+low-grade cost — an unnecessary tag bump per edit — and never a wrong mesh.
+
+### <a id="publishable-plugins"></a>`PUBLISHABLE_PLUGINS` — why a whitelist
+
+The only plugins we publish a shared cache for. Everything else under `export/`
+is a local experiment: a DLC, a landmass mod, a half-converted ESP somebody ran
+once. Those caches are worthless to a downloader (nobody else has that plugin)
+but they are **not harmless** — `discover_plugins()` is what the pre-push gate
+iterates, so a 0-entry or partially-generated cache from a throwaway run fails
+`verify()` and **blocks the push**, and a large one gets zipped and uploaded as
+a release asset nobody wants.
+
+Deliberately a whitelist, **not a size/entry-count heuristic**: "big enough to
+publish" would silently start shipping the next landmass mod that happens to
+cross the threshold. Adding a plugin here is a decision to host its cache.
+
+Matched case-insensitively — `export/` folder names come from whatever the user
+typed after `-f`, and `Nehrim.esm` vs `nehrim.esm` must not change what gets
+published.
+
 ### GAP (unfixed): the download path ignores `PUBLISHABLE_PLUGINS`
 
 **Measured 2026-08-26.** `auto_install` makes its anonymous releases API call
-for **any** plugin, including ones whose cache is never published. The allowlist
+for **any** plugin, including ones whose cache is never published. The whitelist
 that should gate it already exists and is already correct:
 
 ```python
@@ -1678,17 +1820,17 @@ already-up-to-date and drop-in checks but **before** `allow_download` /
 `_api_releases()`. Ordering matters:
 
 - Drop-ins must still work for *any* plugin — a user who builds and drops in
-  their own zip is a supported path and must not be gated by an allowlist about
+  their own zip is a supported path and must not be gated by a whitelist about
   what *we* host.
 - Only the **network** step is restricted, so the gate belongs immediately
   before it.
 
-**Verified safe — nothing is lost.** Two off-allowlist assets exist
+**Verified safe — nothing is lost.** Two off-whitelist assets exist
 (`navmesh-cache-DLCBattlehornCastle.zip`, `navmesh-cache-ElsweyrAnequina.zip`),
 but they appear on exactly one historical release, `navmesh-cache-0.586-0.586`
 (2026-08-11). That range covers 0.586 only; current builds report 0.616, so the
 existing version-range gate already rejects them. Every current release
-(`0.616+`, `0.609-0.615`, `0.600-0.608`, …) carries only the three allowlisted
+(`0.616+`, `0.609-0.615`, `0.600-0.608`, …) carries only the three whitelisted
 plugins.
 
 Keep the user-facing message honest when gating: for a non-hosted plugin the
@@ -2645,7 +2787,7 @@ ribbon for them when invoked directly, so the fix is to gate jobs on
 
 ## <a id="ledge-links"></a>Ledge links: both sides, or neither
 
-**Code:** `tes5_import/pgrd_to_navm.py` (`_resolve_ledge_links`)
+**Code:** `tes5_import/navmesh/from_pgrd.py` (`_resolve_ledge_links`)
 
 A DROP-DOWN between disconnected storeys is Skyrim's own mechanism for
 stepping off a ledge — vanilla Skyrim.esm carries 476 Ledge Down / 467 Ledge Up

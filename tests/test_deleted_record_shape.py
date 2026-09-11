@@ -7,7 +7,7 @@ never writes -- see docs/commentary/tes5_import_override.md.
 """
 import struct
 
-from tes5_import.overrides import make_deleted_record
+from tes5_import.overrides.nested import make_deleted_record
 
 DELETED = 0x20
 COMPRESSED = 0x40000

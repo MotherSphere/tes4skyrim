@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 
-from .import_main import import_plugin
+from .pipeline import import_plugin
 
 
 def main():

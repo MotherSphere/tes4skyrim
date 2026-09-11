@@ -302,13 +302,12 @@ def start_conversation(ctx, call) -> str:
 def add_topic(ctx, call) -> str:
     """AddTopic on a GATED topic opens that topic's unlock gate.
 
-    Skyrim has no AddTopic, so the visibility model is re-expressed as one
-    `TES4Unlock_<topic>` global per explicitly-added topic (see
-    tes5_import/dialog_unlocks.py).  INFO and quest-stage fragments already
-    emit the SetValue; a script AddTopic is the THIRD reveal route.
-    Load-bearing rather than cosmetic: TGReadWantedPoster and
-    TG00MysteriousNoteScript are how the player first learns of the Gray Fox.
-    An UNGATED topic is already visible, so it no-ops.
+    Skyrim has no AddTopic, so visibility is re-expressed as one
+    `TES4Unlock_<topic>` global per explicitly-added topic.  A script AddTopic
+    is the THIRD reveal route after INFO and quest-stage fragments; an
+    UNGATED topic is already visible, so it no-ops.
+
+    See: docs/commentary/tes5_import_dialogue.md#addtopic-unlock-globals
     """
     topic = call.source(0).strip().strip('"')
     gname = (ctx.topic_unlock_globals or {}).get(topic.lower())

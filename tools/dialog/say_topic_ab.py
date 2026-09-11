@@ -327,7 +327,7 @@ def main():
     if not args.topic:
         ap.error('--topic or --audit required')
 
-    from tes5_import.skyrim_overrides import RACE_MAP, TES4_RACE_FID_TO_EDID
+    from tes5_import.base.equivalents import RACE_MAP, TES4_RACE_FID_TO_EDID
     race4 = race5 = 0
     if args.race:
         for fid24, edid in TES4_RACE_FID_TO_EDID.items():

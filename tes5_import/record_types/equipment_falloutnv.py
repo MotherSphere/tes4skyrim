@@ -21,7 +21,7 @@ from asset_convert.havok.gun_vocabulary_falloutnv import (ANIM_TYPE_CLASS,
                                                           GUN_CLASSES,
                                                           RELOAD_LETTERS)
 
-from ..skyrim_overrides import WEAPON_ANIM_CROSSBOW
+from ..base.equivalents import WEAPON_ANIM_CROSSBOW
 from .bodypart_falloutnv import SIDECAR_DIR, source_file
 from .projectile_falloutnv import gun_ammo
 from .sound import get_soun_identity, sndr_editor_id

@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from asset_convert.lod.esm_scan import finite
-from tes5_import.text_reader import get_float
+from tes5_import.base.text_reader import get_float
 
 # The exact bit patterns found in the shipped plugin.
 NAN_BITS = 0x7FC00000

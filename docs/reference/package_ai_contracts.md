@@ -1,7 +1,7 @@
 # PACK / AI Package & CTDA Engine Contracts
 
 Linked from [CLAUDE.md](../../CLAUDE.md). Verified engine behavior for converted AI
-packages and condition items. Implemented in `tes5_import/pack_converter.py`,
+packages and condition items. Implemented in `tes5_import/packages/converter.py`,
 `pack_templates.py`, `packages.py`, and `dialog_conditions`. For the original
 design analysis see [package_conversion_plan.md](../commentary/tes5_import_package.md)
 (note: its "PACK is in SKIP_TYPES" status header is stale — PACK is converted).
@@ -25,7 +25,7 @@ never hand-written:
 
 ```bash
 python tools/generators/gen_ctda_param_types.py <path>/wbDefinitionsTES5.pas \
-    -o tes5_import/ctda_param_types.py
+    -o tes5_import/generated/ctda_param_types.py
 python tools/generators/gen_ctda_param_types.py <path>/wbDefinitionsTES5.pas --func N
 ```
 

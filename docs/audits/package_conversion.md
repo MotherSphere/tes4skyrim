@@ -1,7 +1,7 @@
 # PACK Conversion Audit — 2026-08-17
 
 Full audit of the TES4→TES5 AI-package conversion: gaps, incorrect mappings, and
-same-name/different-meaning traps. Scope: `tes5_import/pack_converter.py`,
+same-name/different-meaning traps. Scope: `tes5_import/packages/converter.py`,
 `pack_templates.py`, `pack_aliases.py`, `packages.py`,
 `tes4_export/record_types/dialog_misc.py::export_PACK`, and the CTDA path in
 `dialog_conditions.py`.
@@ -21,7 +21,7 @@ engine contracts) and [package_conversion_plan.md](../commentary/tes5_import_pac
 ### 1. `PTDT.Type=1` (Object ID) is unhandled — 388 packages silently sandbox
 
 > **CLOSED since this audit.** `_choose()` now branches on `t_type == 1` in
-> `tes5_import/pack_converter.py` (lines 389, 803, 1204, 1259), including
+> `tes5_import/packages/converter.py` (lines 389, 803, 1204, 1259), including
 > sole-placement resolution and travel/acquire routing. The finding below is
 > the state on the audit date, kept as the record of what was measured.
 

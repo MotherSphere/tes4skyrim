@@ -1,6 +1,6 @@
 """LOD's view of a plugin: global FormID identity, and the four LOD tables.
 
-The record/GRUP binary layer lives in `tes5_import/tes5_reader.py`; this adds
+The record/GRUP binary layer lives in `tes5_import/base/tes5_reader.py`; this adds
 what only the LOD stages need.
 
 Every FormID here is NORMALISED: the index byte is rewritten to a global one
@@ -14,7 +14,7 @@ import math
 import struct
 from pathlib import Path
 
-from tes5_import.tes5_reader import masters, walk, zstr
+from tes5_import.base.tes5_reader import masters, walk, zstr
 
 #: Has Distant LOD -- SSELodGen bakes LOD for this object.
 FLAG_DISTANT_LOD = 0x00008000

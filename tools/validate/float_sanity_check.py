@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 
 from output_layout import paths
-from tes5_import.tes5_reader import records
+from tes5_import.base.tes5_reader import records
 
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

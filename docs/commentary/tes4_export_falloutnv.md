@@ -364,7 +364,7 @@ ordinal plus a count, since a single record carries thousands.
 
 ### Reusing the TES5 serialiser
 
-`tes5_import/pgrd_to_navm.py::_pack_nvnm` already writes the TES5 blob and is
+`tes5_import/navmesh/from_pgrd.py::_pack_nvnm` already writes the TES5 blob and is
 validated byte-exact against real Skyrim navmeshes. It takes
 `(verts, tris, adj, tri_flags, ...)` — exactly what NVVX/NVTR carry — so the
 FO3/FNV path feeds it authored data where the Oblivion path feeds it generated
@@ -739,7 +739,7 @@ mesh and animations were built and sitting unused; only the pointer was missing.
 
 Skyrim expresses the same idea with the same subrecord, and the importer
 already builds that shape for Oblivion's placed-LVLC case in
-`tes5_import/leveled_actors.py` — an actor whose TPLT and Template Flags make
+`tes5_import/actors/leveled_actors.py` — an actor whose TPLT and Template Flags make
 it a pure indirection. An FNV stub is that record already, so carrying TPLT and
 `TemplateFlags` through is the whole conversion.
 

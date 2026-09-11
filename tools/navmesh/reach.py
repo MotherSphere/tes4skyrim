@@ -30,7 +30,7 @@ from collections import defaultdict, deque
 
 import numpy as np
 
-from tes5_import.tes5_reader import walk as walk_plugin
+from tes5_import.base.tes5_reader import walk as walk_plugin
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from tes5_import.tes5_reader import REC_HDR, subrecords, walk
+from tes5_import.base.tes5_reader import REC_HDR, subrecords, walk
 
 # ---------------------------------------------------------------------------
 # Constants

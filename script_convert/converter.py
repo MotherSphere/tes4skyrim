@@ -9,7 +9,7 @@ from script_convert.blocks import BLOCK_FILTER_PARAM
 from script_convert.constants import (
     KNOWN_GLOBALS, LOOSE_OPS, PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS,
     PLAYER_ALIAS_EXTENDS, RETURN_TYPES, SELF_NAMES, TYPE_MAP, _REF_TYPES,
-    _canonical_global, _digit_stripped_formid, _record_type_to_base_papyrus,
+    _canonical_global, digit_stripped_formid, _record_type_to_base_papyrus,
     record_type_to_papyrus, safe_property_name, papyrus_script_name,
     resolve_property_formid,
     script_type_may_override
@@ -98,11 +98,7 @@ class ScriptConverter:
     # the two can never disagree about which INFOs carry a fragment.
     say_topics: set = set()
 
-    # DIAL EditorID (lower) -> `TES4Unlock_<topic>` GlobalVariable name, from
-    # tes5_import.dialog_unlocks.build_unlock_plan. Populated once per run by
-    # the pipeline. `AddTopic X` on a GATED topic opens that topic's gate, the
-    # same SetValue(1) the INFO/QUST fragments emit — see _NO_OP_FUNCS for why
-    # an ungated topic stays an inert comment.
+    #: DIAL EditorID (lower) -> `TES4Unlock_<topic>` global, from build_unlock_plan.
     topic_unlock_globals: dict = {}
 
     # script EditorID (lower) -> [(mesg_edid, text, buttons)], from
@@ -145,13 +141,7 @@ class ScriptConverter:
 
     @property
     def _property_refs(self) -> dict:
-        """The script's property table.
-
-        A live attribute of the COMPATIBILITY surface (I14): read by
-        `tes5_import/dialog_converter.py` and written by
-        `pipeline._add_scro_ref`, so it stays assignable even though the
-        storage moved onto `ScriptContext`.
-        """
+        """The script's property table; assignable, stored on ScriptContext."""
         return self.sc.property_refs
 
     @_property_refs.setter
@@ -1192,7 +1182,7 @@ class ScriptConverter:
         no voice type) resolves to no voice folder and the line is silent.
         The importer places a TACT carrying that NPC's voice type at the
         emitter's authored position and registers it under the speaker name --
-        see tes5_import/speaker_activators.py, which derives the SAME name
+        see tes5_import/dialogue/speak_as.py, which derives the SAME name
         from the same authored pair, so the two agree with no side-channel.
 
         The fourth authored argument is TES4's "speak in the player's head",
@@ -1739,7 +1729,7 @@ class ScriptConverter:
         # the binder had a FormID for a property the script never declared.
         fid = self.xref.edid_to_formid.get(low, '')
         if not fid:
-            fid = _digit_stripped_formid(self.xref, low)
+            fid = digit_stripped_formid(self.xref, low)
         if not fid:
             # Stale source spelling: recover the record the ORIGINAL compiler
             # bound, from this record's SCRO table (see register_scro_alias_pool).
@@ -2266,7 +2256,7 @@ class ScriptConverter:
             return ''
         # Never redirect a name that resolves on its own.
         if (self.xref.edid_to_formid.get(low)
-                or _digit_stripped_formid(self.xref, low)):
+                or digit_stripped_formid(self.xref, low)):
             return ''
         return alias
 

@@ -196,6 +196,12 @@ real data, or a failing-then-passing test.
 - 🛑 **NEVER RUN A BARE SHELL COMMAND.** Every one goes through
   `python tools/validate/safe_run.py <command>`, which gates the `.py` files
   the command wrote. The hook refuses anything else. See [the wrapper](#safe-run).
+- 🛑 **UNLINK EVERY JUNCTION BEFORE REMOVING A WORKTREE.** Linking live
+  `export/`/`output/` into one is fine; the TEARDOWN is what kills — both
+  `git worktree remove --force` and `rmtree` FOLLOW junctions and delete the
+  real tree. Order: `os.rmdir()` each link, verify each target still has its
+  files, then remove. `is_junction()` misses them — track links as you create
+  them. Both dirs are gitignored, so nothing restores them.
 - **NEVER `git stash` / `git stash pop`** in this repository.
 - **NEVER `git commit` or `git push`.** The user commits after in-game testing.
 - **NEVER `git add` / `git rm`** (staging, including staged deletions). Use plain
@@ -390,11 +396,13 @@ python tools/navmesh/navmesh_cache_hook.py --run                      # publish 
   keyed by asset path. Only our own `navmesh_geom_cache` pickles go in.
 - **Never put mtime, absolute paths, or worker counts in a cache key** — they
   are machine-local, so every downloader misses.
-- **NEVER add a function directly below — or edit the tail of — one of the six
-  gated functions in `import_main.py`** (`NAVMESH_FUNCS` in
-  `navmesh_cache_hook.py`). Git's `-U0` hunk header names the function ABOVE an
-  insertion, so unrelated code reads as a navmesh change and the next push
-  republishes the whole cache. Check with `navmesh_cache_hook.py --check`.
+- **The cache tag is a SHA-1 over the BYTES of every `tes5_import/navmesh/*.py`**
+  (`navmesh/pool.py:navmesh_geom_cache`). Any edit there — whitespace included —
+  invalidates every downloader's cache, so republish when you touch it.
+  `NAVMESH_PATHS`/`NAVMESH_FUNCS` in `navmesh_cache_hook.py` gate the push; a
+  function added directly below a gated one reads as a navmesh change because
+  git's `-U0` hunk header names the function ABOVE an insertion. Check with
+  `navmesh_cache_hook.py --check`.
 
 Why, and the invalidation/tag contracts:
 [world_land_navmesh_notes.md](docs/commentary/tes5_import_navmesh.md#the-shared-navmesh-cache--design-rationale).

@@ -18,9 +18,9 @@ pyffi = pytest.importorskip('pyffi')
 
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 apply_patches()
-from pyffi.formats.nif import NifFormat  # noqa: E402
+from pyffi.formats.nif import NifFormat
 
-from asset_convert.lava_surface import build_lava_nif  # noqa: E402
+from asset_convert.lava_surface import build_lava_nif
 
 TEX = r'textures\tes4\water\oblivionlava06.dds'
 

@@ -1,6 +1,6 @@
-# tes5_import/master_manifest.py - merging a mod stack
+# tes5_import/overrides/manifest.py - merging a mod stack
 
-**Code:** `tes5_import/master_manifest.py`, `tes5_import/overrides.py`, `asset_convert/sources/base_plugins.py`
+**Code:** `tes5_import/overrides/manifest.py`, `tes5_import/overrides/nested.py`, `asset_convert/sources/base_plugins.py`
 
 ## Contents
 
@@ -168,3 +168,48 @@ Nehrim's 135 landscape normals classify as 58 `mask`, 73 `no_alpha`, 4
 `binary`. The masked ones already resolve correctly with no extra work, and the
 fix is mod-safe by construction: it bails on anything that is not DXT1, so a
 mod's real specular map can never be overwritten.
+
+---
+
+## Resolving a master's export directory
+<a id="master-export-resolution"></a>
+
+**Code:** `tes5_import/overrides/nested.py` — `export_root`,
+`master_export_dir`.
+
+🛑 **Never derive the export root as `dirname(export_dir)` + the master's
+name.** `export_dir` is a RECORD directory, and an **imported mod nests its
+plugins inside the mod's own folder**, so the parent is the mod rather than
+the export root and the join finds nothing.
+
+Every consumer resolves through these two helpers instead, so the master's
+own run and the dependent plugin's adoption of it read the SAME `RACE.txt`.
+
+Three call sites relearned this the hard way, each with a silent failure:
+
+| Caller | Symptom when the join failed |
+|---|---|
+| `import_main._master_export_dirs` | Returned `[]` for every grouped plugin, so the adoption loop never ran and every actor fell through to the Imperial default voice. |
+| `actors/creature_races` | No master projects were inherited, so every CREA reusing the master's creature folder shipped as a **base Skyrim creature**. |
+| `base/artifact_schema` | Preflight could not see the master's artifacts. |
+
+### Projects are keyed on the model folder's LEAF name
+
+A plugin shipping its own folder under a master's leaf name shadows the
+master's project **even when its CREA records point at the MASTER's path**.
+
+Morroblivion ships `meshes/morroblivion/creatures/daedra/scamp` — dead assets
+no CREA references, only a `mesh.nif` that is in no NIFZ set — while its
+`0Scamp` record points at Oblivion's `Creatures/Scamp`. The empty own project
+won, `_bodies_of` found no body for the record's NIFZ set, no race was
+generated, and **the scamp shipped as a vanilla SkeletonRace actor**.
+
+Own projects win on conflict — this plugin's own conversion of a folder is
+authoritative for the records it ships — EXCEPT when the own project ships no
+body mesh at all, which is never authoritative for anything (see `_usable`).
+
+Without the master's projects at all, CREA records fall through to
+`resolve_creature_race` and ship as BASE SKYRIM creatures: a Skyrim frostbite
+spider or a Nord standing in for the converted Oblivion actor. Morrowind_ob.esm
+places **86** CREA records on Oblivion.esm's rat/skeleton/goblin meshes, which
+its own BSA never ships.

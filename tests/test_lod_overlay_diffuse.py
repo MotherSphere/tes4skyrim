@@ -25,7 +25,7 @@ from asset_convert.lod import lod_gen
 from asset_convert.texture import texture_prune
 
 PIL = pytest.importorskip('PIL.Image')
-from PIL import Image  # noqa: E402
+from PIL import Image
 
 
 OVERLAY = 'tes4/rocks/greatforestrock03.dds'

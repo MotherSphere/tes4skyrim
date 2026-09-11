@@ -325,7 +325,7 @@ def _sound_data_by_folder(export_dir: str) -> dict:
     chance is the authored CSDC play-chance (0-100); 100 when the export
     predates the field.
     """
-    from tes5_import.text_reader import parse_export_file
+    from tes5_import.base.text_reader import parse_export_file
 
     crea_path = os.path.join(export_dir, 'CREA.txt')
     soun_path = os.path.join(export_dir, 'SOUN.txt')
@@ -396,7 +396,7 @@ def _speed_attr_by_folder(export_dir: str) -> dict:
     dead/prop variants (Speed ~9-12) never move — and one behavior project
     serves the whole folder.
     """
-    from tes5_import.text_reader import parse_export_file
+    from tes5_import.base.text_reader import parse_export_file
 
     crea_path = os.path.join(export_dir, 'CREA.txt')
     if not os.path.exists(crea_path):
@@ -424,7 +424,7 @@ def _part_sets_by_folder(export_dir: str) -> dict:
     skeletal-hound) each listing its own body parts in NIFZ.  Each distinct
     set is merged into its own whole-animal NIF, so the record side can point
     each CREA at the right merged mesh."""
-    from tes5_import.text_reader import parse_export_file
+    from tes5_import.base.text_reader import parse_export_file
 
     crea_path = os.path.join(export_dir, 'CREA.txt')
     if not os.path.exists(crea_path):
@@ -457,7 +457,7 @@ def _crea_model_dirs(export_dir: str) -> set:
     meshes\\creatures\\aa_blood\\draugr, which is the one its CREA records
     actually reference). Picking by what the records use beats any
     walk-order heuristic."""
-    from tes5_import.text_reader import parse_export_file
+    from tes5_import.base.text_reader import parse_export_file
 
     crea_path = os.path.join(export_dir, 'CREA.txt')
     if not os.path.exists(crea_path):
@@ -710,11 +710,7 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
         # ActionIdleWarn IDLE entry records (creature_idles)
         'vocal_events': m.get('vocal_events', []),
     } for name, m in all_manifests.items()}
-    # Versioned envelope: the import stage reads this back, possibly from a
-    # DIFFERENT plugin (a dependent plugin uses its master's projects and never
-    # rewrites them), so the file has to name the plugin and stage that rebuild
-    # it.  See tes5_import/artifact_schema.py.
-    from tes5_import.artifact_schema import write_artifact
+    from tes5_import.base.artifact_schema import write_artifact
     write_artifact(os.path.join(export_dir, 'creature_projects.json'),
                    os.path.basename(os.path.normpath(export_dir)), summary)
 

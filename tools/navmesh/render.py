@@ -159,7 +159,7 @@ def main():
         if cell is None:
             print('reference %s not found in any cell' % a.ref)
             return 1
-        from tes5_import.text_reader import get_float
+        from tes5_import.base.text_reader import get_float
         rx = get_float(refr, 'PosX', 0.0)
         ry = get_float(refr, 'PosY', 0.0)
         print('ref %s is in cell %s (%s) at (%.0f, %.0f)'

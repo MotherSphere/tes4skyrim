@@ -12,7 +12,7 @@ from script_convert.constants import (
 from script_convert.command_rows import (
     ACTOR_ONLY_FUNCTIONS, OBJREF_SHARED_FUNCTIONS
 )
-from tes5_import.text_reader import parse_export_file
+from tes5_import.base.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
 # ===========================================================================
@@ -231,8 +231,8 @@ def _scan_range(args: tuple) -> dict:
     ProcessPoolExecutor; boundary rule matches text_reader.parse_file_range.
     """
 
-    from tes5_import.text_reader import (_DELIM_BEGIN, _DELIM_END,
-                                         _find_delim_line)
+    from tes5_import.base.text_reader import (DELIM_BEGIN, DELIM_END,
+                                              find_delim_line)
 
     fpath, sig, start, end = args
     out = _new_scan_out()
@@ -246,18 +246,18 @@ def _scan_range(args: tuple) -> dict:
         except ValueError:  # empty file
             return out
         try:
-            begin = _find_delim_line(mm, _DELIM_BEGIN, start)
+            begin = find_delim_line(mm, DELIM_BEGIN, start)
             while begin != -1 and begin < end:
                 nl = mm.find(b'\n', begin)
                 if nl < 0:
                     break
-                rec_end = _find_delim_line(mm, _DELIM_END, nl + 1)
+                rec_end = find_delim_line(mm, DELIM_END, nl + 1)
                 if rec_end < 0:
                     break
                 block = mm[nl + 1:rec_end].decode('utf-8', errors='replace')
                 _scan_record_lines(sig, block.split('\n'), out)
-                begin = _find_delim_line(mm, _DELIM_BEGIN,
-                                         rec_end + len(_DELIM_END))
+                begin = find_delim_line(mm, DELIM_BEGIN,
+                                         rec_end + len(DELIM_END))
         finally:
             mm.close()
     return out
@@ -415,7 +415,16 @@ class CrossRefGraph:
         self.actor_packages.update(out['actor_packages'])
 
     def get_extends_class(self, script_formid: str) -> str:
-        """Determine the Papyrus extends class for a script."""
+        """The Papyrus extends class for a script.
+
+        For a type-0 script the base must be one EVERY attaching record
+        can bind, since Papyrus refuses a script whose declared base
+        does not match the form.  A script attached ONLY to the player's
+        base NPC_ extends the alias type instead, because the importer
+        rehosts it on a quest's PlayerRef alias.
+
+        See: docs/commentary/script_convert.md#player-base-script-needs-quest-alias
+        """
         schr_type = self.script_formid_to_type.get(script_formid, 0)
 
         if schr_type == 1:
@@ -423,29 +432,12 @@ class CrossRefGraph:
         if schr_type == 256:
             return 'ActiveMagicEffect'
 
-        # Type 0: the base type must be one EVERY attaching record can bind.
-        # Papyrus refuses a script whose declared base does not match the form
-        # ("Unable to bind script X because their base types do not match"), so
-        # a script shared between an actor and a non-actor record cannot be
-        # `Actor` — the non-actor copies would silently never attach.  Scanning
-        # for the FIRST actor attachment and returning early did exactly that
-        # to `NoActivationScript`, which Oblivion puts on both a DOOR and an
-        # NPC_.  `Actor extends ObjectReference`, so the shared base binds to
-        # both and every inherited event still resolves.
         attached = [rec_fid for rec_fid, scri_fid in self.record_scri.items()
                     if scri_fid == script_formid]
         sigs = {self.record_type.get(rec_fid, '') for rec_fid in attached}
         if 'QUST' in sigs:
             return 'Quest'
 
-        # A script attached ONLY to the player's base NPC_ (0x00000007) cannot
-        # run there in Skyrim — the acting player is PlayerRef 0x14 (signature
-        # PLYR), whose base is Skyrim's own 0x07, never our shifted copy.  The
-        # importer rehosts it on a start-game-enabled quest's PlayerRef alias
-        # (tes5_import.object_scripts.build_player_alias_plan), so it must be
-        # emitted against that alias's base type.  Only when the player base is
-        # its SOLE attachment: a script shared with real NPCs still has to bind
-        # to them as an Actor.
         if attached and all(self._is_player_base(f) for f in attached):
             return PLAYER_ALIAS_EXTENDS
 
@@ -500,7 +492,7 @@ class CrossRefGraph:
         effects = self.spell_effects.get(spell_name.lower())
         if not effects:
             return 0
-        from tes5_import.skyrim_overrides import (MGEF_CODE_TO_SKYRIM,
+        from tes5_import.base.equivalents import (MGEF_CODE_TO_SKYRIM,
                                                   MGEF_AV_CODE_TO_SKYRIM)
         for code, av in effects:
             if not code:
@@ -731,7 +723,7 @@ class CrossRefGraph:
         Resolves through a placed reference to its base record, like
         get_base_signature, so `CTrapLogs01Ref.playgroup` works.
         """
-        from tes5_import.mesh_bounds import get_mesh_physics_flags
+        from tes5_import.base.mesh_bounds import get_mesh_physics_flags
 
         fid = self.edid_to_formid.get(name.lower(), '')
         if not fid:
@@ -752,7 +744,7 @@ class CrossRefGraph:
         shared between a held trap and something else still has to release the
         trap, and the release is inert on anything that is not held.
         """
-        from tes5_import.mesh_bounds import get_mesh_physics_flags
+        from tes5_import.base.mesh_bounds import get_mesh_physics_flags
 
         want = (script_edid or '').lower()
         if not want:

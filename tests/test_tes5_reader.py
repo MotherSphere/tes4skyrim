@@ -4,7 +4,7 @@ import zlib
 
 import pytest
 
-from tes5_import import tes5_reader as R
+from tes5_import.base import tes5_reader as R
 
 
 def sub(tag: bytes, data: bytes) -> bytes:

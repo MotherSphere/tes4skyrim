@@ -18,9 +18,9 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 
 from core.worker_budget import worker_count
-from .. import navm_verify, navm_worker
+from . import cache_audit as navm_verify, worker as navm_worker
 from ..record_types.navm_falloutnv import precompute_fallout_navmeshes
-from ..text_reader import (get_float, get_formid, get_formid_index_offset,
+from ..base.text_reader import (get_float, get_formid, get_formid_index_offset,
                            get_injected_formids, get_int, get_str)
 
 #: Base record types whose placed footprint carves holes in a navmesh.
@@ -328,21 +328,25 @@ def gather_navm_jobs(by_type: dict, door_fids: set = None) -> list:
 # ---------------------------------------------------------------------------
 
 
+#: Runs AFTER geometry leaves the cache, so it cannot invalidate an entry.
+_TAG_EXCLUDE = frozenset({'edge_links.py'})
+
+
 def navmesh_geom_cache(collision_cache: str):
     """(cache_dir, tag) for the on-disk navmesh geometry cache, or None.
 
     The tag hashes the navmesh generator SOURCES only, so editing any navmesh
     code (params included) invalidates every entry automatically.  Collision
-    enters per-cell via `pgrd_to_navm._geom_hash`, never here.
+    enters per-cell via `from_pgrd._geom_hash`, never here.
 
     See: docs/commentary/tes5_import_navmesh.md#pool-orchestration
     """
     if not collision_cache or not os.path.exists(collision_cache):
         return None
     h = hashlib.sha1()
-    pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    srcs = sorted(glob.glob(os.path.join(pkg, 'navmesh', '*.py')))
-    srcs.append(os.path.join(pkg, 'pgrd_to_navm.py'))
+    here = os.path.dirname(os.path.abspath(__file__))
+    srcs = sorted(s for s in glob.glob(os.path.join(here, '*.py'))
+                  if os.path.basename(s) not in _TAG_EXCLUDE)
     for src in srcs:
         try:
             with open(src, 'rb') as fh:

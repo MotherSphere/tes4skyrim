@@ -8,13 +8,13 @@ import struct
 
 import pytest
 
-from tes5_import.dialog_conditions import (
+from tes5_import.base.conditions import (
     GET_VM_SCRIPT_VARIABLE,
     convert_ctda_list_with_strings,
     papyrus_var_name,
 )
-from tes5_import.pack_aliases import PackagePlan, build_script_var_map
-from tes5_import.pack_converter import (
+from tes5_import.packages.aliases import PackagePlan, build_script_var_map
+from tes5_import.packages.converter import (
     PackContext,
     SPEED_RUN,
     T5_MUST_COMPLETE,
@@ -24,7 +24,7 @@ from tes5_import.pack_converter import (
     convert_PACK,
     convert_flags,
 )
-from tes5_import.pack_templates import (
+from tes5_import.packages.templates import (
     ESCORT,
     FOLLOW,
     PKDT_TYPE_PACKAGE,
@@ -213,7 +213,7 @@ def test_unresolvable_script_variable_reads_zero_like_tes4():
     authored outcome. Dropping the condition failed OPEN: SE08's five
     Xedilian victims (base SE08XeddefenNPC01 has no SCRI) force-greeted and
     fled unconditionally."""
-    from tes5_import.dialog_conditions import _UNRESOLVED_VAR_SENTINEL
+    from tes5_import.base.conditions import _UNRESOLVED_VAR_SENTINEL
     rec = {
         'ConditionCount': '1',
         'Condition[0].Raw':
@@ -289,7 +289,7 @@ def test_alias_location_uses_reference_alias_type_8():
     actor stands up) and never travels.  Skyrim.esm census: type 8 = 585 uses,
     type 9 = 1 use out of 6,838 PLDTs.
     """
-    from tes5_import.pack_converter import build_alias_location
+    from tes5_import.packages.converter import build_alias_location
     ltype, alias, radius = struct.unpack('<iii', build_alias_location(5, 1000))
     assert (ltype, alias, radius) == (8, 5, 1000)
 
@@ -320,8 +320,8 @@ def test_quest_escort_location_routes_through_alias_as_type_8():
 def _reloc_setup(monkeypatch, placements):
     """Seed _OBJECT_VMAD with a base-attached actor script and a PACK condition
     reading its variable via GetScriptVariable(func 53) on a placed ACHR."""
-    from tes5_import import object_scripts as os_
-    from tes5_import.text_reader import set_formid_index_offset
+    from tes5_import.base import object_scripts as os_
+    from tes5_import.base.text_reader import set_formid_index_offset
     set_formid_index_offset(0)          # keep raw fids for a clean assertion
     os_._OBJECT_VMAD.clear()
     os_._OBJECT_VMAD[0x0000A29D] = b'VMAD\x04\x00base'   # marker bytes
@@ -377,7 +377,7 @@ def test_addscriptpackage_reaches_the_actors_quest_alias():
     because MQ00CalebroPackage04 — added by INFO 0x11D3, which is gated
     `GetIsID Celebro02` — was on no actor at all.
     """
-    from tes5_import.pack_aliases import (PackagePlan,
+    from tes5_import.packages.aliases import (PackagePlan,
                                           build_script_assigned_packages)
 
     # INFO gated on GetIsID (func 72) -> Celebro02 (0x11C7), forcing Package04.
@@ -424,7 +424,7 @@ def test_commented_out_addscriptpackage_is_not_resurrected():
     resolved or the ref name is captured as `tCelebroRef` and resolves to
     nothing.
     """
-    from tes5_import.pack_aliases import build_script_assigned_packages
+    from tes5_import.packages.aliases import build_script_assigned_packages
 
     by_type = {'SCPT': [{
         'FormID': '00001111', 'EditorID': 'S',
@@ -457,8 +457,8 @@ def test_cross_cell_follow_stays_follow_not_escort():
     (9 in Oblivion); cross-cell ones are "follow me elsewhere" quests by name
     (MQ16MartinFollowPCToPalace, MG01ErthorFollowPlayer, FGD07AjumFollow).
     """
-    from tes5_import.pack_converter import _choose, PackContext, T4_FOLLOW
-    from tes5_import.pack_templates import ESCORT, FOLLOW
+    from tes5_import.packages.converter import _choose, PackContext, T4_FOLLOW
+    from tes5_import.packages.templates import ESCORT, FOLLOW
 
     rec = {'Signature': 'PACK', 'FormID': '00000E9D',
            'EditorID': 'MQ00CalebroPackage02', 'PKDT.Type': str(T4_FOLLOW),
@@ -493,13 +493,13 @@ def test_hunt_at_actor_base_becomes_a_follow_chain_nearest_first():
     REFERENCE (Follow) — so the chain does the seeking, and the engine walks
     it as each target dies.
     """
-    from tes5_import.pack_converter import (hunt_chain_targets, PackContext,
+    from tes5_import.packages.converter import (hunt_chain_targets, PackContext,
                                             convert_PACK_records,
                                             T4_FIND, CTDA_GET_DEAD,
                                             CTDA_GET_DISABLED,
                                             CTDA_GET_IN_SAME_CELL)
-    from tes5_import.pack_templates import FOLLOW, SANDBOX
-    from tes5_import.text_reader import set_formid_index_offset
+    from tes5_import.packages.templates import FOLLOW, SANDBOX
+    from tes5_import.base.text_reader import set_formid_index_offset
     set_formid_index_offset(1)
     try:
         rec = {'Signature': 'PACK', 'FormID': '000292CD',
@@ -559,7 +559,7 @@ def test_hunt_at_actor_base_becomes_a_follow_chain_nearest_first():
 
 
 def test_hunt_chain_runs_ahead_of_its_source_on_alias_and_pkid_lists():
-    from tes5_import.packages import (npc_packages, set_package_chains,
+    from tes5_import.packages.actor_wiring import (npc_packages, set_package_chains,
                                       set_quest_packages)
     plan = PackagePlan()
     plan.owner_quest[0x0100AAAA] = 0x01000900

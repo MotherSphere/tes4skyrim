@@ -234,8 +234,7 @@ either way.
 
 - Export text is cached per record type in `export/<filename>/` (`ACTI.txt`,
   `NPC_.txt`, …).
-- FormID mappings live in `export/mappings/<filename>.FormID_Mapping.txt`.
-- Processing `Knights.esp` reuses the cached `Oblivion.esm` export + mappings.
+- Processing `Knights.esp` reuses the cached `Oblivion.esm` export.
 - `--no-cache` forces a re-export.
 
 ### Versioned stage artifacts
@@ -246,7 +245,7 @@ outlive the PLUGIN that wrote them: a dependent plugin reads its master's
 `creature_projects.json` and never rewrites it. So a file on disk can predate
 the code reading it by any amount.
 
-Registered artifacts carry an envelope (`tes5_import/artifact_schema.py`):
+Registered artifacts carry an envelope (`tes5_import/base/artifact_schema.py`):
 
 ```json
 {"version": 1, "plugin": "Oblivion.esm", "stage": "--creatures-only",
@@ -367,7 +366,7 @@ the normal "headers not found" Missing rather than crashing.
 
 ## Skipped record types
 
-`SKIP_TYPES` in [tes5_import/constants.py](../../tes5_import/constants.py) is the
+`SKIP_TYPES` in [tes5_import/base/constants.py](../../tes5_import/base/constants.py) is the
 single source of truth. Currently skipped: ROAD, SCPT, SKIL, BSGN, RACE, MGEF,
 CSTY, IDLE, GMST, EYES, HAIR.
 

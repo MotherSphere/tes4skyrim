@@ -55,7 +55,7 @@ own model keeps it.
 ## Flattening is the only channel
 
 An early version of this note claimed the engine still resolves the remaining
-categories through TPLT at spawn time, the way `tes5_import/leveled_actors.py`
+categories through TPLT at spawn time, the way `tes5_import/actors/leveled_actors.py`
 relies on for Oblivion's placed-LVLC shells. That is wrong, and measuring the
 built ESM settles it: **0 of 5,394 output NPC_ records carry a TPLT**, because
 neither `convert_CREA` nor `convert_NPC_` ever emits one — TPLT appeared only

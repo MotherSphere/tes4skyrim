@@ -23,8 +23,9 @@ from asset_convert.sources import mod_ingest, source_registry
 from core.plugin_masters import get_masters_from_binary
 from output_layout import record_dir
 
-#: Plugins shown before the picker gets its own scrolling viewport.
-PICKER_MAX_ROWS = 8
+#: Shortest the scrolling body may be squeezed, and the chrome around it.
+_BODY_MIN_PX = 200
+_CARD_CHROME_PX = 140
 
 #: Missing masters named in full before the rest are counted.
 _MAX_NAMED_MASTERS = 10
@@ -93,16 +94,77 @@ def _card(ui: ModsUI, title: str):
     return card
 
 
+def _card_body(ui: ModsUI, card):
+    """The card's scrolling middle: everything between title and buttons.
+
+    ONE region for the whole body, not one per list. A card carries a summary,
+    two unbounded pickers and a warning, so per-list viewports still left the
+    fixed chrome alone and a 35-sub-package archive overflowed the window with
+    its Import button off the bottom. `_fit_card` caps this at the window.
+    """
+    holder = tk.Frame(card, bg=ui.CLR["panel"])
+    holder.pack(fill=tk.BOTH, expand=True)
+    canvas = tk.Canvas(holder, bg=ui.CLR["panel"], highlightthickness=0,
+                       borderwidth=0)
+    bar = ttk.Scrollbar(holder, orient=tk.VERTICAL, command=canvas.yview)
+    canvas.configure(yscrollcommand=bar.set)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    body = tk.Frame(canvas, bg=ui.CLR["panel"])
+    win = canvas.create_window((0, 0), window=body, anchor="nw")
+    canvas.bind("<MouseWheel>",
+                lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1,
+                                              "units"))
+    card._body = (canvas, bar, body, win)
+    return body
+
+
+def _fit_card(card) -> None:
+    """Size the body to its content, capped by the window; scroll if over.
+
+    Re-runnable, because the window can be resized under an open card: the
+    scrollbar is unpacked again when the content once more fits, so growing
+    the window back leaves no stale bar.
+    """
+    parts = getattr(card, "_body", None)
+    if parts is None:
+        return
+    canvas, bar, body, win = parts
+    card.update_idletasks()
+    need_h, need_w = body.winfo_reqheight(), body.winfo_reqwidth()
+    room = max(_BODY_MIN_PX, card.master.winfo_height() - _CARD_CHROME_PX)
+    width = min(need_w, max(_BODY_MIN_PX,
+                            card.master.winfo_width() - _CARD_CHROME_PX))
+    canvas.configure(width=width, height=min(need_h, room),
+                     scrollregion=(0, 0, need_w, need_h))
+    canvas.itemconfigure(win, width=max(width, need_w))
+    if need_h > room:
+        bar.pack(side=tk.RIGHT, fill=tk.Y)
+    else:
+        bar.pack_forget()
+        canvas.yview_moveto(0)
+
+
 def _show(card) -> None:
-    """Centre a finished card and make it modal."""
+    """Centre a finished card and make it modal.
+
+    The re-fit follows the WINDOW, not the card: a card placed dead centre
+    of a window the user then shrinks would otherwise keep its original
+    height and hang off both ends.
+    """
+    _fit_card(card)
     card.place(relx=0.5, rely=0.5, anchor="center")
     card.grab_set()
+    bound = card.master.bind("<Configure>", lambda _e: _fit_card(card), "+")
+    card._resize_bind = bound
 
 
 def _closer(card):
     """A callable that drops the grab and destroys `card`."""
     def _close():
-        """Dismiss the card."""
+        """Dismiss the card, and stop following the window's size."""
+        bound = getattr(card, "_resize_bind", None)
+        if bound is not None:
+            card.master.unbind("<Configure>", bound)
         card.grab_release()
         card.destroy()
     return _close
@@ -422,10 +484,15 @@ def begin_import(path: str, ui: ModsUI) -> None:
 
 
 def _summary_lines(manifest) -> list:
-    """What the confirm card says the archive holds."""
-    info = [os.path.basename(str(manifest.path)),
-            mod_ingest.layout_description(manifest.payload_root),
-            manifest.summary()]
+    """What the confirm card says the archive holds.
+
+    The layout line is omitted for a BAIN archive: it names every sub-package
+    in full, directly above the list that already shows them all.
+    """
+    info = [os.path.basename(str(manifest.path))]
+    if not manifest.all_subpackages:
+        info.append(mod_ingest.layout_description(manifest.payload_root))
+    info.append(manifest.summary())
     if manifest.bsas:
         info.append(f"{len(manifest.bsas)} BSA(s) will be extracted")
     if manifest.nested:
@@ -436,82 +503,108 @@ def _summary_lines(manifest) -> list:
     return info
 
 
-def _subpackage_picks(ui: ModsUI, card, manifest) -> list:
-    """Checkbuttons for a complex BAIN archive's sub-packages, all ticked."""
-    if not manifest.all_subpackages:
-        return []
-    tk.Label(card, text=f"Sub-packages ({len(manifest.all_subpackages)})",
-             bg=ui.CLR["panel"], fg=ui.CLR["text"],
-             font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16,
-                                                pady=(10, 2))
-    picks = []
-    for name in manifest.all_subpackages:
-        var = tk.BooleanVar(value=True)
-        picks.append((name, var))
-        _checkbutton(card, ui, name, var).pack(anchor="w", padx=(28, 16))
-    return picks
+def plugins_for_subpackages(manifest, chosen) -> list:
+    """The payload-relative plugins `chosen` sub-packages actually ship.
 
-
-def _plugin_picks(ui: ModsUI, card, manifest, on_change) -> list:
-    """Checkbuttons for the plugins to register, all ticked.
-
-    Anything past `PICKER_MAX_ROWS` gets its own scrolling viewport: Better
-    Cities ships 99 plugins, which packed straight into the card makes it
-    taller than the screen with no way to reach the buttons.
+    Derived from `raw_members`, the only list still carrying the sub-package
+    prefix -- `manifest.plugins` is payload-RELATIVE, so Unique Landscapes'
+    three copies of `Unique Landscapes.esp` (00 Core and both 95 Full Merge
+    variants) arrive indistinguishable. Deduped for that reason.
     """
-    tk.Label(card, text=f"Plugins ({len(manifest.plugins)})",
-             bg=ui.CLR["panel"], fg=ui.CLR["text"],
+    if not manifest.all_subpackages:
+        return list(manifest.plugins)
+    keep, seen = [], set()
+    for root in chosen:
+        prefix = (root + '/').lower()
+        for mem in manifest.raw_members:
+            path = str(mem.path)
+            if (os.path.splitext(path)[1].lower() in mod_ingest.PLUGIN_EXTS
+                    and path.lower().startswith(prefix)):
+                rel = path[len(prefix):]
+                if rel.lower() not in seen:
+                    seen.add(rel.lower())
+                    keep.append(rel)
+    return sorted(keep, key=str.lower)
+
+
+def _list_heading(ui: ModsUI, body, text: str):
+    """One picker's bold heading; returned so a caller can retitle it."""
+    var = tk.StringVar(value=text)
+    tk.Label(body, textvariable=var, bg=ui.CLR["panel"], fg=ui.CLR["text"],
              font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16,
                                                 pady=(10, 2))
-    picks = []
-    plist = (_scrolling_list(ui, card, picks)
-             if len(manifest.plugins) > PICKER_MAX_ROWS else card)
-    for rel in manifest.plugins:
-        var = tk.BooleanVar(value=True)
-        picks.append((rel, var))
-        var.trace_add("write", lambda *_a: on_change())
-        _checkbutton(plist, ui, os.path.basename(rel), var).pack(
-            anchor="w", padx=(24 if plist is card else 4))
-    return picks
+    return var
 
 
-def _scrolling_list(ui: ModsUI, card, picks):
-    """A fixed-height scrolling viewport, with All / None bulk buttons."""
-    holder = tk.Frame(card, bg=ui.CLR["panel"], height=260)
-    holder.pack(fill=tk.X, padx=16)
-    holder.pack_propagate(False)
-    canvas = tk.Canvas(holder, bg=ui.CLR["panel"], highlightthickness=0,
-                       borderwidth=0)
-    bar = ttk.Scrollbar(holder, orient=tk.VERTICAL, command=canvas.yview)
-    canvas.configure(yscrollcommand=bar.set)
-    bar.pack(side=tk.RIGHT, fill=tk.Y)
-    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    plist = tk.Frame(canvas, bg=ui.CLR["panel"])
-    win = canvas.create_window((0, 0), window=plist, anchor="nw")
-
-    def _sync(_e=None):
-        """Keep the scroll region and inner width matched to the canvas."""
-        canvas.configure(scrollregion=canvas.bbox("all"))
-        canvas.itemconfigure(win, width=canvas.winfo_width())
-
-    plist.bind("<Configure>", _sync)
-    canvas.bind("<Configure>", _sync)
-    canvas.bind("<MouseWheel>",
-                lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1,
-                                              "units"))
-
+def _bulk_buttons(ui: ModsUI, body, picks) -> None:
+    """All / None over whatever `picks` holds when the button is pressed."""
     def _set_all(value):
-        """Tick or untick every plugin at once."""
-        for _rel, v in picks:
-            v.set(value)
+        """Tick or untick every row at once."""
+        for _name, var in picks:
+            var.set(value)
 
-    bulk = tk.Frame(card, bg=ui.CLR["panel"])
+    bulk = tk.Frame(body, bg=ui.CLR["panel"])
     bulk.pack(anchor="w", padx=16, pady=(4, 0))
     ttk.Button(bulk, text="All", command=lambda: _set_all(True)).pack(
         side=tk.LEFT)
     ttk.Button(bulk, text="None", command=lambda: _set_all(False)).pack(
         side=tk.LEFT, padx=(6, 0))
-    return plist
+
+
+def _subpackage_picks(ui: ModsUI, body, manifest, on_change) -> list:
+    """Checkbuttons for a complex BAIN archive's sub-packages, all ticked."""
+    if not manifest.all_subpackages:
+        return []
+    _list_heading(ui, body, f"Sub-packages ({len(manifest.all_subpackages)})")
+    picks = []
+    for name in manifest.all_subpackages:
+        var = tk.BooleanVar(value=True)
+        picks.append((name, var))
+        var.trace_add("write", lambda *_a: on_change())
+        _checkbutton(body, ui, name, var).pack(anchor="w", padx=(28, 16))
+    _bulk_buttons(ui, body, picks)
+    return picks
+
+
+class _PluginPicks:
+    """The plugin checkbuttons, rebuilt whenever the sub-packages change.
+
+    A BAIN compilation's plugins belong to sub-packages, so offering all 34
+    of Unique Landscapes' while only `00 Core` is ticked invites picking a
+    plugin the import will never extract. Ticks already made are remembered
+    across a rebuild, so re-ticking a sub-package restores its plugins as
+    the user last left them.
+    """
+
+    def __init__(self, ui: ModsUI, body, manifest, on_change):
+        """Build the heading and an empty row list; `rebuild` fills it."""
+        self.ui, self.manifest, self.on_change = ui, manifest, on_change
+        self.picks, self.state = [], {}
+        self.heading = _list_heading(ui, body, "Plugins")
+        self.rows = tk.Frame(body, bg=ui.CLR["panel"])
+        self.rows.pack(fill=tk.X)
+        _bulk_buttons(ui, body, self.picks)
+
+    def rebuild(self, chosen) -> None:
+        """Re-list the plugins `chosen` sub-packages ship."""
+        for name, var in self.picks:
+            self.state[name] = bool(var.get())
+        for child in self.rows.winfo_children():
+            child.destroy()
+        self.picks.clear()
+        rels = plugins_for_subpackages(self.manifest, chosen)
+        self.heading.set(f"Plugins ({len(rels)})")
+        for rel in rels:
+            var = tk.BooleanVar(value=self.state.get(rel, True))
+            self.picks.append((rel, var))
+            var.trace_add("write", lambda *_a: self.on_change())
+            _checkbutton(self.rows, self.ui, os.path.basename(rel),
+                         var).pack(anchor="w", padx=(28, 16))
+        self.on_change()
+
+    def chosen(self) -> list:
+        """The payload-relative plugins currently ticked."""
+        return [rel for rel, var in self.picks if var.get()]
 
 
 class _MissingWarning:
@@ -609,35 +702,19 @@ def confirm_import(ui: ModsUI, manifest, by_plugin=None) -> None:
     by_plugin = by_plugin or {}
     card = _card(ui, "Import Mod")
     close = _closer(card)
-    tk.Label(card, text="\n".join(_summary_lines(manifest)),
+    body = _card_body(ui, card)
+    tk.Label(body, text="\n".join(_summary_lines(manifest)),
              bg=ui.CLR["panel"], fg=ui.CLR["subtext"], font=("Segoe UI", 9),
              justify=tk.LEFT, anchor="w", wraplength=420).pack(anchor="w",
                                                                padx=16)
-    subs = _subpackage_picks(ui, card, manifest)
-    warning, picks = [None], []
-
-    def _compute():
-        """The masters still missing for whatever is ticked right now."""
-        return missing_masters(ui, by_plugin,
-                               [rel for rel, var in picks if var.get()])
-
-    if manifest.plugins:
-        picks = _plugin_picks(ui, card, manifest,
-                              lambda: warning[0].queue(_compute))
-    else:
-        _no_plugin_note(ui, card)
-
-    anchor = tk.Frame(card, bg=ui.CLR["panel"], height=0)
-    anchor.pack(anchor="w")
-    warning[0] = _MissingWarning(ui, card, anchor)
-    warning[0].refresh(_compute())
+    subs, plugs = _build_pickers(ui, body, manifest, by_plugin)
     keep_var = tk.BooleanVar(value=True)
     if not manifest.is_folder:
-        _keep_checkbox(ui, card, manifest, keep_var)
+        _keep_checkbox(ui, body, manifest, keep_var)
 
     def _go():
         """Start the ingest with the chosen plugins and sub-packages."""
-        chosen = [rel for rel, var in picks if var.get()]
+        chosen = plugs[0].chosen() if plugs[0] else []
         picked = [n for n, v in subs if v.get()]
         keep = bool(keep_var.get())
         close()
@@ -651,6 +728,42 @@ def confirm_import(ui: ModsUI, manifest, by_plugin=None) -> None:
 
     _buttons(ui, card, close, "Import", _go)
     _show(card)
+
+
+def _build_pickers(ui: ModsUI, body, manifest, by_plugin):
+    """The sub-package and plugin pickers, wired so the first drives the second.
+
+    Returns (subpackage picks, [plugin picks or None]). The plugin list is
+    rebuilt from the ticked sub-packages, so it only ever offers plugins the
+    import will actually extract.
+    """
+    warning, plugs = [None], [None]
+
+    def _compute():
+        """The masters still missing for whatever is ticked right now."""
+        return missing_masters(ui, by_plugin,
+                               plugs[0].chosen() if plugs[0] else [])
+
+    def _refresh():
+        """Re-list the plugins for the sub-packages ticked right now."""
+        if plugs[0] is not None:
+            plugs[0].rebuild([n for n, v in subs if v.get()])
+
+    subs = _subpackage_picks(ui, body, manifest, _refresh)
+    if manifest.plugins:
+        plugs[0] = _PluginPicks(ui, body, manifest,
+                                lambda: warning[0].queue(_compute))
+    else:
+        _no_plugin_note(ui, body)
+
+    anchor = tk.Frame(body, bg=ui.CLR["panel"], height=0)
+    anchor.pack(anchor="w")
+    warning[0] = _MissingWarning(ui, body, anchor)
+    if plugs[0] is not None:
+        plugs[0].rebuild([n for n, v in subs if v.get()])
+    else:
+        warning[0].refresh(_compute())
+    return subs, plugs
 
 
 def run_import(ui: ModsUI, manifest, chosen, keep_archive,

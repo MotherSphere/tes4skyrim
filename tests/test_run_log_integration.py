@@ -17,7 +17,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import run_log  # noqa: E402
+import run_log
 
 
 # A plugin that cannot exist: the export stage fails immediately, so the run

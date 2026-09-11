@@ -42,8 +42,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # tes5_import uses re-export pattern that ruff F401 would incorrectly remove
 "tes5_import/__init__.py" = ["F401"]
-"tes5_import/constants.py" = ["F401"]
-"tes5_import/record_types/common.py" = ["F401"]
+"tes5_import/base/constants.py" = ["F401"]
+# Script-style tools are documented as `python tools/<x>.py`, so they insert
+# the repo root on sys.path before importing it -- E402 is inherent to that.
+"tools/**/*.py" = ["E402"]
+"tests/*.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["tes4_export", "tes5_import", "asset_convert", "core"]

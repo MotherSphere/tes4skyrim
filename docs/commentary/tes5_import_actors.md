@@ -254,6 +254,13 @@ because the faction carries no crime data. The player is not a member, so the
 lock still reads Requires Key and activation stays blocked; the OnActivate
 preamble restores the lock after each AI passage.
 
+TES4 `XACT`/`ONAM` ("Open by Default") is deliberately NOT transferred by
+`convert_REFR`. In Skyrim those make the door SPAWN open, but Oblivion doors
+carrying them still spawn closed — verified in-game, where every CharacterGen
+portcullis stood open at load once they were passed through. Oblivion opens
+such doors through the AI bypass instead, which is what the consume-door
+handling at `XLOC` reproduces.
+
 ## <a id="faction-relations"></a>FACT relations: Ally and Friend are not interchangeable
 
 TES4 Relations become TES5 XNAM — `Faction(FormID) Modifier(S32)

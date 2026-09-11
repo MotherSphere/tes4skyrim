@@ -14,7 +14,7 @@ idiom instead of the poll.
 
 This module is the SHARED analysis both sides run so they agree exactly:
 
-  * the importer (tes5_import.import_main) builds the plan and writes one MESG
+  * the importer (tes5_import.pipeline) builds the plan and writes one MESG
     per call site — EDID `TES4Msg_<Script>_<NN>`, DESC = the message text,
     ITXT per button — then registers each EDID in _WELL_KNOWN_PROPERTIES so
     the VMAD property pass can bind them;

@@ -42,11 +42,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from core.subprocess_flags import windows_cmd
 
-from tes5_import.writer import (pack_record, pack_subrecord, pack_tes4_header,
+from tes5_import.base.writer import (pack_record, pack_subrecord, pack_tes4_header,
                                 pack_top_group, pack_string_subrecord,
                                 pack_formid_subrecord, pack_uint32_subrecord,
-                                _count_records_and_groups)
-from tes5_import.dialog_conditions import build_ctda
+                                count_records_and_groups)
+from tes5_import.base.conditions import build_ctda
 from script_convert.pipeline import build_vmad_object_script
 
 PLUGIN_NAME = 'TESGameSelect.esp'
@@ -358,15 +358,18 @@ def _pack_script_entry(name: str, object_props: dict) -> bytes:
 
 
 def build_plugin(skyrim_esm: str) -> bytes:
+    """The finished plugin bytes.
+
+    HEDR count is records + GRUPs, matching vanilla Skyrim.esm and the
+    main writer.  An undercount is not cosmetic: the engine walks the
+    file by this number and a wrong one silently drops records.
+    """
     groups = [
         pack_top_group('GLOB', b''.join(build_glob(f, e) for f, e in GLOBALS)),
         pack_top_group('MESG', build_mesg()),
         pack_top_group('QUST', build_qust() + build_mq101_override(skyrim_esm)),
     ]
-    # HEDR count = records + GRUPs, matching vanilla Skyrim.esm and the main
-    # writer. An undercount here is not cosmetic: the engine walks the file by
-    # this number, and a wrong one silently drops records.
-    count = sum(_count_records_and_groups(g) for g in groups)
+    count = sum(count_records_and_groups(g) for g in groups)
     header = pack_tes4_header(
         ['Skyrim.esm'],
         num_records=count,

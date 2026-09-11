@@ -185,7 +185,7 @@ def test_lookup_ignores_the_load_order_index_byte():
     lookup miss SILENTLY — no error, every NPC just fell back to the
     bucket-0 mesh and the whole length feature evaporated.
     """
-    from tes5_import import hair_variants
+    from tes5_import.actors import hair_variants as hair_variants
 
     hair_variants._BUCKETS.clear()
     hair_variants._HAS_TRI.clear()
@@ -878,8 +878,8 @@ def test_master_owned_hair_resolves_to_the_base_id():
     master-owned hair therefore resolves to its base FormID, which the
     load-order remap rewrites like any other cross-plugin reference.
     """
-    from tes5_import import hair_variants
-    from tes5_import.npc_face_mapper import _resolve_hair_part
+    from tes5_import.actors import hair_variants as hair_variants
+    from tes5_import.actors.npc_face_mapper import _resolve_hair_part
 
     w = _FakeWriter()
     fid = 0x010C4821

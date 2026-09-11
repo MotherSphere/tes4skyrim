@@ -89,8 +89,8 @@ ALLOWED = {
     ('asset_convert/ui/book_inam.py', '_out_root'): 'resolver fallback',
     ('asset_convert/sources/bsa_pack.py', '_out_root'): 'resolver fallback',
     ('asset_convert/lod/terrain_lod.py', '_master_record_dir'): 'resolver fallback',
-    ('tes5_import/overrides.py', '_master_export_dir'): 'resolver fallback',
-    ('tes5_import/master_manifest.py', '_master_export_dir'): 'resolver fallback',
+    ('tes5_import/overrides/nested.py', 'master_export_dir'): 'resolver fallback',
+    ('tes5_import/overrides/manifest.py', 'master_export_dir'): 'resolver fallback',
     ('convert.py', 'record_dir'): 'resolver fallback',
     ('convert.py', 'plugin_out_root'): 'resolver fallback',
     ('asset_convert/sources/mod_ingest.py', 'ingest'): 'builds the group folder',
@@ -297,8 +297,8 @@ ASSET_ALLOWED = {
     ('output_layout.py', 'assets_for'),
     # These receive an already-resolved asset root, not a record dir.
     ('asset_convert/collision/collision_extract.py', 'scan_mesh_data'),
-    ('tes5_import/pgrd_to_navm.py', '_door_axis_map'),
-    ('tes5_import/pgrd_to_navm.py', '_bounds_map'),
+    ('tes5_import/navmesh/from_pgrd.py', '_door_axis_map'),
+    ('tes5_import/navmesh/from_pgrd.py', '_bounds_map'),
     # animdata_base is a PER-PLUGIN cache and correctly sits in the record dir.
     ('asset_convert/havok/creature_pipeline.py', 'merge_animdata_singlefiles'),
 }
@@ -378,7 +378,7 @@ def test_manifest_source_is_the_plugin_not_the_mod(tmp_path):
     offered a plugin that does not exist and cannot be re-run.
     """
     import json
-    from tes5_import.master_manifest import write_manifest, manifest_path
+    from tes5_import.overrides.manifest import write_manifest, manifest_path
 
     out = tmp_path / 'Black Marsh'
     out.mkdir()

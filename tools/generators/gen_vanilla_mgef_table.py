@@ -1,7 +1,7 @@
-"""Generate tes5_import/vanilla_mgef_data.py from the Skyrim.esm MGEF dump.
+"""Generate tes5_import/generated/vanilla_mgef_data.py from the Skyrim.esm MGEF dump.
 
 The import pipeline sometimes needs to synthesize a companion MGEF that is an
-"aimed variant" of a vanilla magic effect (see tes5_import/magic_effects.py) —
+"aimed variant" of a vanilla magic effect (see tes5_import/actors/magic_effects.py) —
 that requires the vanilla effect's full 152-byte DATA struct at conversion
 time.  End users running the converter do not have the references/ dump, so
 this tool bakes the DATA blobs for every vanilla MGEF the mapping tables can
@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tes5_import.skyrim_overrides import (
+from tes5_import.base.equivalents import (
     MGEF_AV_CODE_TO_SKYRIM,
     MGEF_CODE_TO_SKYRIM,
 )

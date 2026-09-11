@@ -27,8 +27,8 @@ TES5 record order: EDID VMAD FULL MDOB KSIZ/KWDA DATA ESCE* SNDD DNAM CTDA
 import struct
 import threading
 
-from ..text_reader import get_float, get_formid, get_int, get_str
-from ..writer import (
+from ..base.text_reader import get_float, get_formid, get_int, get_str
+from ..base.writer import (
     pack_formid_subrecord,
     pack_record,
     pack_string_subrecord,
@@ -809,7 +809,7 @@ def convert_MGEF(rec: dict, writer=None) -> bytes:
 
     TES5 order: EDID VMAD FULL MDOB KSIZ/KWDA DATA ESCE* SNDD DNAM CTDA
     """
-    from ..object_scripts import get_object_vmad
+    from ..base.object_scripts import get_object_vmad
 
     code = get_str(rec, 'EditorID')
     subs = b''
@@ -978,7 +978,7 @@ def build_seff_variants(mgef_records: list, effect_records: list, writer,
     if writer is None:
         return 0
 
-    from ..object_scripts import get_magic_effect_vmad
+    from ..base.object_scripts import get_magic_effect_vmad
 
     seff = next((r for r in mgef_records
                  if get_str(r, 'EditorID') == 'SEFF'), None)

@@ -42,7 +42,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from core.subprocess_flags import configure_multiprocessing
 from core.process_job import create_pool_job
-from output_layout import assets_for  # noqa: E402
+from output_layout import assets_for
 
 configure_multiprocessing()
 create_pool_job()

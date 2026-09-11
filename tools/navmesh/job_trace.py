@@ -2,7 +2,7 @@
 
 WHY THIS EXISTS (and why the other navmesh tools don't cover it)
 
-`tes5_import.navm_worker.run_job` deliberately catches per-cell errors so one bad
+`tes5_import.navmesh.worker.run_job` deliberately catches per-cell errors so one bad
 cell cannot abort the 2,900-job pool, and the pool's workers run under
 `pythonw.exe` where stdout goes nowhere. So when the import reports
 
@@ -48,7 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 
 def _load(export_dir, offset):
-    from tes5_import.text_reader import (parse_export_directory,
+    from tes5_import.base.text_reader import (parse_export_directory,
                                          group_records_by_type,
                                          set_formid_index_offset)
     from tes5_import import import_main as im
@@ -115,8 +115,8 @@ def main():
     geom_cache = navm_pool.navmesh_geom_cache(collision_cache)
     dcc = str(assets_for(export_dir) / 'door_centers_cache.json')
 
-    from tes5_import import navm_worker
-    from tes5_import.pgrd_to_navm import convert_PGRD
+    from tes5_import.navmesh import worker as navm_worker
+    from tes5_import.navmesh.from_pgrd import convert_PGRD
 
     navm_worker.init_worker(
         base_model_by_fid, door_fids, collision_cache, args.offset, geom_cache,

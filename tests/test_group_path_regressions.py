@@ -209,21 +209,21 @@ def test_master_lookups_all_agree_on_the_export_root(tmp_path):
     silently: dropped manifest entries, no voice-type adoption, no inherited
     creature projects -- each with at most a warning.
     """
-    from tes5_import.overrides import _export_root, _master_export_dir
+    from tes5_import.overrides.nested import export_root, master_export_dir
 
     exp = _fake_group(tmp_path, ['A.esm', 'B.esp'])
     rec = exp / 'My Pack' / 'A.esm'
     rec.mkdir(parents=True)
     (exp / 'Oblivion.esm').mkdir()
 
-    assert _export_root(str(rec)) == str(exp)
-    assert _master_export_dir(_export_root(str(rec)),
+    assert export_root(str(rec)) == str(exp)
+    assert master_export_dir(export_root(str(rec)),
                               'Oblivion.esm') == str(exp / 'Oblivion.esm')
 
     # A plain (non-grouped) plugin is unchanged.
     plain = exp / 'Nehrim.esm'
     plain.mkdir()
-    assert _export_root(str(plain)) == str(exp)
+    assert export_root(str(plain)) == str(exp)
 
 
 def test_import_main_master_dirs_match_load_master_export(tmp_path):
@@ -233,8 +233,8 @@ def test_import_main_master_dirs_match_load_master_export(tmp_path):
     every grouped plugin, so the voice-type adoption loop never ran and every
     actor fell through to the Imperial default.
     """
-    from tes5_import.import_main import _master_export_dirs
-    from tes5_import.overrides import _export_root, _master_export_dir
+    from tes5_import.pipeline import _master_export_dirs
+    from tes5_import.overrides.nested import export_root, master_export_dir
 
     exp = _fake_group(tmp_path, ['A.esm', 'B.esp'])
     rec = exp / 'My Pack' / 'A.esm'
@@ -247,7 +247,7 @@ def test_import_main_master_dirs_match_load_master_export(tmp_path):
         export_dir = str(rec)
 
     got = _master_export_dirs(_Ctx())
-    assert got == [_master_export_dir(_export_root(str(rec)), 'Oblivion.esm')]
+    assert got == [master_export_dir(export_root(str(rec)), 'Oblivion.esm')]
     assert got != []
 
 
@@ -257,7 +257,7 @@ def test_creature_projects_are_inherited_from_a_master(tmp_path):
     Without them the CREA records reusing a master's creature folders fall
     through to `resolve_creature_race` and ship as BASE SKYRIM creatures.
     """
-    from tes5_import.creature_races import _load_projects
+    from tes5_import.actors.creature_races import _load_projects
 
     exp = _fake_group(tmp_path, ['A.esm', 'B.esp'])
     rec = exp / 'My Pack' / 'A.esm'
@@ -266,10 +266,7 @@ def test_creature_projects_are_inherited_from_a_master(tmp_path):
                                      encoding='utf-8')
     master = exp / 'Oblivion.esm'
     master.mkdir()
-    # Written through the real producer: the file carries a versioned
-    # envelope, and a stub entry missing a required key is now rejected as
-    # stale (tes5_import/artifact_schema.py).
-    from tes5_import.artifact_schema import write_artifact
+    from tes5_import.base.artifact_schema import write_artifact
     write_artifact(str(master / 'creature_projects.json'), 'Oblivion.esm',
                    {'rat': {'project_hkx': 'Actors\TES4\rat\p.hkx',
                             'behavior_hkx': 'Actors\TES4\rat\b.hkx',
@@ -314,9 +311,9 @@ def test_book_inam_passes_the_asset_root_to_the_ownership_split():
 def test_import_main_points_the_soun_converter_at_the_asset_root():
     """The SOUN directory expansion reads `sound/`, which is asset-side."""
     import inspect
-    from tes5_import import import_main
+    from tes5_import import pipeline as import_main
 
-    src = inspect.getsource(import_main.import_plugin)
+    src = inspect.getsource(import_main)
     assert 'set_sound_source_dir(str(assets_for(export_dir)))' in src, (
         'set_sound_source_dir is being handed a record dir again -- every '
         'directory-valued SOUN ANAM becomes an unplayable bare path')

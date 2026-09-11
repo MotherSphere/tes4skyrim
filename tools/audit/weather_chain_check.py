@@ -3,7 +3,7 @@ in a converted TES5 plugin."""
 import struct
 import sys
 
-from tes5_import.tes5_reader import records as read_records
+from tes5_import.base.tes5_reader import records as read_records
 
 path = sys.argv[1]
 data = open(path, 'rb').read()

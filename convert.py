@@ -379,14 +379,10 @@ def _write_base_plugins(export_dir, name, bases):
 def _missing_master_exports(results, export_dir: str, tes4_data: str) -> dict:
     """{master_name: {plugins needing it}} for masters lacking an export dir.
 
-    A plugin's masters resolve through `record_dir` (see
-    tes5_import/overrides.py:load_master_export), so a missing one is the
-    project's classic silent-failure mode.
+    Resolved through the registry, never by joining the name onto `export/`:
+    an imported mod's plugins live inside their mod's shared folder.
 
-    Resolved through the registry rather than by joining the name onto
-    `export/`: an imported mod's plugins live inside their mod's shared folder,
-    so a plugin mastering a resource pack's ESM reported every one of its
-    masters as missing while they sat converted one level down.
+    See: docs/commentary/tes5_import_mod_merge.md#master-export-resolution
     """
     from asset_convert.sources import source_registry
 
@@ -689,9 +685,9 @@ def phase_creatures(file_name: str, tes5_data: str, config: dict,
 def phase_import(file_name: str, tes4_data: str, tes5_data: str,
                  export_dir: str, config: dict, output_dir: str = None):
     """Import using the Python tes5_import package."""
-    from tes5_import.import_main import import_plugin
-    from tes5_import.override_merge import MissingMasterOutputError
-    from tes5_import.artifact_schema import StaleArtifactError
+    from tes5_import.pipeline import import_plugin
+    from tes5_import.overrides.master_index import MissingMasterOutputError
+    from tes5_import.base.artifact_schema import StaleArtifactError
 
     export_subdir = str(record_dir(export_dir, file_name))
     if not os.path.isdir(export_subdir):
@@ -803,7 +799,7 @@ def phase_sounds(file_name: str, config: dict, output_dir: str = None):
 def phase_scripts(file_name: str, config: dict, output_dir: str = None):
     """Convert TES4 scripts to Papyrus .psc source files."""
     from script_convert.pipeline import convert_all_scripts
-    from tes5_import.artifact_schema import StaleArtifactError
+    from tes5_import.base.artifact_schema import StaleArtifactError
 
     export_root = str(SCRIPT_DIR / "export")
     export_subdir = str(record_dir(export_root, file_name))
@@ -1470,7 +1466,6 @@ def _run_pipeline():
     export_dir   = str(SCRIPT_DIR / "export")
 
     os.makedirs(export_dir, exist_ok=True)
-    os.makedirs(os.path.join(export_dir, "mappings"), exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
 
     if args.build_morrowind_patch:

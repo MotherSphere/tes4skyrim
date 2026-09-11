@@ -30,8 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tes5_import.text_reader import parse_export_file  # noqa: E402
-from script_convert import pipeline  # noqa: E402
+from tes5_import.base.text_reader import parse_export_file
+from script_convert import pipeline
 
 
 def _quest_records(export_dir: str, quest_edid: str, by_type: dict):
