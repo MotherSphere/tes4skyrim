@@ -11,6 +11,7 @@
 - [Object LOD: `_lod` in FO3/FNV, `_far` in Oblivion](#object-lod-suffix-differs-by-game)
 - [Prescreening the LODGen input](#prescreening-the-lodgen-input)
 - [`write_lodgen_input`: master modes and `only_cells`](#write-lodgen-input-master-modes)
+- [Terrain LOD invents ground over cells that own no LAND](#lod-invents-terrain-over-cells-with-no-land)
 
 ## Grass (GRAS) conversion — record invariants + shader profile (2026-07-09)
 <a id="grass-conversion-record-invariants-shader"></a>
@@ -1342,3 +1343,43 @@ same string either way, and every validity check still runs.
 When the sheet layout is not the one verified against (`scaled == 0`) or the
 vanilla source mesh is unavailable, None is returned: the caller omits MODL and
 the engine falls back to its own default, never a broken model reference.
+
+
+## <a id="lod-invents-terrain-over-cells-with-no-land"></a>Terrain LOD invents ground over cells that own no LAND
+
+**Code:** the tile queue in `generate_terrain_lod`, `_assemble_tile` and
+`fill_missing` in `asset_convert/lod/terrain_lod.py`.
+
+A tile is queued when `any(c in lands for c in cells)` — ONE real cell anywhere
+in a `level x level` footprint builds the whole tile. `_assemble_tile` leaves
+every cell with no LAND as NaN, and `fill_missing` then edge-extends the nearest
+real row/column across them rather than leaving a hole. The result is LOD ground
+where the plugin authored none.
+
+Measured on WrldMorrowind (Morrowind_ob.esm + TR_Mainland.esm, 15,615 LAND
+cells), counting each baked tile's footprint against cells that own a LAND:
+
+| level | tiles | real cells | footprint | real |
+|---|---|---|---|---|
+| 4 | 1,037 | 15,602 | 16,592 | 94.0% |
+| 8 | 291 | 15,607 | 18,624 | 83.8% |
+| 16 | 89 | 15,615 | 22,784 | 68.5% |
+| 32 | 30 | 15,615 | 30,720 | 50.8% |
+
+At level 32 HALF the baked footprint is invented. The coarser the level the
+further a tile reaches past the landmass, because the footprint grows as
+`level^2` while the real cells do not.
+
+Worked example — TES4 cell (30,-60), which no plugin owns. TR's TES3 source
+stops at TES3 x=14, and a TES3 cell splits into four TES4 cells, so TES4 x=30
+would need TES3 x=15. No LOD4 tile exists at (28,-60), but the level 8/16/32
+tiles at (24,-64), (16,-64) and (0,-64) all cover it, and `fill_missing`
+column-extends the heights of (27,-60) — the nearest real cell, three cells
+west — across it. Because each empty column takes its OWN nearest source
+column, neighbouring invented cells inherit DIFFERENT heights: that is the
+vertically disjointed terrain seen in-game. `WrldMorrowind.4.28.-64.btr` is
+12/16 invented.
+
+`fill_missing` is right for a hole INSIDE the landmass, where a Z=0 crater
+between real cells would be worse. It is wrong past the coastline, where absent
+LAND means "no ground here". The two cases are not distinguished today.

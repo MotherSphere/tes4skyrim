@@ -305,6 +305,10 @@ real data, or a failing-then-passing test.
   change affects. Reserve the full stage for changes that genuinely touch every
   mesh, and say so when you run one.
 - **Build the mesh the user named, in the PLUGIN the user named** If they say a mesh is a Nehrim issue, rebuild it under `Nehrim.esm` even if there is a same-named mesh under `Oblivion.esm`
+- 🛑 **A `--*-only` FLAG IS A STAGE, NOT A SCOPE** — `--lod-only` bakes every
+  qualifying worldspace, masters' included. Confirm the target from the first
+  output lines before calling a build running; a banner is not progress.
+  Scoping one worldspace by hand still needs its overlays.
 - **Never run two CPU-saturating jobs at once.** The order is **targeted tests
   first, then builds, one at a time.** While one runs, do not start pytest, a
   mesh sweep, or a second build — wait for the completion notification, then

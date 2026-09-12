@@ -16,11 +16,8 @@ Local step = CELL_SIZE / (level*32) so that level verts × step = CELL_SIZE.
 Heights are in Skyrim units (1 unit ≈ 1.4 cm).  Cell size = 4096 units.
 """
 
-import io
-import math
 import mmap
 import struct
-import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -32,6 +29,8 @@ from core.worker_budget import worker_count
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 apply_patches()
 from asset_convert.lod.terrain_lod_falloutnv import edid_keyed_lod_tiles, resolve_edid_keyed
+from asset_convert.lod.terrain_nif import (CELL_SIZE, PYFFI_AVAILABLE,
+                                           build_terrain_nif, tile_solid_mask)
 from output_layout import assets_for
 from asset_convert.texture.dds_codec import (
     TEX_SIZE,
@@ -43,17 +42,10 @@ from tes5_import.base.tes5_reader import (GRP_TOP,
                                      header_end, read_group,
                                      read_record, records, walk)
 
-try:
-    from pyffi.formats.nif import NifFormat
-    _PYFFI = True
-except ImportError:
-    _PYFFI = False
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-CELL_SIZE   = 4096.0   # Skyrim units per cell
 VERTS_SIDE  = 33       # vertices per cell side in TES5 LAND records (32 intervals)
 DELTA_SCALE = 8.0      # each int8 delta = 8 Skyrim units of height
 
@@ -846,333 +838,6 @@ def _tile_water_quads(lands, cell_water, tile_x, tile_y, level, default_wh):
 # ---------------------------------------------------------------------------
 # DDS writing (DXT1 via PIL/Pillow or pure-Python fallback)
 # ---------------------------------------------------------------------------
-
-def _set_local_bounding_sphere(shapedata, verts):
-    """Set the shape's bounding sphere in LOCAL coords, vanilla-style.
-
-    Vanilla uses the bbox center with the corner distance as the radius.
-    Returns the (lo, hi, center) bbox arrays for callers that also need them.
-    """
-    va = np.array(verts, dtype=np.float64)
-    lo = va.min(axis=0)
-    hi = va.max(axis=0)
-    ctr = (lo + hi) / 2.0
-    shapedata.center.x, shapedata.center.y, shapedata.center.z = ctr
-    shapedata.radius = float(np.linalg.norm((hi - lo) / 2.0))
-    return lo, hi, ctr
-
-
-def _build_water_node(water_quads, level: int):
-    """Build the vanilla-style LOD water node for a tile.
-
-    Vanilla .btr structure (verified against Skyrim.esm terrain meshes):
-      root "chunk" child[1] = BSMultiBoundNode named "WATER" (scale 1) holding
-      one shape with an independent flat quad per water cell:
-        * LOD4:  BSSegmentedTriShape with EXACTLY 16 segments — a fixed 4x4
-          grid over the tile (1 cell per segment at LOD4), column-major
-          (segment index = sx*4 + sy).  Segments let the engine hide the quad
-          for cells that are loaded at full detail.  Per-segment binary layout
-          (nif.xml BSGeometrySegmentData, PyFFI's BSSegment fields are
-          misaligned over the same 9 bytes):
-            flags(byte)=0 | start_index(uint, tri-POINTS, 0 when empty)
-            | num_primitives(uint)
-          Through PyFFI's fields: internal_index = start_index << 8, and
-          num_primitives=2 lands exactly on the bsseg_water bit (2 << 8).
-        * LOD8/16/32: plain NiTriShape (no segments — these tiles never
-          overlap the loaded-cell area).
-      The shape has NO shader property, no UVs, no normals: the engine
-      attaches the worldspace LOD water shader itself (WRLD NAM3).  That is
-      also why NAM3 must point at a valid WATR record — a null one CTDs.
-      Quad verts are local 0..4096 like the land (x scale=level), Z = water
-      height / level.  Quads are unshared (4 verts each) so per-cell heights
-      can differ.
-    """
-    cell_local = CELL_SIZE / level
-    scale = float(level)
-
-    quad_map = {(cx, cy): wh for cx, cy, wh in water_quads}
-    span = max(1, level // 4)   # cells per segment side (4x4 segment grid)
-
-    ordered = []                # quads in segment order, column-major
-    seg_num_prims = [0] * 16
-    seg_start = [0] * 16
-    for sx in range(4):
-        for sy in range(4):
-            seg = sx * 4 + sy
-            n_before = len(ordered)
-            for cx in range(sx * span, (sx + 1) * span):
-                for cy in range(sy * span, (sy + 1) * span):
-                    wh = quad_map.get((cx, cy))
-                    if wh is not None:
-                        ordered.append((cx, cy, wh))
-            count = len(ordered) - n_before
-            seg_num_prims[seg] = count * 2
-            # start_index in triangle points; vanilla stores 0 for empty segments
-            seg_start[seg] = n_before * 6 if count else 0
-
-    verts = []
-    tris = []
-    for cx, cy, wh in ordered:
-        x0 = cx * cell_local
-        y0 = cy * cell_local
-        z = wh / scale
-        b = len(verts)
-        verts += [(x0, y0, z), (x0 + cell_local, y0, z),
-                  (x0, y0 + cell_local, z), (x0 + cell_local, y0 + cell_local, z)]
-        tris += [(b, b + 1, b + 2), (b + 1, b + 3, b + 2)]
-
-    # ---- geometry data ----
-    shapedata = NifFormat.NiTriShapeData()
-    shapedata.has_vertices = True
-    shapedata.has_normals = False
-    shapedata.num_uv_sets = 0
-    shapedata.has_uv = False
-    shapedata.num_vertices = len(verts)
-    shapedata.vertices.update_size()
-    for i, (x, y, z) in enumerate(verts):
-        shapedata.vertices[i].x = x
-        shapedata.vertices[i].y = y
-        shapedata.vertices[i].z = z
-    shapedata.num_triangles = len(tris)
-    shapedata.num_triangle_points = len(tris) * 3
-    shapedata.has_triangles = True
-    shapedata.triangles.update_size()
-    for i, (a, b, c) in enumerate(tris):
-        shapedata.triangles[i].v_1 = a
-        shapedata.triangles[i].v_2 = b
-        shapedata.triangles[i].v_3 = c
-
-    lo, hi, ctr = _set_local_bounding_sphere(shapedata, verts)
-
-    if level == 4:
-        shape = NifFormat.BSSegmentedTriShape()
-        shape.num_segments = 16
-        shape.segment.update_size()
-        for i in range(16):
-            seg = shape.segment[i]
-            # True layout: flags byte (0) | start uint | num_prims uint.
-            # PyFFI's misaligned view: internal_index covers flags+start[0:3],
-            # its 'flags' bitstruct covers start[3]+num_prims[0:3].
-            seg.internal_index = (seg_start[i] << 8) & 0xFFFFFFFF
-            seg.flags.bsseg_water = 1 if seg_num_prims[i] else 0
-            seg.unknown_byte_1 = 0
-    else:
-        shape = NifFormat.NiTriShape()
-    shape.name = b''
-    shape.flags = 14
-    shape.scale = scale
-    shape.data = shapedata
-
-    # ---- WATER BSMultiBoundNode ----
-    whs = [wh for _, _, wh in ordered]
-    aabb = NifFormat.BSMultiBoundAABB()
-    # XY: bbox of the quads in WORLD units relative to the tile origin.
-    aabb.position.x = float(ctr[0] * scale)
-    aabb.position.y = float(ctr[1] * scale)
-    aabb.extent.x = float((hi[0] - lo[0]) / 2.0 * scale)
-    aabb.extent.y = float((hi[1] - lo[1]) / 2.0 * scale)
-    # Z: vanilla spans [min height, max(max height, 0)].
-    z_lo = min(whs)
-    z_hi = max(max(whs), 0.0)
-    aabb.position.z = (z_lo + z_hi) / 2.0
-    aabb.extent.z = (z_hi - z_lo) / 2.0
-
-    multi_bound = NifFormat.BSMultiBound()
-    multi_bound.data = aabb
-
-    wnode = NifFormat.BSMultiBoundNode()
-    wnode.name = b'WATER'
-    wnode.flags = 14
-    wnode.multi_bound = multi_bound
-    wnode.num_children = 1
-    wnode.children.update_size()
-    wnode.children[0] = shape
-    return wnode
-
-
-def _build_terrain_nif(heights: np.ndarray, tile_x: int, tile_y: int,
-                       level: int, edid: str, output_dir: Path,
-                       water_quads=None) -> bytes:
-    """Build a .btr NIF for a terrain tile and return bytes.
-
-    Vertex layout matches vanilla Skyrim terrain LOD:
-      - BSMultiBoundNode root named "chunk" (required for Skyrim LOD culling)
-      - NiTriShape child named "Land" with scale=level
-      - All levels: 33×33 = 1089 verts at local step=128 (matches vanilla ~1056 vert count)
-      - heights input is the full-res (level*32+1)² grid
-      - Z = world_height / scale  (vertex_z × scale = world_Z in game units)
-      - No normals; 1 UV set (all zero) — LOD landscape shader uses world-space texturing
-      - Bounding sphere and AABB position use world-space Z
-    """
-    if not _PYFFI:
-        raise RuntimeError("pyffi not available")
-
-    nif_data = NifFormat.Data()
-    nif_data.version        = 0x14020007   # 20.2.0.7
-    nif_data.user_version   = 12           # Skyrim
-    nif_data.user_version_2 = 83           # Skyrim LE
-    nif_data.header.endian_type = 1        # little-endian
-
-    # ------------------------------------------------------------------ #
-    # Geometry
-    # ------------------------------------------------------------------ #
-    # All levels: subsample to 33×33 (1089 verts).
-    #   Vanilla Skyrim LE LOD4 uses ~1056 verts (decimated), so 33×33 is
-    #   comparable and avoids rendering issues from oversized meshes.
-    #   LOD8+ full-res (257²=66049) also overflows uint16.
-    src_tv = level * 32 + 1
-    assert heights.shape == (src_tv, src_tv), \
-        f"Expected heights shape ({src_tv},{src_tv}), got {heights.shape}"
-
-    # Subsample to 33×33: stride=level samples indices 0,level,2*level,...,32*level
-    # Local tile spans CELL_SIZE = 4096 units; step = 4096/32 = 128
-    tv   = 33
-    step = CELL_SIZE / (tv - 1)    # 4096/32 = 128 local units/step
-    h33  = heights[::level, ::level]   # stride=level → 33×33
-
-    N = tv * tv
-
-    # Triangles: wind so the front face points UP (+Z).  The terrain is a top
-    # surface; with X=col, Y=row and Z up, i0->i1->i2 is CCW seen from +Z (front
-    # face up).  The previous i0->i2->i1 order was CW = back-facing, so the land
-    # rendered only from below / looked transparent from above.
-    tris = []
-    for row in range(tv - 1):
-        for col in range(tv - 1):
-            i0 = row * tv + col
-            i1 = i0 + 1
-            i2 = i0 + tv
-            i3 = i2 + 1
-            tris.append((i0, i1, i2))
-            tris.append((i1, i3, i2))
-
-    world_scale = float(level)
-
-    # ---- NiTriShapeData ----
-    shapedata = NifFormat.NiTriShapeData()
-    shapedata.has_vertices = True
-    shapedata.has_normals  = False   # unused in vanilla terrain LOD
-    shapedata.num_uv_sets  = 1       # vanilla BTR has num_uv_sets=1
-    shapedata.has_uv       = True    # must be True for PyFFI to allocate UV array
-    shapedata.num_vertices = N
-    shapedata.vertices.update_size()
-
-    # Use full-res grid for bounding box (accurate Z range), h33 for geometry
-    z_min = float(heights.min())
-    z_max = float(heights.max())
-
-    for row in range(tv):
-        for col in range(tv):
-            i = row * tv + col
-            shapedata.vertices[i].x = col * step
-            shapedata.vertices[i].y = row * step
-            # Z stored pre-divided by scale so vertex_z × scale = world_Z
-            shapedata.vertices[i].z = float(h33[row, col]) / world_scale
-
-    # UV set — the tile texture maps across the whole tile.  Vanilla ground
-    # truth (tamriel.4.0.32.btr): u = x/4096, v = 1 - y/4096 (v=0 at the NORTH
-    # edge, matching the DDS row 0 = north).  All-zero UVs made every triangle
-    # sample a single texel, so each tile rendered as one flat color — the
-    # in-game map became a hard-edged per-tile checkerboard.
-    shapedata.uv_sets.update_size()
-    for row in range(tv):
-        for col in range(tv):
-            i = row * tv + col
-            shapedata.uv_sets[0][i].u = col * step / CELL_SIZE
-            shapedata.uv_sets[0][i].v = 1.0 - (row * step / CELL_SIZE)
-
-    shapedata.num_triangles       = len(tris)
-    shapedata.num_triangle_points = len(tris) * 3
-    shapedata.has_triangles       = True
-    shapedata.triangles.update_size()
-    for i, (a, b, c) in enumerate(tris):
-        shapedata.triangles[i].v_1 = a
-        shapedata.triangles[i].v_2 = b
-        shapedata.triangles[i].v_3 = c
-
-    # Bounding sphere — center and radius in WORLD space (same as AABB).
-    # XY world center = CELL_SIZE/2 × level (tile spans 0..CELL_SIZE in local,
-    # scaled by level gives 0..CELL_SIZE×level in world).
-    z_ctr         = (z_min + z_max) / 2.0
-    xy_world_half = CELL_SIZE / 2.0 * world_scale   # e.g. 2048 * 4 = 8192 for L4
-    z_world_half  = (z_max - z_min) / 2.0 + 500.0   # extra safety margin
-    shapedata.center.x = xy_world_half
-    shapedata.center.y = xy_world_half
-    shapedata.center.z = z_ctr
-    shapedata.radius   = math.sqrt(xy_world_half**2 + xy_world_half**2 + z_world_half**2)
-
-    # ---- Texture set ----
-    tex_base = f'textures\\terrain\\{edid}\\{edid}.{level}.{tile_x}.{tile_y}'
-    texset = NifFormat.BSShaderTextureSet()
-    texset.num_textures = 9
-    texset.textures.update_size()
-    texset.textures[0] = f'Data\\{tex_base}.dds'.encode()
-    texset.textures[1] = f'Data\\{tex_base}_n.dds'.encode()
-
-    # ---- Shader property (landscape LOD) ----
-    shader = NifFormat.BSLightingShaderProperty()
-    shader.skyrim_shader_type = 18  # kLODLandscapeNoise
-    shader.texture_set = texset
-    sf1 = shader.shader_flags_1
-    sf1.slsf_1_model_space_normals = 1
-    sf1.slsf_1_own_emit            = 1
-    sf1.slsf_1_z_buffer_test       = 1
-    sf2 = shader.shader_flags_2
-    sf2.slsf_2_lod_landscape  = 1
-    sf2.slsf_2_z_buffer_write = 1
-    # uv_scale must be (1,1) — pyffi defaults to (0,0) which breaks the LOD shader
-    shader.uv_scale.u = 1.0
-    shader.uv_scale.v = 1.0
-
-    # ---- NiTriShape ----
-    shape = NifFormat.NiTriShape()
-    shape.name  = b'land'
-    shape.flags = 14
-    shape.scale = float(level)
-    shape.data  = shapedata
-    shape.bs_properties[0] = shader
-
-    # ---- BSMultiBoundNode root ----
-    world_half = CELL_SIZE * level / 2.0
-    z_extent   = (z_max - z_min) / 2.0 + 500.0
-
-    aabb = NifFormat.BSMultiBoundAABB()
-    aabb.position.x = world_half
-    aabb.position.y = world_half
-    aabb.position.z = z_ctr
-    aabb.extent.x   = world_half
-    aabb.extent.y   = world_half
-    aabb.extent.z   = z_extent
-
-    multi_bound = NifFormat.BSMultiBound()
-    multi_bound.data = aabb
-
-    root = NifFormat.BSMultiBoundNode()
-    root.name         = b'chunk'
-    root.flags        = 14
-    root.multi_bound  = multi_bound
-
-    # Water: child[1] BSMultiBoundNode "WATER" (vanilla structure).  The engine
-    # textures it with the worldspace LOD water shader (WRLD NAM3).
-    if water_quads:
-        water_node = _build_water_node(water_quads, level)
-        root.num_children = 2
-        root.children.update_size()
-        root.children[0] = shape
-        root.children[1] = water_node
-    else:
-        root.num_children = 1
-        root.children.update_size()
-        root.children[0] = shape
-
-    nif_data.roots = [root]
-
-    buf = io.BytesIO()
-    nif_data.write(buf)
-    return buf.getvalue()
-
-
-# ---------------------------------------------------------------------------
 # Diffuse tile compositing + heightmap normal maps
 # ---------------------------------------------------------------------------
 
@@ -1498,10 +1163,13 @@ def _process_tile(args):
         water_quads = _tile_water_quads(_worker_lands, _worker_cell_water,
                                         tile_x, tile_y, level, _worker_default_wh)
 
-        output_dir = _worker_mesh_dir.parent.parent.parent
-        nif_bytes  = _build_terrain_nif(heights, tile_x, tile_y, level,
-                                        worldspace_edid, output_dir,
-                                        water_quads=water_quads)
+        solid = tile_solid_mask(_worker_lands, tile_x, tile_y, level)
+        nif_bytes = build_terrain_nif(heights, tile_x, tile_y, level,
+                                      worldspace_edid,
+                                      water_quads=water_quads,
+                                      solid_mask=solid)
+        if nif_bytes is None:
+            return tag, True, None
         (_worker_mesh_dir / f'{tag}.btr').write_bytes(nif_bytes)
 
         tex_size = TEX_SIZE_BY_LEVEL.get(level, TEX_SIZE)
@@ -1528,6 +1196,40 @@ def _process_tile(args):
 # ---------------------------------------------------------------------------
 # Top-level orchestration
 # ---------------------------------------------------------------------------
+
+def _queue_tiles(lands, bounds, worldspace_edid, only_cells):
+    """The (tx, ty, level, edid) tile tasks to bake.
+
+    A tile is queued only when a cell it covers owns a LAND record, so no tile
+    is baked purely from heights edge-extended past the landmass.  `only_cells`
+    restricts an override plugin to the tiles its edits touch, counting a tile
+    as touched when ANY cell it composites changed -- an edit at a boundary
+    alters the neighbouring tile's edge too.
+    See: docs/commentary/asset_convert_terrain.md#lod-invents-terrain-over-cells-with-no-land
+    """
+    min_x, min_y, max_x, max_y = bounds
+    work = []
+    for level in LOD_LEVELS:
+        tx_start = (min_x // level) * level
+        ty_start = (min_y // level) * level
+        tx_end   = ((max_x + level - 1) // level) * level
+        ty_end   = ((max_y + level - 1) // level) * level
+
+        n_level = 0
+        for ty in range(ty_start, ty_end, level):
+            for tx in range(tx_start, tx_end, level):
+                cells = [(tx + cx, ty + cy)
+                         for cy in range(level) for cx in range(level)]
+                if not any(c in lands for c in cells):
+                    continue
+                if only_cells is not None and not any(c in only_cells
+                                                      for c in cells):
+                    continue
+                work.append((tx, ty, level, worldspace_edid))
+                n_level += 1
+        print(f"  LOD {level}: {n_level} tiles queued")
+    return work
+
 
 def generate_terrain_lod(esm_path: Path, output_dir: Path,
                          worldspace_edid: str = 'TES4Tamriel',
@@ -1567,7 +1269,7 @@ def generate_terrain_lod(esm_path: Path, output_dir: Path,
         print("  ERROR: Pillow not installed — pip install Pillow")
         return False
 
-    if not _PYFFI:
+    if not PYFFI_AVAILABLE:
         print("  ERROR: pyffi not available")
         return False
 
@@ -1613,40 +1315,8 @@ def generate_terrain_lod(esm_path: Path, output_dir: Path,
     n_workers = worker_count()
     print(f"  Using {n_workers} worker process(es).")
 
-    # Build the work list for EVERY level up front and run it through ONE pool.
-    # A pool per level serialised each level's tail: LOD32 has only ~21 tiles
-    # for all of Tamriel but they are by far the most expensive (a level-N tile
-    # composites N² cells), so 29 workers ran 21 tasks and then idled while the
-    # slowest finished.  One pool lets the cheap LOD4 tiles backfill those
-    # stragglers.  Tasks are submitted LONGEST-FIRST (highest level first) —
-    # classic longest-processing-time scheduling, which keeps the expensive
-    # tiles off the critical path at the end of the run.
-    work = []
-    for level in LOD_LEVELS:
-        tx_start = (min_x // level) * level
-        ty_start = (min_y // level) * level
-        tx_end   = ((max_x + level - 1) // level) * level
-        ty_end   = ((max_y + level - 1) // level) * level
-
-        # Only tile coords are passed per-task; lands is sent once via initializer.
-        n_level = 0
-        for ty in range(ty_start, ty_end, level):
-            for tx in range(tx_start, tx_end, level):
-                cells = [(tx + cx, ty + cy)
-                         for cy in range(level) for cx in range(level)]
-                if not any(c in lands for c in cells):
-                    continue
-                # An override plugin ships only the tiles its edits touch. A
-                # tile counts as touched when ANY cell it composites was
-                # changed — an edit at a tile boundary alters the neighbouring
-                # tile's edge too, so testing coverage (not just the edited
-                # cell's own tile) is what keeps the seams matching.
-                if only_cells is not None and not any(c in only_cells
-                                                      for c in cells):
-                    continue
-                work.append((tx, ty, level, worldspace_edid))
-                n_level += 1
-        print(f"  LOD {level}: {n_level} tiles queued")
+    work = _queue_tiles(lands, (min_x, min_y, max_x, max_y),
+                        worldspace_edid, only_cells)
 
     if not work:
         print("  No tiles to generate.")
