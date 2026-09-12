@@ -847,10 +847,11 @@ def _tile_water_quads(lands, cell_water, tile_x, tile_y, level, default_wh):
 # DDS writing (DXT1 via PIL/Pillow or pure-Python fallback)
 # ---------------------------------------------------------------------------
 
-def _set_local_bounding_sphere(shapedata, verts) -> None:
+def _set_local_bounding_sphere(shapedata, verts):
     """Set the shape's bounding sphere in LOCAL coords, vanilla-style.
 
     Vanilla uses the bbox center with the corner distance as the radius.
+    Returns the (lo, hi, center) bbox arrays for callers that also need them.
     """
     va = np.array(verts, dtype=np.float64)
     lo = va.min(axis=0)
@@ -858,6 +859,7 @@ def _set_local_bounding_sphere(shapedata, verts) -> None:
     ctr = (lo + hi) / 2.0
     shapedata.center.x, shapedata.center.y, shapedata.center.z = ctr
     shapedata.radius = float(np.linalg.norm((hi - lo) / 2.0))
+    return lo, hi, ctr
 
 
 def _build_water_node(water_quads, level: int):
@@ -940,7 +942,7 @@ def _build_water_node(water_quads, level: int):
         shapedata.triangles[i].v_2 = b
         shapedata.triangles[i].v_3 = c
 
-    _set_local_bounding_sphere(shapedata, verts)
+    lo, hi, ctr = _set_local_bounding_sphere(shapedata, verts)
 
     if level == 4:
         shape = NifFormat.BSSegmentedTriShape()
