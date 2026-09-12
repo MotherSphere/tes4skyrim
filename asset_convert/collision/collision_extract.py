@@ -61,6 +61,7 @@ Cache: two-phase, mirroring mesh_bounds.
     load_collision(cache_path)             — in each navmesh worker
 """
 
+from asset_convert.game_paths import current_namespace
 import hashlib
 import json
 import math
@@ -690,10 +691,10 @@ def _worker_both(args: tuple):
     of analysis on top of a ~174 ms parse, so parsing once and running both
     nearly halves the combined phase.
 
-    NOTE: the door axis/centre cache is NOT produced here any more — the scan
-    reads CONVERTED meshes, and door geometry must come from the ORIGINAL
-    NIF's Close-sequence pose (see door_closed_geometry).  It is built by
-    tools/generators/build_door_axis_cache.py from the export meshes.
+    NOTE: the door axis/centre cache is NOT produced here — the scan reads
+    CONVERTED meshes, and door geometry must come from the ORIGINAL NIF's
+    Close-sequence pose (see door_closed_geometry).  scan_door_axes builds it
+    from the export meshes.
     """
     nif_path, rel_key = args
     try:
@@ -719,16 +720,36 @@ def _worker_both(args: tuple):
 
 
 # ---------------------------------------------------------------------------
-# Cache — binary (a JSON of millions of floats is far too slow and large)
+# Cache
+# ---------------------------------------------------------------------------
 
-_MAGIC = b'TESCOL03'
+#: Bumped when extraction or mesh conversion changes walkable/blocking output.
+COLLISION_SCHEMA_VERSION = 1
+
+#: Cache format id; its trailing digits carry COLLISION_SCHEMA_VERSION.
+_MAGIC = b'TESCOL04'
 _COLLISION: Dict[str, dict] = {}
 # path_key -> short collision digest, memoised by collision_digest().  Cleared
 # with _COLLISION so a reload cannot serve digests for the previous cache.
 _DIGESTS: Dict[str, str] = {}
 
 
+def collision_cache_is_current(collision_cache: str) -> bool:
+    """True if the cache exists AND was written at the current schema.
+
+    Gates the rescan instead of `os.path.exists`, so a cache built before a
+    change to what counts as walkable is regenerated rather than trusted.
+    See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
+    """
+    try:
+        with open(collision_cache, 'rb') as fh:
+            return zlib.decompress(fh.read(), 0, 64)[:8] == _MAGIC
+    except (OSError, zlib.error):
+        return False
+
+
 def _serialize(results: Dict[str, dict]) -> bytes:
+    """Pack every mesh's triangle soups into the compressed cache blob."""
     buf = bytearray()
     buf += _MAGIC
     buf += struct.pack('<I', len(results))
@@ -860,12 +881,78 @@ def scan_mesh_data(mesh_dir: str, collision_cache: str, bounds_cache: str,
     with open(bounds_cache, 'w', encoding='utf-8') as fh:
         json.dump(payload, fh)
 
-    # NOTE: door_panel_axis_cache.json is NOT written here — door geometry
-    # must come from the ORIGINAL NIF's Close-sequence pose, and this scan
-    # reads the converted output meshes.  Run tools/generators/build_door_axis_cache.py
-    # (reads export/<plugin>/meshes) to build it.
-
     return len(col_results), len(bnd_results)
+
+
+def _door_model_paths(door_txt: str) -> set:
+    """Normalised model paths of every DOOR base in an export's DOOR.txt."""
+    models = set()
+    try:
+        with open(door_txt, encoding='utf-8', errors='replace') as fh:
+            txt = fh.read()
+    except OSError:
+        return models
+    for line in txt.splitlines():
+        if not line.startswith('Model.MODL='):
+            continue
+        path = line.split('=', 1)[1].strip().lower().replace('\\', '/')
+        while '//' in path:
+            path = path.replace('//', '/')
+        if path:
+            models.add(path)
+    return models
+
+
+def _closed_door_entry(args):
+    """(cache key, door_closed_geometry result or None) for one ORIGINAL NIF."""
+    path, key = args
+    try:
+        return key, door_closed_geometry(read_nif_data(path))
+    except Exception:
+        return key, None
+
+
+def _door_axis_jobs(export_plugin_dir: str) -> list:
+    """(original NIF path, 'tes4/<model>') for every DOOR base that exists."""
+    door_txt = os.path.join(export_plugin_dir, 'DOOR.txt')
+    root = os.path.join(export_plugin_dir, 'meshes')
+    if not os.path.exists(door_txt) or not os.path.isdir(root):
+        return []
+    jobs = []
+    for mdl in sorted(_door_model_paths(door_txt)):
+        path = os.path.join(root, *mdl.split('/'))
+        if os.path.exists(path):
+            jobs.append((path, current_namespace() + '/' + mdl))
+    return jobs
+
+
+def scan_door_axes(export_plugin_dir: str, dest: str,
+                   workers: int = None) -> int:
+    """Write door_panel_axis_cache.json; return how many models it classified.
+
+    Reads the ORIGINAL (export) door meshes at their CLOSED pose, which is the
+    only source that recovers a door stored mid-open, so this cannot share
+    `scan_mesh_data`'s parse of the CONVERTED tree.  The navmesh sizes, orients
+    and positions every Door Triangle from this file, so a missing one silently
+    falls back to a constant half-width and moves the geometry.
+
+    See: docs/commentary/tes5_import_navmesh.md#door-base-line-is-local-y
+    """
+    jobs = _door_axis_jobs(export_plugin_dir)
+    if not jobs:
+        return 0
+    out = {}
+    with ProcessPoolExecutor(max_workers=workers or worker_count()) as ex:
+        for key, res in ex.map(_closed_door_entry, jobs, chunksize=8):
+            if res is not None:
+                axis, width, cx, cy, zmin = res
+                out[key] = [axis, round(width, 2), round(cx, 2),
+                            round(cy, 2), round(zmin, 2)]
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    with open(dest, 'w', encoding='utf-8') as fh:
+        json.dump(out, fh, indent=0, sort_keys=True)
+    print(f"  Door axes: {len(out)} / {len(jobs)} door meshes classified")
+    return len(out)
 
 
 def scan_collision(mesh_dir: str, cache_path: str, workers: int = None) -> int:

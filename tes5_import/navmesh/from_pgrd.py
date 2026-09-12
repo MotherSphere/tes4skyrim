@@ -293,7 +293,7 @@ def load_door_centroids(cache_path, quiet: bool = False) -> int:
     Keys are mesh_bounds-style ('tes4/...'), matching the door_fids map.
 
     The authoritative source is door_panel_axis_cache.json (written by
-    scan_mesh_data and tools/build_door_axis_cache.py from the COLLISION
+    collision_extract.scan_door_axes from the COLLISION
     PANEL): axis, doorway width, and — in the 4-element form — the exact panel
     centre.  The legacy door_centers_cache.json (mesh-bbox centres) is only a
     fallback for models the axis cache lacks a centre for; a plugin without it
@@ -790,20 +790,15 @@ def pack_navm_record(form_id: int, subrecords: bytes) -> bytes:
 
 def geom_hash(tag, points, edges, refr_recs, base_model_by_fid, doors,
               land_rec, origin_x, origin_y):
-    """Hash of everything the geometry build consumes."""
+    """Hash of everything the geometry build consumes.
+
+    The `geom-vN` literal is bumped when the CACHED PAYLOAD's shape changes,
+    not only when its inputs do, so an older entry cannot silently restore
+    geometry the current build would not produce.
+    See: docs/commentary/tes5_import_navmesh.md#geom-payload-version
+    """
     from asset_convert.collision.collision_extract import collision_digest
     h = hashlib.sha1()
-    # Bump when the CACHED PAYLOAD's shape changes, not just its inputs: the
-    # entry now carries ledge links too, and an older entry would silently
-    # restore geometry with no drop-downs.
-    # v3: analytic door wedges (exact width/centre/apex side) changed the
-    # geometry for every cell with a door without changing the inputs.
-    # v4: per-mesh collision digests replaced the whole-file collision hash that
-    # used to ride in via `tag`.  One replaced mesh previously invalidated EVERY
-    # entry (~8,200 for Oblivion) and forced a full regeneration; now only the
-    # cells that actually place that mesh miss.  This is also what lets a
-    # published cache survive a user's own mesh edits — see
-    # collision_extract.collision_digest and tools/navmesh_cache.py.
     h.update(b'geom-v4-permesh-collision')
     h.update(repr((tag, origin_x, origin_y)).encode())
     h.update(repr(points).encode())

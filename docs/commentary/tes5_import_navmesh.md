@@ -231,7 +231,7 @@ reorders triangles, so indices captured before it stay valid.
 Which local axis a door's threshold runs along decides the whole quad's
 orientation. It is read from the door's **collision panel** — the body the
 engine collides with — in `asset_convert.collision.collision_extract.door_panel_axis_from_data`,
-cached to `door_panel_axis_cache.json` by `tools/generators/build_door_axis_cache.py`:
+cached to `door_panel_axis_cache.json` by `collision_extract.scan_door_axes`:
 
 > A door panel is thin THROUGH the opening and wide ACROSS it. The panel's thin
 > horizontal axis is the swing direction; the wide one is the threshold.
@@ -510,7 +510,7 @@ function of the door, computed in `corridor_doors` and passed through
   `(cos rz, −sin rz)`.
 * **The door cache measures the ORIGINAL NIF at the CLOSED pose**
   (`asset_convert.collision.collision_extract.door_closed_geometry`, built by
-  `tools/generators/build_door_axis_cache.py` from `export/<plugin>/meshes`; the
+  `collision_extract.scan_door_axes` from `export/<plugin>/meshes`; the
   converted-mesh scan no longer writes it).  The 'Close' controller
   sequence's FINAL key values override the animated nodes, and the union
   bbox of the KEYED shapes — the door leaf/leaves, never frames or static
@@ -1710,6 +1710,25 @@ version of a churning binary forever) and not Git LFS (free tier is 1 GB
 bandwidth per *month* — about three clones).
 
 Commands are in [CLAUDE.md](../../CLAUDE.md#shared-navmesh-cache).
+
+### <a id="geom-payload-version"></a>The `geom-vN` literal versions the PAYLOAD, not the inputs
+
+**Code:** `geom_hash` in `tes5_import/navmesh/from_pgrd.py`
+
+`geom_hash` mixes a literal `geom-vN` into the key, bumped whenever the cached
+payload's SHAPE changes even though its inputs did not — otherwise an older
+entry silently restores geometry the current build would never produce:
+
+- **v2** — entries began carrying ledge links; an older entry restored
+  geometry with no drop-downs.
+- **v3** — analytic door wedges (exact width, centre and apex side) changed
+  the geometry of every cell with a door, with identical inputs.
+- **v4** — per-mesh collision digests replaced the whole-file collision hash
+  that used to ride in via `tag`. One replaced mesh previously invalidated
+  **every** entry (~8,200 for Oblivion) and forced a full regeneration; now
+  only the cells that actually place that mesh miss. This is also what lets a
+  published cache survive a user's own mesh edits — see
+  `collision_extract.collision_digest` and `tools/navmesh/navmesh_cache.py`.
 
 ### <a id="door-triangle-tie-break"></a>The door triangle tie-break is AREA, not index
 

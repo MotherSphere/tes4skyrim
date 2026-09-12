@@ -48,10 +48,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 
 def _load(export_dir, offset):
+    """(text_reader, by_type, door_fids, base_model_by_fid, jobs) for a plugin.
+
+    The masters' export is loaded and passed to both index builders, exactly as
+    `pipeline_records` does: a DOOR or base object owned by a master otherwise
+    resolves to nothing, so every such door loses its panel measurement and the
+    geometry rebuilt here silently differs from the pipeline's.
+    """
+    from tes5_import.base import text_reader as im
     from tes5_import.base.text_reader import (parse_export_directory,
                                          group_records_by_type,
                                          set_formid_index_offset)
-    from tes5_import import import_main as im
+    from tes5_import.overrides.nested import load_master_export
 
     set_formid_index_offset(offset)
     print(f'parsing {export_dir} ...', flush=True)
@@ -59,8 +67,12 @@ def _load(export_dir, offset):
     by_type = group_records_by_type(parse_export_directory(export_dir))
     print(f'  parsed in {time.time() - t0:.1f}s', flush=True)
 
-    door_fids = navm_pool.build_door_fid_set(by_type)
-    base_model_by_fid = navm_pool.build_base_model_index(by_type)
+    master_export = load_master_export(export_dir)
+    if master_export:
+        print(f'  {len(master_export)} master records', flush=True)
+    door_fids = navm_pool.build_door_fid_set(by_type, master_export)
+    base_model_by_fid = navm_pool.build_base_model_index(by_type,
+                                                         master_export)
     jobs = navm_pool.gather_navm_jobs(by_type, door_fids)
     # FormIDs are pre-assigned in the parent in the real run; any stable value
     # works here since we are not writing a plugin.

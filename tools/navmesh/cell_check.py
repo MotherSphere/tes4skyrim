@@ -6,9 +6,12 @@ set against `build.build_navmesh` output for named cells, so a fix can be
 iterated in seconds.
 
     python tools/navmesh/cell_check.py XPAichan01 SancreTor03 Ondo
+    python tools/navmesh/cell_check.py --export export/Nehrim.esm Cell01
 
 Cells are named by EditorID and read from the audit index
 (`export/<plugin>/audit_index3.pkl`, built by tools/navmesh/audit.py).
+`--export` selects the plugin; it defaults to Oblivion.esm and must name an
+export whose audit index already exists.
 Exterior cells need their grid origin, so pass those to navmesh/audit.py
 instead, or extend this with --formid.
 """
@@ -21,7 +24,16 @@ from tes5_import.navmesh.from_pgrd import (collect_doors, compute_adjacency,
                                       load_door_centroids)
 import tools.navmesh.audit as na
 import tools.navmesh.check as nc
-EXPORT='export/Oblivion.esm'
+
+
+def _export_arg(argv):
+    """The --export value, defaulting to Oblivion.esm."""
+    if '--export' in argv:
+        return argv[argv.index('--export') + 1]
+    return 'export/Oblivion.esm'
+
+
+EXPORT = _export_arg(sys.argv)
 ce.load_collision(os.path.join(EXPORT,'collision_cache.bin'), quiet=True)
 # Without this the door panel centroids, threshold AXIS and doorway WIDTH are
 # all unset, so this tool would generate doors the pipeline never generates.
@@ -90,7 +102,9 @@ def door_report(verts, tris, doors):
 
 
 want_doors = '--doors' in sys.argv
-for cellname in [a for a in sys.argv[1:] if not a.startswith('--')]:
+_skip = {EXPORT} if '--export' in sys.argv else set()
+for cellname in [a for a in sys.argv[1:]
+                 if not a.startswith('--') and a not in _skip]:
     c=[x for x in cells if (x.get('EditorID') or '').lower()==cellname.lower()][0]
     fid=(c.get('FormID') or '').upper()
     nodes,edges=na._pgrd_nodes(pgrd_by_cell[fid])
