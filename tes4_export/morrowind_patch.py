@@ -214,7 +214,7 @@ def _import_records(export_dir: str, out_root, progress) -> tuple:
     Imported inside the function to keep the export package from loading the
     whole import stage just to answer where the patch lives.
     """
-    from tes5_import.import_main import import_plugin
+    from tes5_import.pipeline import import_plugin
 
     dest = plugin_esm(out_root, PATCH_NAME)
     dest.parent.mkdir(parents=True, exist_ok=True)

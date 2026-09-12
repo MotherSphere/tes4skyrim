@@ -226,6 +226,25 @@ navmesh link at all.
 Note `build_edge_links` only appends edge links to *exterior* meshes and never
 reorders triangles, so indices captured before it stay valid.
 
+<a id="navmesh-worker-rebuilt-globals"></a>
+**What `init_worker` must rebuild in every pool child** (`navmesh/worker.py`).
+A spawned child does NOT inherit the parent's module globals, so each of these
+is rebuilt per worker or the stage silently produces nothing:
+
+- `text_reader._formid_index_offset` — the load-order master-index shift
+  `get_formid()` applies (e.g. +1 for Oblivion.esm behind Skyrim.esm). Left at
+  the default 0, every FormID `convert_PGRD` reads (PathingCell
+  ParentCELL/ParentWRLD, door REFR links, ONAM base objects) keeps master index
+  `0x00` instead of the plugin's real index; the engine then cannot resolve the
+  navmesh's parent cell at load and null-derefs in `Hook_NavMeshLoad`. **MUST be
+  set before any `get_formid()` call.**
+- `collision_extract._COLLISION` — the per-mesh Havok collision soups the
+  navmesh is voxelized from. Without it every cell has no geometry and produces
+  no navmesh at all.
+- `from_pgrd`'s door caches — see [the door-center caches](#door-center-caches).
+- The containment job (`core.process_job.join_pool_job`), so a worker cannot
+  outlive a parent that dies without cleanup. No-op off Windows.
+
 ### Door threshold axis comes from the COLLISION PANEL, never the bbox
 
 Which local axis a door's threshold runs along decides the whole quad's
@@ -294,7 +313,7 @@ children).
 
 `navmesh_audit.py` cached `door_fids` as a **set**, while the pipeline
 (`import_main._build_door_fid_set`) builds a **fid → model-key map**. With a set,
-`_collect_doors` takes its legacy membership-only path: no panel centring, no
+`_collect_doors` takes its legacy membership-only path: no panel centering, no
 threshold axis, **width 0**. `navmesh_cell_check.py` additionally never called
 `load_door_centroids` at all. So every generated-cell tool silently graded doors
 with the default orientation and no width — the exact opposite of what shipped.
@@ -440,7 +459,7 @@ min area 992):
   WITHDRAWN and `_build_door_links` falls back to the containing mesh
   triangle.  An unreachable 1-triangle island is strictly worse than a
   fallback door triangle.
-* **Winding normalisation + scrap sweep** (`corridor.build_corridors` tail):
+* **Winding normalization + scrap sweep** (`corridor.build_corridors` tail):
   every triangle is forced CCW in plan (decimation edge collapses can flip
   one → CK DOWNFACING), and 1-2 triangle components that carry no door
   threshold are dropped.
@@ -452,7 +471,7 @@ function of the door, computed in `corridor_doors` and passed through
 `door_edges` as `(base0, base1, apex, storey_z)`:
 
 * **Base** = the doorway's exact measured width (collision panel, capped at
-  `DOOR_LINE_HALF_MAX`), centred on the exact panel centre.  The old
+  `DOOR_LINE_HALF_MAX`), centered on the exact panel center.  The old
   45u-minimum widening is gone — it pushed a narrow gate's base through both
   jambs.
 * **Apex** = base midpoint + facing × `max(w/2, DOOR_TRI_MIN_DEPTH=64)` on the
@@ -461,10 +480,10 @@ function of the door, computed in `corridor_doors` and passed through
   flipped the whole triangle to the far side of the door (three doors in
   ImperialDungeon01), and the area varied with the surrounding geometry.  Same
   door → same triangle, every build.
-* **Exact centres**: `door_panel_axis_cache.json` now carries each model's
-  collision-panel centre (`[axis, width, cx, cy]`, world units); `_door_threshold`
+* **Exact centers**: `door_panel_axis_cache.json` now carries each model's
+  collision-panel center (`[axis, width, cx, cy]`, world units); `_door_threshold`
   prefers it over the legacy mesh-bbox `door_centers_cache.json`.  The bbox
-  centres were 25–35u off along the threshold on the CharacterGen prison gates
+  centers were 25–35u off along the threshold on the CharacterGen prison gates
   (`cgprisoncellgate01`, `idgate01`) — over half those gates' own width.  Double
   doors merge their per-leaf rigid bodies (parallel panel-shaped bodies of
   comparable size), so the width spans the whole doorway, not one leaf.
@@ -504,8 +523,8 @@ function of the door, computed in `corridor_doors` and passed through
   _rot_matrix`, measured on the AnvilFG floor shell).  `_door_threshold` and
   every door direction formula used the naive CCW form — wrong for any
   rotation off 0/180, which is why it survived every cardinal-rotation test:
-  Arvena's upstairs door (raw 90°) had its centre one FULL door width from
-  the real doorway.  Correct forms everywhere now: centre offset
+  Arvena's upstairs door (raw 90°) had its center one FULL door width from
+  the real doorway.  Correct forms everywhere now: center offset
   `(lx·c + ly·s, −lx·s + ly·c)`; threshold `(sin rz, cos rz)`; facing
   `(cos rz, −sin rz)`.
 * **The door cache measures the ORIGINAL NIF at the CLOSED pose**
@@ -514,13 +533,13 @@ function of the door, computed in `corridor_doors` and passed through
   converted-mesh scan no longer writes it).  The 'Close' controller
   sequence's FINAL key values override the animated nodes, and the union
   bbox of the KEYED shapes — the door leaf/leaves, never frames or static
-  fence sections — gives `[axis, width, centre_x, centre_y, z_min]` per
+  fence sections — gives `[axis, width, center_x, center_y, z_min]` per
   model.  This is the only correct source: idgate01's leaves are STORED
   mid-open (nowhere near the doorway; they swing 90° shut), its static side
   grates span 269u where the keyed leaves close to 133u, and the converted
   collision (the previous source) additionally baked the leaf transforms
   wrong — which is what rotated the CharacterGen pen gate's Door Triangle
-  90° and put a corner at the door centre.  z_min (the closed slab's base)
+  90° and put a corner at the door center.  z_min (the closed slab's base)
   also replaces the whole-NIF bounds z-min as the pivot→floor drop.
 * **Attach completion ladder** (in order, each a measured failure): stitch →
   T-junction split → apex bridges → **carve** (`_carve_door`: locally remove
@@ -596,7 +615,7 @@ Three guards apply. A split must not manufacture a near-VERTICAL or degenerate t
 
 When every candidate spans too far, the shortest border edge of each side is split at its midpoint. Decimation merges boundary vertices into edges well past the 160u bridge cap, so both sides offer only LONG border edges -- **the Sanctum pit gate: components touching at 0.00u, shortest edges 104/173u, all bridges rejected**.
 
-<a id="ribbon-centreline-seeds"></a>**Every ribbon gets a row of centreline seeds** (`union_cdt._ribbon_seeds`), for two reasons. **Connectivity:** a corridor is only ~one ribbon wide (80u), so at a 128u target edge it gets no interior hex row, and a bend is triangulated by long triangles whose centroids fall outside the bend and are culled -- silently snapping the corridor into pieces (**ChorrolFightersGuild fell into 10 components**). A row of centreline points guarantees a triangle chain that stays inside. **Stairs:** a ribbon climbing more than half a storey gap over a `target_edge` run is a stair; one uniform triangle on it would span more than `STOREY_GAP_Z` across its corners and be dropped by the per-surface emission, so the whole flight vanishes (**Pinarus's two floors, 268u apart, on a single 2-node edge**). Steep ribbons are sampled much finer, along the centreline and both rails, at a spacing giving ~a third of the storey gap of climb per step. On flat open ground the Poisson guard rejects most seeds in favour of the coarse hex lattice, so rooms stay large-triangled.
+<a id="ribbon-centerline-seeds"></a>**Every ribbon gets a row of centerline seeds** (`union_cdt._ribbon_seeds`), for two reasons. **Connectivity:** a corridor is only ~one ribbon wide (80u), so at a 128u target edge it gets no interior hex row, and a bend is triangulated by long triangles whose centroids fall outside the bend and are culled -- silently snapping the corridor into pieces (**ChorrolFightersGuild fell into 10 components**). A row of centerline points guarantees a triangle chain that stays inside. **Stairs:** a ribbon climbing more than half a storey gap over a `target_edge` run is a stair; one uniform triangle on it would span more than `STOREY_GAP_Z` across its corners and be dropped by the per-surface emission, so the whole flight vanishes (**Pinarus's two floors, 268u apart, on a single 2-node edge**). Steep ribbons are sampled much finer, along the centerline and both rails, at a spacing giving ~a third of the storey gap of climb per step. On flat open ground the Poisson guard rejects most seeds in favour of the coarse hex lattice, so rooms stay large-triangled.
 
 <a id="flip-never-onto-an-existing-diagonal"></a>**A 2D flip may never land on a diagonal that already exists** (`union_cdt._flip2d`). The shared vertex space spans several cut pieces, so an edge can recur; a 3-owner edge is non-manifold and gets torn out later.
 
@@ -614,7 +633,7 @@ Where the wedges consume a whole part, that part WAS the doorway apron and the d
 
 <a id="door-edge-must-accept-interior-rings"></a>**A door base line may sit on an INTERIOR ring** (`union_cdt._door_edge_on_part`). The threshold edge is part of the union boundary, so a strict interior test silently drops it and the door never gets its forced edge. The test accepts the edge when its midpoint is within the polygon or within `tol` of the FULL boundary, holes included: **Arvena's upstairs door base sat on a hole of its sheet, 137u from the exterior ring**, so an exterior-only test never claimed it and the door lost its reservation.
 
-<a id="steep-refinement-keeps-stairs-alive"></a>**Steep ground is refined after the CDT** (`union_cdt._refine_steep`). The CDT builds from ring vertices only, so a stair or ramp comes out as a few large triangles whose corners span more than a storey step -- the per-surface emission drops them and the whole stair vanishes. Any triangle a steep centreline seed lands in is bisected at its longest edge, splitting the neighbour across that edge at the same midpoint so the mesh STAYS conforming. Door triangles and their ring edges are exempt: the doorway must stay ONE triangle.
+<a id="steep-refinement-keeps-stairs-alive"></a>**Steep ground is refined after the CDT** (`union_cdt._refine_steep`). The CDT builds from ring vertices only, so a stair or ramp comes out as a few large triangles whose corners span more than a storey step -- the per-surface emission drops them and the whole stair vanishes. Any triangle a steep centerline seed lands in is bisected at its longest edge, splitting the neighbour across that edge at the same midpoint so the mesh STAYS conforming. Door triangles and their ring edges are exempt: the doorway must stay ONE triangle.
 
 <a id="ledge-links-spread-along-the-lip"></a>**Ledge links are emitted for EVERY qualifying edge pair along a lip, not just the closest** (`clean_validate.find_ledge_links`). A vanilla balcony carries a ledge link on several triangles along its edge -- **Skyrim.esm census: half of all mesh->target ledge pairs have 2-12+ links, owning-triangle median area 9,398, linked-edge median 135u** -- so an actor can drop off anywhere along it. Without that spread the **CharacterGen assassins stood at the balcony edge and stayed there**.
 
@@ -630,7 +649,7 @@ Endpoint pairing is tried both ways round, because the two boundaries wind in op
 
 <a id="ribbon-polygon-memoisation"></a>**The ribbon-polygon memo is keyed on strip IDENTITY** (`union_geom._ribbon_polygon`). The nested ribbon-pair loops (`_same_surface_region`, `_split_plan_overlaps`) ask for the same strips over and over: **379,250 calls on a cell of a few thousand strips, ~12.7s of a 33s build**, with the invalid-outline repair re-running its buffer/union work every time. Strips are plain dicts that live for the whole build and are never mutated after their polygon could first be asked for, so `id()` is a sound key; the cache holds a reference to every strip it keys, so a freed dict's id cannot be recycled onto a stale entry. Cleared per build by `_ribbon_cache_clear`.
 
-<a id="invalid-ribbon-outline-repair"></a>**A self-intersecting ribbon outline is repaired by union PLUS a centreline band** (`union_geom._ribbon_polygon_uncached`). A grown outline can self-intersect where two cross-sections' rails cross at a sharp concavity. `buffer(0)` alone is NOT a safe repair: on a bow-tie it returns a MultiPolygon and shapely's union keeps the lobes separate, losing the part of the ribbon that bridged to a neighbour. Measured on ChorrolFightersGuild: exactly the **7 ribbons with invalid outlines** -- (22,23), (22,24), (26,43), (26,42), (26,27), (41,42), (25,26) -- were the ones whose sheet unioned into **5 disjoint parts**, with ribbon (22,23) appearing in two parts without joining them; **pathgrid=1 but navmesh=4**. The repair keeps EVERY lobe and, critically, covers the CENTRELINE with a minimum-width band: the pathgrid asserts an actor walks it, so the ribbon must always contain it -- which is also what makes two ribbons sharing a node overlap into one sheet.
+<a id="invalid-ribbon-outline-repair"></a>**A self-intersecting ribbon outline is repaired by union PLUS a centerline band** (`union_geom._ribbon_polygon_uncached`). A grown outline can self-intersect where two cross-sections' rails cross at a sharp concavity. `buffer(0)` alone is NOT a safe repair: on a bow-tie it returns a MultiPolygon and shapely's union keeps the lobes separate, losing the part of the ribbon that bridged to a neighbour. Measured on ChorrolFightersGuild: exactly the **7 ribbons with invalid outlines** -- (22,23), (22,24), (26,43), (26,42), (26,27), (41,42), (25,26) -- were the ones whose sheet unioned into **5 disjoint parts**, with ribbon (22,23) appearing in two parts without joining them; **pathgrid=1 but navmesh=4**. The repair keeps EVERY lobe and, critically, covers the CENTERLINE with a minimum-width band: the pathgrid asserts an actor walks it, so the ribbon must always contain it -- which is also what makes two ribbons sharing a node overlap into one sheet.
 
 <a id="clip-strip-cuts-at-the-node-projection"></a>**A donated strip is cut at the NODE'S projection, not the segment end** (`union_geom._clip_strip_near`). A stair strip is extended up to 48u beyond its end node (`RIBBON_STAIR_END_EXTEND`), so measuring from the endpoint left only r-48u of covered disc and the piece's rim lost its levels -- **which is what disconnected ChorrolFightersGuild**.
 
@@ -638,7 +657,7 @@ Endpoint pairing is tried both ways round, because the two boundaries wind in op
 
 <a id="uniform-hex-lattice-triangulation"></a>**Uniform triangulation is a hex lattice + centroid-inside Delaunay** (`corridor_union._triangulate`). The old approach earcut the polygon after cutting it on an 8u grid and produced needles and slivers along every boundary -- **20% of triangles had an edge ratio > 3, some > 400**. Vanilla Skyrim navmeshes are near-uniform ~`target_edge` triangles, so: (1) sample interior Steiner points on a HEX lattice at `target_edge` spacing -- hex, not a square grid, so the Delaunay is near-equilateral rather than right-isoceles; (2) densify boundary rings at the same spacing so boundary triangles match interior scale; (3) Delaunay the whole point set and keep only triangles whose CENTROID lies inside the polygon, which honours the outline and every hole exactly without a constrained triangulator.
 
-`steep_seeds` are points along STEEP ribbon centrelines (stairs, ramps). A uniform `target_edge` triangle on a staircase climbs more than one storey gap across its corners and is dropped by the per-surface emission -- the whole stair vanishes. The seeds are forced in at fine spacing so the stair keeps short, gently-climbing triangles.
+`steep_seeds` are points along STEEP ribbon centerlines (stairs, ramps). A uniform `target_edge` triangle on a staircase climbs more than one storey gap across its corners and is dropped by the per-surface emission -- the whole stair vanishes. The seeds are forced in at fine spacing so the stair keeps short, gently-climbing triangles.
 
 <a id="door-triangle-is-reserved-as-a-hole"></a>**The door triangle is RESERVED as a hole, not coaxed out of the Delaunay** (`corridor_union._triangulate`). Vanilla marks a door with ONE triangle whose long edge is the whole doorway. Every attempt to get that from the triangulator failed the same way: the door line lies on the union BOUNDARY, so the ribbon's own outline corners land on it and split it into 3-4 pieces, and no amount of seeding, keep-out or constraint recovery can remove a corner already baked into the polygon. So the region is cut OUT of the polygon before triangulation -- the triangulator fills around it as a hole and cannot subdivide what it never sees. The wedge's shape is fixed by `corridor_doors` (full doorway base, deterministic depth, apex on the pathgrid's side); the reservation never moves, shrinks or flips it. A wedge that severs the sheet is allowed -- the MultiPolygon branch triangulates every significant piece. The old guard that SKIPPED reserving such a door instead demoted it to whatever sliver the fallback containing-triangle link happened to find.
 
@@ -869,7 +888,7 @@ uncovered** (was 2.5% uncovered / 2452 broken pathgrid edges with contours).
   BLOCKING/walls RED — plus pathgrid and door markers (cyan threshold lines;
   white core = teleport door). `--focus X,Y --span N` zooms a world-coord
   window; `--ids` labels triangle indices + vertex heights; `--quality`
-  colours steep triangles red and needles magenta. Exterior cells can be
+  colors steep triangles red and needles magenta. Exterior cells can be
   addressed as `--cell grid:X:Y` (colon form survives comma-list splitting;
   Windows filenames can't hold `:` so outputs sanitize it).
   `tools/navmesh/tri_check.py --cell A,B,...` checks EVERY triangle of a
@@ -1121,7 +1140,7 @@ exterior cells regenerate automatically.
 
 <a id="door-wedge-rings-are-pinned"></a>**The wedge's ring is PINNED through the cleanup passes** (`build_corridors`, `door_pins`). Base corners, base midpoint and apex. Where a door is wider than the ribbon crossing it, the ground beside the reserved wedge is thin crumb geometry that decimation eats -- taking the hole-ring vertices with it, so the attach found nothing within snap range and withdrew the door triangle (**measured on the CharacterGen pen gate**).
 
-<a id="every-centreline-is-sampled"></a>**Every pathgrid centreline is sampled into `pin_xy`** (`build_corridors`). The samples both PIN the mesh over a steep ribbon through decimation and mark a component as pathgrid-carrying so the island pass can never drop it. A steep ribbon keeps only the narrow Phase-1 width, so an edge collapse can eat it outright -- **measured on exterior grid (-48,-8), where all four steep hillside edges lost their mesh entirely, 4/4 midpoints covered before decimation and 0/4 after**, while every flat corridor was unaffected. Each sample is (x, y, z, ux, uy): the direction lets the sliver cull measure the corridor's CROSS-WIDTH at that sample, and consumers reading only x/y/z are unaffected.
+<a id="every-centerline-is-sampled"></a>**Every pathgrid centerline is sampled into `pin_xy`** (`build_corridors`). The samples both PIN the mesh over a steep ribbon through decimation and mark a component as pathgrid-carrying so the island pass can never drop it. A steep ribbon keeps only the narrow Phase-1 width, so an edge collapse can eat it outright -- **measured on exterior grid (-48,-8), where all four steep hillside edges lost their mesh entirely, 4/4 midpoints covered before decimation and 0/4 after**, while every flat corridor was unaffected. Each sample is (x, y, z, ux, uy): the direction lets the sliver cull measure the corridor's CROSS-WIDTH at that sample, and consumers reading only x/y/z are unaffected.
 
 <a id="the-wall-sampler-is-lazy"></a>**The door wall-test sampler is built LAZILY** (`build_corridors`). Indexing the blocking soup costs **~0.4s on a dense cell**, and a cell with no doors never asks it a single question; once the grow went native that build was **the second-largest remaining cost**, spent entirely on an object most cells discard unused. Only the DOOR footprint still needs a Python-side wall test, running a few probes per door rather than the ~890k the width march does, so it is not worth crossing into C++ for.
 
@@ -1150,16 +1169,16 @@ exterior cells regenerate automatically.
 
 <a id="island-drop-is-a-known-workaround"></a>**Some dropped fringe islands are REAL coverage -- this pass is a stopgap** (`_drop_unreachable_islands`). Verified on Chorrol: their centroids are inside no main-component triangle. They arise where the retriangulation pinched a surface to a single-vertex bowtie, leaving a corner edge-detached. The proper fix is to seed the triangulation so the neck stays edge-connected, or to split the bowtie vertex, NOT to drop. Until then an island is dropped only when unreachable -- connected to no cell door and no worldspace border -- so a doorstep or a border-crossing scrap is always preserved even if tiny.
 
-<a id="finalize-is-a-backstop"></a>**`finalize` is a backstop, not a remesh** (`finalize`). `corridor_union` already yields ONE connected non-overlapping surface, so this welds, guarantees manifold, drops stray islands and compacts -- no decimation of its own. Ledges come back as MARKS (centroids) because later passes shift indices; the caller resolves them with `_resolve_ledges` LAST. A component reaching a door centre or the exterior `cell_bounds` leads out of the cell and is KEPT. `cs` and `pinned` are accepted for signature stability and unused. Only DOORS pin the decimator, since a collapse at a threshold kills the Door Triangle: `pin_xy` carries every pathgrid sample and is used by the island pass, so pinning all of it would disable decimation everywhere. `door_pins` carries the reserved wedges' RING points -- base corners, base midpoint, apex -- because decimation collapsing those left the attach nothing to snap the door triangle to where the doorway outreaches its ribbon.
+<a id="finalize-is-a-backstop"></a>**`finalize` is a backstop, not a remesh** (`finalize`). `corridor_union` already yields ONE connected non-overlapping surface, so this welds, guarantees manifold, drops stray islands and compacts -- no decimation of its own. Ledges come back as MARKS (centroids) because later passes shift indices; the caller resolves them with `_resolve_ledges` LAST. A component reaching a door center or the exterior `cell_bounds` leads out of the cell and is KEPT. `cs` and `pinned` are accepted for signature stability and unused. Only DOORS pin the decimator, since a collapse at a threshold kills the Door Triangle: `pin_xy` carries every pathgrid sample and is used by the island pass, so pinning all of it would disable decimation everywhere. `door_pins` carries the reserved wedges' RING points -- base corners, base midpoint, apex -- because decimation collapsing those left the attach nothing to snap the door triangle to where the doorway outreaches its ribbon.
 
-<a id="badness-catches-needles-and-caps"></a>**Shape badness is the max of two normalised terms** (`_badness`). `max(edge_ratio / MAX_EDGE_RATIO, aspect / MAX_TRI_ASPECT)`: the ratio term catches needles (one short edge), the aspect term catches CAPS (all edges comparable, near-zero height) which the ratio cannot see. 1.0 is exactly the contract boundary.
+<a id="badness-catches-needles-and-caps"></a>**Shape badness is the max of two normalized terms** (`_badness`). `max(edge_ratio / MAX_EDGE_RATIO, aspect / MAX_TRI_ASPECT)`: the ratio term catches needles (one short edge), the aspect term catches CAPS (all edges comparable, near-zero height) which the ratio cannot see. 1.0 is exactly the contract boundary.
 
 ## Boundary sliver cull (`corridor_clean.cull_boundary_slivers`)
 <a id="boundary-sliver-cull"></a>
 
 **Code:** `tes5_import/navmesh/corridor_clean.py`
 
-<a id="a-residual-needle-is-fringe"></a>**A residual boundary needle is FRINGE, not usable ground** (`cull_boundary_slivers`). After collapses and flips have done what they can, a needle left on the outline means the outline's shape does not admit a good triangle there. Per the design brief those little bits are simply REMOVED: an actor loses a sliver of fringe it could not stand on anyway, and the mesh keeps only triangles honouring the shape contract. A triangle qualifies when `ratio > CULL_SLIVER_RATIO` and `area < CULL_SLIVER_MAX_AREA`, or `area < MIN_TRI_AREA` -- where ratio is normalised badness, 1.0 being the contract.
+<a id="a-residual-needle-is-fringe"></a>**A residual boundary needle is FRINGE, not usable ground** (`cull_boundary_slivers`). After collapses and flips have done what they can, a needle left on the outline means the outline's shape does not admit a good triangle there. Per the design brief those little bits are simply REMOVED: an actor loses a sliver of fringe it could not stand on anyway, and the mesh keeps only triangles honouring the shape contract. A triangle qualifies when `ratio > CULL_SLIVER_RATIO` and `area < CULL_SLIVER_MAX_AREA`, or `area < MIN_TRI_AREA` -- where ratio is normalized badness, 1.0 being the contract.
 
 <a id="fringe-needs-two-boundary-edges"></a>**True fringe has TWO boundary edges, never one** (`cull_boundary_slivers`). A triangle with a single edge on the outline and its other two deep in the interior is a WEDGE filling a concave pocket: removing it does not trim the fringe, it bites a slim V into walkable ground, apex inward, with open boundary down both new sides. Coverage and crack metrics are both blind to that -- no ground is uncovered, no walked line crosses the new boundary -- so it shipped while being plainly visible on the staircase. Measured on **ImperialDungeon01, ONE cull round took the cell from 1 open notch to 7, two of them bitten out of the tower stairs** the author reported twice. With two boundary edges the triangle is a corner of the outline with one edge back into the mesh, and removing it leaves the remaining boundary running straight through.
 
@@ -1178,9 +1197,9 @@ exterior cells regenerate automatically.
 
 <a id="the-outline-may-not-move"></a>**The OUTLINE may not move** (`decimate`). The boundary is the wall standoff: any boundary motion -- even sliding one boundary vertex onto another, which cuts the corner between them -- pushes mesh through walls. So only an INTERIOR vertex may be collapsed, and it collapses INTO its neighbour. Two outline vertices may collapse only along an OUTLINE edge: if the edge between them is interior they sit on opposite sides of a thin neck, and fusing them pinches the sheet at a point so the far side comes off as a vertex-attached scrap (**BarrenCave: [1768, 6, 5, 3]**).
 
-<a id="sawtooth-and-concave-allowances"></a>**Sawtooth teeth are cut inward; concave corners get a fraction of the standoff** (`decimate`). A boundary vertex that juts OUTWARD from its neighbours' chord (convex) may be removed with a larger deviation (`DECIMATE_SAWTOOTH_DEV`), because cutting it can only SHRINK the mesh, and the union outline's zigzag teeth are exactly such vertices. Cuts are inward-only, bounded in total by `DECIMATE_MAX_AREA_LOSS` of the mesh's area, so the periphery is straightened and never eaten. CONCAVE corners get a small allowance too: the outline is a wall STANDOFF, not the wall -- a ribbon is laid at `RIBBON_HALF_WIDTH` from its centreline, so the boundary already sits clear of real collision (**measured 11-17u at the Pinarus corner**). Refusing them is what left sliver fans nothing could repair: such a corner cannot be collapsed, cannot be flipped (the quad around a concave corner is non-convex) and cannot be split (its longest edge is under the split floor), and **a census of five reference cells found 16-32 of them EACH, carrying triangles up to badness 68**. The allowance (`CONCAVE_CUT_FRAC`) is a deliberate fraction of the standoff, so it can never cross the wall the standoff buys.
+<a id="sawtooth-and-concave-allowances"></a>**Sawtooth teeth are cut inward; concave corners get a fraction of the standoff** (`decimate`). A boundary vertex that juts OUTWARD from its neighbours' chord (convex) may be removed with a larger deviation (`DECIMATE_SAWTOOTH_DEV`), because cutting it can only SHRINK the mesh, and the union outline's zigzag teeth are exactly such vertices. Cuts are inward-only, bounded in total by `DECIMATE_MAX_AREA_LOSS` of the mesh's area, so the periphery is straightened and never eaten. CONCAVE corners get a small allowance too: the outline is a wall STANDOFF, not the wall -- a ribbon is laid at `RIBBON_HALF_WIDTH` from its centerline, so the boundary already sits clear of real collision (**measured 11-17u at the Pinarus corner**). Refusing them is what left sliver fans nothing could repair: such a corner cannot be collapsed, cannot be flipped (the quad around a concave corner is non-convex) and cannot be split (its longest edge is under the split floor), and **a census of five reference cells found 16-32 of them EACH, carrying triangles up to badness 68**. The allowance (`CONCAVE_CUT_FRAC`) is a deliberate fraction of the standoff, so it can never cross the wall the standoff buys.
 
-<a id="a-pin-protects-a-position"></a>**A pin protects a POSITION, so the far end may still collapse INTO it** (`decimate`). Door threshold corners are pinned because collapsing them destroys the Door Triangle and the doorway goes dead in the engine. But nothing about a pin requires its NEIGHBOUR to stay: refusing the whole edge froze the merge, since **v464 sits 7.5u from pathgrid node n124, so the 24u node pin vetoed collapsing the redundant v598 into it and two 300u^2 slivers survived on the stairs**. Only both-pinned is a genuine stalemate -- and even then the two may fuse when REDUNDANT, a vertex within `DECIMATE_OUTLINE_TOL` of the straight line between its two boundary neighbours contributing no position of its own. A single door's 24u centre pin covers ~50u of boundary, so at **ImperialDungeon01's prison door FOUR consecutive vertices of one near-collinear chain were all pinned and could never collapse into each other**, forcing the fan of 8-360u^2 slivers through the doorway reported as "completely mangled".
+<a id="a-pin-protects-a-position"></a>**A pin protects a POSITION, so the far end may still collapse INTO it** (`decimate`). Door threshold corners are pinned because collapsing them destroys the Door Triangle and the doorway goes dead in the engine. But nothing about a pin requires its NEIGHBOUR to stay: refusing the whole edge froze the merge, since **v464 sits 7.5u from pathgrid node n124, so the 24u node pin vetoed collapsing the redundant v598 into it and two 300u^2 slivers survived on the stairs**. Only both-pinned is a genuine stalemate -- and even then the two may fuse when REDUNDANT, a vertex within `DECIMATE_OUTLINE_TOL` of the straight line between its two boundary neighbours contributing no position of its own. A single door's 24u center pin covers ~50u of boundary, so at **ImperialDungeon01's prison door FOUR consecutive vertices of one near-collinear chain were all pinned and could never collapse into each other**, forcing the fan of 8-360u^2 slivers through the doorway reported as "completely mangled".
 
 <a id="link-condition-guards-the-bowtie"></a>**The link condition guards against a surface closing on itself at a point** (`decimate`). A collapse is edge-topology safe only when the two vertices' neighbourhoods meet EXACTLY at the opposite corners of the triangles being collapsed; any other shared vertex normally means the collapse pinches the surface into a bowtie joined at a single vertex, which edge adjacency then reads as TWO components (**BarrenCave: decimation took one connected cave to [1771, 7]**). The pinch needs the collapsed edge to be INTERIOR: with mesh on both sides, fusing its ends joins two separate fans at a single vertex. On a BOUNDARY edge (one owner) there is no second fan -- one side is open space -- so the collapse merely shortens the outline and cannot bowtie, whatever else the two vertices share. Measured on **ImperialDungeon01's stairs, v600/v601 sit 2.5u apart on the OUTLINE joined by a single 71u^2 sliver, each reaching the V apex v382 through its own 300u^2 sliver**; the strict test saw v382 as an extra shared vertex and refused, so the slivers survived every pass, neither dropped (they carry adjacency) nor merged. Allowing it yields the two fat triangles the author sketched: (394,382,465) and (382,514,464).
 
@@ -1220,7 +1239,7 @@ exterior cells regenerate automatically.
 
 **Code:** `tes5_import/navmesh/corridor_union.py`
 
-<a id="height-is-a-property-of-point-and-surface"></a>**A point's height is a property of THE POINT AND ITS SURFACE, never of whichever triangle reached it first** (`_emit_surfaces`). The old code chose a triangle's height as the MEAN of its three corners' levels, then bound each corner to whatever vertex already sat within `SAME_SURFACE_Z` of that mean -- so a corner's height depended on WHICH TRIANGLE ASKED FIRST, and two triangles sharing a corner on ONE surface routinely bound it to two different vertices (**corner 22, a single level at 395.3, minted vertex 370 at z=395.3 for one neighbour and vertex 413 at z=356.2 for the next**). They then share no EDGE and the engine cannot walk between them, since `_compute_adjacency` links only across shared edges. On a STAIR every consecutive triangle has a different mean, so stairs tore worst: measured on **ICPrisonSewerExit01, 28 of 582 shared 2D edges were lost and the mesh fell into 12 components; ICPrisonEntrance01 fell into 28**. No value of `SAME_SURFACE_Z` fixes it -- widening fuses real storeys, narrowing tears more. It is a first-match-wins race, not a tolerance. The fix gives each (corner, surface) pair one height: the level at that corner nearest its own surface. Because the level came from the ribbon's own centreline (`union_geom._height_on` follows the pathgrid line A->B), the lifted surface is PARALLEL TO THE SEED LINE by construction and a stair comes out as one straight ramp rather than a sawtooth of per-triangle averages. Coverage is untouched: every 2D triangle is still emitted on every surface beneath it.
+<a id="height-is-a-property-of-point-and-surface"></a>**A point's height is a property of THE POINT AND ITS SURFACE, never of whichever triangle reached it first** (`_emit_surfaces`). The old code chose a triangle's height as the MEAN of its three corners' levels, then bound each corner to whatever vertex already sat within `SAME_SURFACE_Z` of that mean -- so a corner's height depended on WHICH TRIANGLE ASKED FIRST, and two triangles sharing a corner on ONE surface routinely bound it to two different vertices (**corner 22, a single level at 395.3, minted vertex 370 at z=395.3 for one neighbour and vertex 413 at z=356.2 for the next**). They then share no EDGE and the engine cannot walk between them, since `_compute_adjacency` links only across shared edges. On a STAIR every consecutive triangle has a different mean, so stairs tore worst: measured on **ICPrisonSewerExit01, 28 of 582 shared 2D edges were lost and the mesh fell into 12 components; ICPrisonEntrance01 fell into 28**. No value of `SAME_SURFACE_Z` fixes it -- widening fuses real storeys, narrowing tears more. It is a first-match-wins race, not a tolerance. The fix gives each (corner, surface) pair one height: the level at that corner nearest its own surface. Because the level came from the ribbon's own centerline (`union_geom._height_on` follows the pathgrid line A->B), the lifted surface is PARALLEL TO THE SEED LINE by construction and a stair comes out as one straight ramp rather than a sawtooth of per-triangle averages. Coverage is untouched: every 2D triangle is still emitted on every surface beneath it.
 
 <a id="levels-recluster-on-the-storey-gap"></a>**Corner levels are RE-CLUSTERED on the storey gap before emission** (`_emit_surfaces`, `storeys_of`). `_levels_at` clusters a corner's covering ribbons on `SAME_SURFACE_Z` (36u), so a staircase arrives already split into a level per tread-ish step -- **corner 162 came back as [-302.3, -254.7], two entries 47u apart that are ONE flight** -- and emission then treated each as its own surface and stacked a second triangle on the stair. Re-clustering makes "surface" mean the same thing to the level lookup and to the emission: a stair is one surface, and only a genuine floor-above is a second.
 
@@ -1234,7 +1253,7 @@ exterior cells regenerate automatically.
 
 <a id="level-less-corners-cluster-their-own-surfaces"></a>**A corner with NO level of its own clusters the surfaces that reach it** (`_emit_surfaces`, `bare_clusters`). Such a corner still has to be distinguished per storey, or every one in the cell collapses into a single class and the mesh flattens. It CANNOT be keyed by quantising z into fixed bands: band edges are arbitrary, so two neighbours a unit apart in Z straddle one and land in different classes -- that **shattered ChorrolFightersGuild into 83 components and lost two thirds of its triangles**. Instead each level-less corner accumulates the surface heights that actually reach it and clusters them on `STOREY_GAP_Z` exactly as a corner's own levels are, giving a stable, band-free slot that separates storeys only where a real gap exists.
 
-<a id="vertex-height-is-the-band-median"></a>**A vertex takes the MEDIAN of its band, never a per-triangle average** (`_emit_surfaces.vert`). A band holds the heights of every ribbon covering this exact point on this storey, each computed by `_height_on` along that ribbon's centreline, so on a stair they agree to within the ribbons' own crossing error and their median is the point's height ON the pathgrid line. The height depends ONLY on the key -- were it to depend on which triangle asked, the first caller would win and the original order-dependence would come straight back. A fallback is used only when the corner carries no level at all: the union covers it but no centreline claims it.
+<a id="vertex-height-is-the-band-median"></a>**A vertex takes the MEDIAN of its band, never a per-triangle average** (`_emit_surfaces.vert`). A band holds the heights of every ribbon covering this exact point on this storey, each computed by `_height_on` along that ribbon's centerline, so on a stair they agree to within the ribbons' own crossing error and their median is the point's height ON the pathgrid line. The height depends ONLY on the key -- were it to depend on which triangle asked, the first caller would win and the original order-dependence would come straight back. A fallback is used only when the corner carries no level at all: the union covers it but no centerline claims it.
 
 <a id="emission-drops-duplicates-and-slivers"></a>**Emission de-duplicates windings and drops zero-area triangles** (`_emit_surfaces`). A 2D triangle is emitted once per surface beneath it, and two of a corner's storey bands can resolve to the SAME vertices, so the same triangle is emitted twice (once per winding) or several times over. Measured on **Pinarus: (167,178,152) and its reverse formed a 2-triangle "component", and a collinear sliver (57,58,59) was emitted FOUR times as four 1-triangle "components"** -- duplicates and degenerates, not islands, and what made a house whose corridor mesh is ONE component report seven. Identity is therefore winding-independent (the sorted vertex triple), and triangles under `MIN_XY_FOOTPRINT` are dropped: they cover no ground, cannot be stood on, and only ever attach to the mesh at a point.
 
@@ -1289,7 +1308,7 @@ exterior cells regenerate automatically.
 
 <a id="trigrid-queries-nine-buckets"></a>**The triangle index queries a 3x3 bucket neighbourhood** (`_TriGrid.candidates`). Single-bucket lookups miss a triangle whenever the query point sits near a bucket boundary -- for a wall test that means growth walks straight THROUGH the wall. Querying the point's bucket and its eight neighbours means a triangle within one bucket (>= the probe extent) is never missed.
 
-<a id="wall-probe-sweeps-the-interval"></a>**The wall probe tests the SWEPT interval, never the end point** (`grow_half_width`). A point probe with a thin slab steps straight over a wall whenever the wall falls between two samples -- measured, **a 2u-deep slab on an 8u step missed a wall by 2u on both sides and produced 124 through-wall triangles in the Fighters Guild**. Centring the slab on the interval midpoint with half the interval as depth (plus the slab's own sliver) makes the sweep continuous, so a wall cannot be skipped. Callers marching in steps therefore pass HALF THE STEP as `depth` and centre on the step's midpoint (`wall_slab_sampler`). On a hit the position is BISECTED (`RIBBON_GROW_BISECT`) so the ribbon ends AT the wall rather than up to a whole step short of it -- a step-short stop is what narrowed doorways.
+<a id="wall-probe-sweeps-the-interval"></a>**The wall probe tests the SWEPT interval, never the end point** (`grow_half_width`). A point probe with a thin slab steps straight over a wall whenever the wall falls between two samples -- measured, **a 2u-deep slab on an 8u step missed a wall by 2u on both sides and produced 124 through-wall triangles in the Fighters Guild**. Centering the slab on the interval midpoint with half the interval as depth (plus the slab's own sliver) makes the sweep continuous, so a wall cannot be skipped. Callers marching in steps therefore pass HALF THE STEP as `depth` and center on the step's midpoint (`wall_slab_sampler`). On a hit the position is BISECTED (`RIBBON_GROW_BISECT`) so the ribbon ends AT the wall rather than up to a whole step short of it -- a step-short stop is what narrowed doorways.
 
 <a id="soft-floor-never-beats-a-wall"></a>**A WALL always overrides the caller's soft floor** (`grow_half_width`, `lo`). `lo` keeps junctions overlapping, but forcing the ribbon out to a connectivity floor drove mesh straight through walls near every junction -- the same defect the Phase-1 unconditional width has. So the soft floor is marched too, from zero, and the wall test may cut it short. The walkable-floor test binds only BEYOND `lo`: inside it the pathgrid's own assertion wins (a node at a threshold or a ledge lip would otherwise collapse its corridor to nothing), and no wall was found there, so nothing can be on the far side of anything.
 
@@ -1297,14 +1316,27 @@ exterior cells regenerate automatically.
 
 <a id="node-discs-fill-junction-notches"></a>**Pathgrid NODES grow radial discs to fill the corner notches** (`grow_node_disc`). Ribbons grow only PERPENDICULAR to their own edge, so where two edges meet at an angle the outer corner is a notch no ribbon reaches -- a right-angle junction leaves a square bite out of the mesh. Marching outward on `RIBBON_GROW_DISC_RAYS` evenly-spaced bearings under the same stop rules as a rail, then closing the ray ends into a polygon, fills exactly that corner; it joins the union like any other strip.
 
-<a id="slab-test-is-a-2d-sat"></a>**The slab test is a separating-axis check in the slab's own frame** (`_tri_hits_slab`). The slab is an oriented box centred at (cx, cy): extent `half_w` along the edge-tangent (~actor width), `depth` along the march direction (thin), full Z span. The triangle's vertices are projected into that frame (tangent = X', march = Y') and tested against the axis-aligned rectangle, gated first by a cheap Z overlap.
+<a id="slab-test-is-a-2d-sat"></a>**The slab test is a separating-axis check in the slab's own frame** (`_tri_hits_slab`). The slab is an oriented box centered at (cx, cy): extent `half_w` along the edge-tangent (~actor width), `depth` along the march direction (thin), full Z span. The triangle's vertices are projected into that frame (tangent = X', march = Y') and tested against the axis-aligned rectangle, gated first by a cheap Z overlap.
 
 ## Door footprints (`corridor_doors.py`)
+<a id="door-center-caches"></a>**The door-center caches and why the panel center wins** (`from_pgrd`, `load_door_centroids`). A door REFR's position is the model PIVOT, which sits on the HINGE, not on the opening; the point an actor walks through — and where the Door Triangle belongs — is the panel midpoint. Two caches hold it, both built in the SAME pass as collision and mesh bounds (`asset_convert.collision.collision_extract.scan_mesh_data`), keyed by normalized model path:
+
+- `_DOOR_PANEL_CTR` — local-space `(cx, cy)` of the COLLISION PANEL in world units. **Preferred.** Verified against placed doors in-world the collision center is exact to **~1.5u**, where the mesh-bbox center was **25-35u off along the threshold on the CharacterGen prison gates (`cgprisoncellgate01`, `idgate01`)** — more than half those gates' own 40/63u width, putting the Door Triangle mostly on the jamb.
+- `_DOOR_CENTROIDS` — local-space `(cx, cy)` XY midpoint of the largest mesh shape. The fallback when no collision panel was read.
+- `_DOOR_FLOOR_DZ` — local z of the door mesh's BASE (bbox z-min). Added to the REFR `PosZ` it gives the threshold's floor height, dropping the point from the hinge (up the door leaf) to the storey the door actually opens onto.
+- `_DOOR_THRESH_LOCAL_Y` — True when the threshold runs along the mesh's LOCAL +Y (the wider horizontal extent), False when along local +X. Read per model; door meshes do not share one convention (**`impdundoor01` is wide in Y, `icdoorint01` wide in X**), so `collect_doors` adds a quarter turn for the X-wide meshes and every consumer — the door quad and `navmesh_preview` alike — then uses one rule.
+- `_DOOR_NO_THRESHOLD` — models whose collision panel is thin in Z: trapdoors, hatches, display cases. They swing about a HORIZONTAL axis, so no vertical-axis threshold line exists and they get no door quad (width 0). They are still EMITTED: `_build_door_links` must give every door a Door Triangle or the doorway goes dead in the engine. Dropping them outright deleted the **Imperial Prison cell gates, the player's own starting cell door among them**, because a shape the extractor could not read (`bhkListShape`) is indistinguishable in the cache from a real trapdoor.
+- `_DOOR_WIDTH` — the real doorway width off the collision panel; see [the base-line section](#door-base-spans-the-real-doorway).
+
+<a id="door-center-uses-transpose-rotation"></a>**The pivot->panel offset rotates by the TRANSPOSE matrix** (`_door_threshold`). Bethesda placement applies the transpose of the naive rotation (`navmesh/world.py::_rot_matrix`, verified against the AnvilFG floor shell), so the world offset is `(lx·cos + ly·sin, -lx·sin + ly·cos)`. The naive CCW form put **Arvena's upstairs door center one FULL door width from the real doorway**. Only doors rotated 90/270 expose it — 0/180 are sign-invariant — which is why it survived every 0/180 test.
+
+<a id="door-triangle-linking-distance"></a>**A triangle links to a door within `DOOR_LINK_MAX_DIST`, weighted toward the threshold LINE** (`from_pgrd`). Triangles centered on the threshold line (a small offset along the facing) are preferred by weighting the along-facing offset up by `DOOR_LINK_ALONG_WEIGHT`.
+
 <a id="door-footprints"></a>
 
 **Code:** `tes5_import/navmesh/corridor_doors.py`
 
-<a id="door-base-line-is-local-y"></a>**A door's base line is its LOCAL +Y, and the facing is local +X** (`door_footprints`). A door mesh's local +X points THROUGH the opening and local +Y runs ALONG the threshold -- measured on **impdundoor01.nif, whose panel is 5.6u thick in X and 115.3u wide in Y**: a panel is thin through the doorway and wide across it. `_door_threshold` agrees, rotating the hinge->doorway-centre offset (which lies along local X) by the same standard matrix. Using the facing as the base line laid the threshold across the axis the door actually opens along -- **every door quad rotated 90 degrees from its real opening**, visible as a sideways door line in `navmesh_preview`. Under the TRANSPOSE placement convention (`world._rot_matrix`) the threshold is `(sin rz, cos rz)` and the facing `(cos rz, -sin rz)`; the old CCW forms drew and swept doors mirrored for any rotation off 0/180.
+<a id="door-base-line-is-local-y"></a>**A door's base line is its LOCAL +Y, and the facing is local +X** (`door_footprints`). A door mesh's local +X points THROUGH the opening and local +Y runs ALONG the threshold -- measured on **impdundoor01.nif, whose panel is 5.6u thick in X and 115.3u wide in Y**: a panel is thin through the doorway and wide across it. `_door_threshold` agrees, rotating the hinge->doorway-center offset (which lies along local X) by the same standard matrix. Using the facing as the base line laid the threshold across the axis the door actually opens along -- **every door quad rotated 90 degrees from its real opening**, visible as a sideways door line in `navmesh_preview`. Under the TRANSPOSE placement convention (`world._rot_matrix`) the threshold is `(sin rz, cos rz)` and the facing `(cos rz, -sin rz)`; the old CCW forms drew and swept doors mirrored for any rotation off 0/180.
 
 <a id="door-base-spans-the-real-doorway"></a>**The base line spans the REAL doorway width, never a constant** (`door_footprints`). Door panels run from **16u to 764u wide (median 121)**, measured off each model's collision panel, so the old constant 90u base line was the wrong size for most doors: on impdundoor01 (115u) it left the first 30u of the threshold with no mesh under it and the **Door Triangle came out a 571-unit scrap -- below the smallest of 1,659 vanilla door triangles (min 992, median 9,614)**, too narrow for an actor to stand on. That is what stopped the **CharacterGen assassins dead at their cell door**.
 
@@ -1571,11 +1603,11 @@ converted worldspace inherits a bank sized for Skyrim's Tamriel.
 generated bank can never shadow the vanilla file the weather system loads by
 name).
 
-### Size and centre come from the exterior CELL GRID, not from MNAM or NAM0/NAM9
+### <a id="cloud-bank-rect-precedence"></a>Size and center come from the exterior CELL GRID, not from MNAM or NAM0/NAM9
 
 Per axis the deck is given **Bethesda's own deck-to-land ratio** — the stock
 910,445 sheet against Skyrim's 487,424 x 385,024 land, i.e. **1.868x on X and
-2.365x on Y** — and centred on the land rectangle's midpoint. Feeding Skyrim's
+2.365x on Y** — and centered on the land rectangle's midpoint. Feeding Skyrim's
 own land back in reproduces the stock scale of exactly **8.0 / 8.0**, which is
 the control that validates the rule.
 
@@ -1586,9 +1618,9 @@ worldspace's persistent refs, are commonly parked at a dummy `(0,0)`, and drag
 the extent toward the origin.
 
 🛑 **MNAM is authored map-camera framing and a converted plugin's can simply be
-WRONG about its own terrain.** NehrimWorldspace's MNAM rectangle is centred
+WRONG about its own terrain.** NehrimWorldspace's MNAM rectangle is centered
 26,624 units SOUTH of its land and its north edge clips 16,384 units of real
-land off. Sizing or centring off it produces a deck that is both offset and
+land off. Sizing or centering off it produces a deck that is both offset and
 undersized. MNAM, then NAM0/NAM9, remain fallbacks only for a worldspace that
 contributes no cells.
 
@@ -1721,7 +1753,7 @@ entry silently restores geometry the current build would never produce:
 
 - **v2** — entries began carrying ledge links; an older entry restored
   geometry with no drop-downs.
-- **v3** — analytic door wedges (exact width, centre and apex side) changed
+- **v3** — analytic door wedges (exact width, center and apex side) changed
   the geometry of every cell with a door, with identical inputs.
 - **v4** — per-mesh collision digests replaced the whole-file collision hash
   that used to ride in via `tag`. One replaced mesh previously invalidated
@@ -1729,6 +1761,16 @@ entry silently restores geometry the current build would never produce:
   only the cells that actually place that mesh miss. This is also what lets a
   published cache survive a user's own mesh edits — see
   `collision_extract.collision_digest` and `tools/navmesh/navmesh_cache.py`.
+
+### <a id="cache-tag-steps-in-its-own-scheme"></a>`previous_tag` steps in the tag's OWN width
+
+**Code:** `_raw_minor_field` / `previous_tag` in `tools/navmesh/navmesh_cache.py`
+
+The step reads the tag's RAW digits rather than `_version_key`, whose value is
+normalized to thousandths for comparison. The WIDTH is the scheme here, not the
+value: `0.73` is a hundredths name even though 730 sits above the
+`_SCHEME_SWITCH_MILS` (580) boundary, so it must step to `0.72`, never `0.729`
+-- a tag that names a release which never existed and 404s the download.
 
 ### <a id="door-triangle-tie-break"></a>The door triangle tie-break is AREA, not index
 
@@ -2111,7 +2153,7 @@ It removes the problem at the source rather than repairing it downstream.
 The pathgrid **is** the "an actor walks here" graph. Build the navmesh directly
 on it:
 
-> Emit a fixed-width ribbon of triangles centred on every pathgrid edge. Edges
+> Emit a fixed-width ribbon of triangles centered on every pathgrid edge. Edges
 > that meet at a shared node **share that node's vertices by construction**, so
 > triangle adjacency links automatically. No independent sheets, so nothing to
 > weld or stitch.
@@ -2194,7 +2236,7 @@ disconnects everything around it under `_compute_adjacency`).
 **Door links** (interior passages AND cross-cell teleport doors). Built in
 `pgrd_to_navm._build_door_links(verts, tris, doors)`: for each door it finds the
 triangle whose 2D footprint CONTAINS the (pivot-corrected) threshold point at
-the door's storey Z; failing that, the nearest triangle centred on the threshold
+the door's storey Z; failing that, the nearest triangle centered on the threshold
 line within `DOOR_LINK_MAX_DIST`. That triangle is flagged `_TRI_FLAG_DOOR` and
 emitted as a Door Triangle, and its ref FormID goes into the NVMI door mirror.
 **What the corridor mesh owes it:** a well-shaped, connected triangle sitting
@@ -2230,7 +2272,7 @@ link and cell-link passes produce a fully functional (if narrow) navmesh.
 - `edges`: `[(i,j), ...]` node-index pairs.
 - `walkable`: `(N,3,3)` float array of walkable collision (floors, treads,
   terrain), from `gather_cell_geometry`.
-- `doors`: `[(x, y, z, rot_z, is_teleport), ...]` pivot-corrected door centres
+- `doors`: `[(x, y, z, rot_z, is_teleport), ...]` pivot-corrected door centers
   (already assembled by `pgrd_to_navm._collect_doors` and passed through).
 
 ### Algorithm
@@ -2273,7 +2315,7 @@ For edge `(i, j)` with snapped endpoints `A=(ax,ay,az)`, `B=(bx,by,bz)`:
   so a long edge is several quads (needed so the ribbon can *follow* a curved
   or bumpy floor in Z; a single quad would bridge straight over dips).
 - For each cross-section parameter `t` in `{0, 1/k, ..., 1}`:
-  - centre `C(t) = lerp(A, B, t)` — **Z comes from the straight A→B line**, not
+  - center `C(t) = lerp(A, B, t)` — **Z comes from the straight A→B line**, not
     re-sampled per cross-section (principle 2: the line's slope is the ramp).
   - left `L(t) = C(t) + HALF * w`, right `R(t) = C(t) - HALF * w`, **both at
     `C(t).z`** — the corridor is FLAT across its width (author decision
@@ -2317,7 +2359,7 @@ For each door `(dx, dy, dz, rz, is_tp)`:
    `DOOR_BRIDGE_RADIUS` of `(dx,dy)` at that storey, the door is genuinely walled
    off from the pathgrid — skip it (conservative; do not invent a floating
    patch).
-2. **Stamp a small threshold quad** on the door line: an oriented rect centred at
+2. **Stamp a small threshold quad** on the door line: an oriented rect centered at
    `(dx,dy,storey_z)`, width `2·DOOR_QUAD_HALF_WIDTH` along the door axis, depth
    `2·DOOR_QUAD_HALF_DEPTH` across it, flat at `storey_z`. Two triangles. Its long
    edge lies ON the door line — exactly what `_build_door_links` wants to flag.
@@ -2735,7 +2777,7 @@ no disconnection the pathgrid contradicts).
    unless it touches a door pin, contains a pathgrid sample, lies on the
    cell seam, or its neighbours would lose each other (bounded BFS).
 6. **Door pins are TIGHT** (`DECIMATE_PIN_RADIUS` 8u around the wedge ring
-   points, 24u around door centres).  The old 80u blanket froze every sliver
+   points, 24u around door centers).  The old 80u blanket froze every sliver
    near a doorway beyond repair (area-3 MICRO triangles parked forever).
 
 Measured on the reference cells: edge-ratio p50 1.56–1.85, p90 2.3–3.1;

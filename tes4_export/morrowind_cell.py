@@ -101,7 +101,7 @@ def _read_header_sub(cell: Cell, sub, seen_data: bool) -> bool:
 
 
 def _cell_map_color(cell, sub):
-    """Set the colour this cell draws on the world map."""
+    """Set the color this cell draws on the world map."""
     if len(sub.data) >= 4:
         cell.map_color = struct.unpack_from('<i', sub.data, 0)[0]
 
@@ -119,7 +119,7 @@ def _cell_water_int(cell, sub):
 
 
 def _cell_ambient(cell, sub):
-    """Set the interior ambient/sunlight/fog colours and fog density."""
+    """Set the interior ambient/sunlight/fog colors and fog density."""
     if len(sub.data) >= 16:
         cell.ambient = struct.unpack_from('<IIIf', sub.data, 0)
 

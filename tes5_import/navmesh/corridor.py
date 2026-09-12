@@ -8,7 +8,7 @@ Bethesda's pathgrid is the only part of the input that ASSERTS "an actor walks
 here".  Instead of re-discovering walkable surface from collision (voxelize /
 contour / region-flood) and then fighting to keep the result connected across
 the seams that discovery introduces, we build the navmesh DIRECTLY on the
-pathgrid: a flat, fixed-width ribbon of triangles centred on every pathgrid
+pathgrid: a flat, fixed-width ribbon of triangles centered on every pathgrid
 edge.
 
 Ribbons on a dense pathgrid overlap heavily (a node can carry 9 edges, and a
@@ -245,7 +245,7 @@ def _plan_stations(nodes, edges, node_z, degree, grow):
 
 
 def _profile_stations(sample, pa, pb, n):
-    """Per-station (x, y, candidate heights) along a steep edge's centreline."""
+    """Per-station (x, y, candidate heights) along a steep edge's centerline."""
     layers = sample.layers
     ax, ay, az = pa
     bx, by, bz = pb
@@ -486,7 +486,7 @@ def _build_corridor_strips(nodes, edges, node_z, wall_hit=None,
                            blocking=None, walkable=None, sample=None):
     """One corridor ribbon per pathgrid edge, plus a disc at every node.
 
-    Each strip carries its centreline ends (after dead-end extension), the
+    Each strip carries its centerline ends (after dead-end extension), the
     along/perpendicular units, a MAX half-width for level lookups, and in
     Phase 2 an explicit grown outline.  They are NOT yet a shared mesh --
     corridor_union takes their boolean union and retriangulates it.
@@ -822,10 +822,10 @@ def _door_geometry(corridors, door_list, nodes, edges, wall_hit, cell_clip):
     return strips, edges_out, pins
 
 
-def _centreline_samples(nodes, edges, node_z):
+def _centerline_samples(nodes, edges, node_z):
     """(x, y, z, ux, uy) along every pathgrid edge, at RIBBON_STEP spacing.
 
-    See: docs/commentary/tes5_import_navmesh.md#every-centreline-is-sampled
+    See: docs/commentary/tes5_import_navmesh.md#every-centerline-is-sampled
     """
     out = []
     for (i, j) in edges:
@@ -914,7 +914,7 @@ def build_corridors(refr_recs, base_model_by_fid, get_collision, nodes, edges,
     """Phase-1 corridor navmesh for one cell: (verts, tris, ledges) lists.
 
     doors: [(x, y, z, rot_z, is_teleport, width), ...] pivot-corrected door
-    centres.  door_bases: low-24 DOOR base FormIDs contributing no collision.
+    centers.  door_bases: low-24 DOOR base FormIDs contributing no collision.
     ledges: [(upper_tri, lower_tri, drop), ...] for NVNM Ledge Up/Down links.
     See: docs/commentary/tes5_import_navmesh.md#ribbon-construction
     """
@@ -949,7 +949,7 @@ def build_corridors(refr_recs, base_model_by_fid, get_collision, nodes, edges,
 
     door_xy = [(x, y, z) for (x, y, z, r, tp, w) in door_list]
     pin_xy = (list(door_xy) + door_pins
-              + _centreline_samples(nodes, edges, node_z))
+              + _centerline_samples(nodes, edges, node_z))
     verts, tris, ledge_marks = corridor_clean.finalize(
         verts, tris, cs=(params.CS_EXTERIOR if land_rec is not None
                          else params.CS),

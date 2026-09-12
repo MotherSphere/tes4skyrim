@@ -368,12 +368,7 @@ BLUR_RADIUS_PER_1000 = 20.0
 # detail worth keeping at diffuse resolution -- and see the encoder note above.
 HEIGHT_DOWNSCALE = 2
 
-# Mitchell-Netravali (B = C = 1/3) resampled for an exact 2x reduction: output
-# texel i is centred on input 2i + 0.5, so the tap offsets are constant and the
-# weights can be a literal.  Chosen over Lanczos deliberately -- Lanczos is too
-# sharp for a height field that is already slightly soft, which is the whole
-# point of the blur that follows.  The negative lobes are why the result is
-# clipped back into 0..255.
+#: Mitchell-Netravali (B = C = 1/3) taps for an exact 2x reduction; negative lobes are why output is clipped to 0..255.
 _MITCHELL_TAPS = (-3, -2, -1, 0, 1, 2, 3)
 _MITCHELL_WEIGHTS = np.array(
     [-5.0 / 288, 1.0 / 36, 77.0 / 288, 4.0 / 9, 77.0 / 288, 1.0 / 36,
@@ -704,65 +699,9 @@ def _median(texels):
     return srt[len(srt) // 2]
 
 
-# How much of a surface must sit within +/-`FLAT_BAND` levels of its own
-# median: the shape difference between a hand-tuned height map and Nehrim's raw
-# alpha, stated so that no outlier can move it.
-#
-# 🔴 THE MEASURE THIS REPLACED WAS WRONG, and it took the author pointing at a
-# rendered map to see it.  "Share of texels in the bottom third of min..max"
-# takes its threshold from the EXTREMES, so a couple of bright texels stretch
-# the range and drag the whole surface into the deep band.
-# `leyawiinmetalstrip03` — a flat plate with two rivets — scored 94.2% "deep",
-# while 93.7% of its area sits within +/-20 of its median, p95 is 83, and the
-# amplitude of 146 comes almost entirely from the rivets (p99 jumps to 132).
-#
-# Recomputed outlier-proof over the same 56 pairs (`temp/parallax_pairs.csv`):
-#
-#                                hand-tuned   Nehrim
-#     deep third (min..max)            12.1     39.1  <- what was calibrated on
-#     deep third (p05..p95)            25.8     37.9  <- honest, barely splits
-#     share within +/-20 of median     63.2     36.6  <- clean AND robust
-#
-# The middle row is the finding: once the range is made robust, the deep-third
-# figure stops separating the two populations at all.  Only the band measure
-# does, and it says the same thing the eye does — the hand-tuned wall is a flat
-# face with narrow mortar grooves, Nehrim's is restless everywhere.
-#
-# 🔴 Scaling and shifting cannot produce this.  Shifting is linear and moves
-# the median with the body; scaling DOES change an absolute band, which is why
-# `target_range` carries part of the correction, but reaching 63% by scaling
-# alone would mean an amplitude far below the ~150 the hand-tuned maps ship at.
-# The rest has to come from a curve.
-#
-# The target itself is the median of the WHOLE reference corpus, 3631 height
-# fields rather than the 56 paired ones:
-#
-#     both folders   p05 34.7   p25 49.0   median 63.3   p75 73.4   p95 84.8
-#       folder A     p05 49.9   p25 62.5   median 69.6   p75 76.1   p95 85.7
-#       folder B     p05 29.3   p25 43.0   median 51.3   p75 66.6   p95 83.1
-#
-# 🔴 Read the two folder rows before touching this number.  The same author
-# normalises to 69.6% in one set and 51.3% in the other — the SAME split that
-# made the amplitude cap dangerous (medians 145 and 153 there).  63 is the
-# pooled median and sits between them, which is the honest choice for a target;
-# calibrating on either folder alone would land 6-12 points off.
-#
-# And the spread is wide on purpose: this is a central tendency, not a law.
-# Half the reference corpus sits below 63%, so the target says "as flat as a
-# typical hand-made map", not "flatter than every hand-made map".  It is a
-# CURVE TARGET only — as a DETECTOR the same figure fails badly, see
-# `DEFAULT_MAX_RANGE`.
-#
-# 🔵 Set to 0.68 rather than the pooled 63.3 on the author's in-game verdict:
-# "the maps are OK, they could go a touch flatter".  0.68 sits between the
-# pooled median and folder A's 69.6 — still inside the hand-tuned population,
-# in the direction of the author's own newer set.
-#
-# What that buys is bounded, and measured: over the 38 maps the median flat
-# share goes 63.4% -> 65.4%, and it does not move again at 0.70, 0.75 or 0.80.
-# `_MIN_BODY_LEVELS` — not the target — is what stops the curve there.  So this
-# dial saturates by design, which is the property that makes turning it safe.
+#: Half-width of the band around a field's own median used to measure flatness.
 FLAT_BAND = 20
+#: Share within +/-FLAT_BAND of the median the curve aims for; hand-tuned 63.2 vs Nehrim 36.6.
 TARGET_FLAT_SHARE = 0.68
 
 
@@ -793,56 +732,10 @@ def _median_from(cum, total):
     return 255
 
 
-# Largest exponent the flattening curve may use, and where the ceiling comes
-# from.  First, why the curve is shaped the way it is.
-#
-# 🔴 `x**g` — the curve this replaced — CANNOT do this job, which is worth
-# recording so it is not tried again.  It compresses one END of the range, so
-# the share inside a band around the median is not even monotone in g:
-# measured over all 38 maps, 21 of them DIP before they rise as g falls, so a
-# bisection has nothing to bisect on.  And inside the range its own
-# posterisation floor allows (g >= 0.63 at amplitude 255) the median share only
-# moves 53% -> 56%.  The 63% target is out of reach for that family entirely.
-#
-# This curve works on the DISTANCE from the median instead:
-#
-#     y = med + sign(d) * D * (|d| / D) ** p          d = v - med
-#
-# with D taken per side, so `lo` -> `lo` and `hi` -> `hi` exactly and the
-# amplitude is untouched.  p > 1 presses the body together and steepens the
-# tails — a flat face with narrow deep grooves.  Two properties `x**g` lacked:
-#
-#   * MONOTONE in p by construction.  Raising p moves every texel weakly
-#     CLOSER to the median, so the share inside any band can only grow.  That
-#     is what makes the bisection valid.
-#   * It cannot punch holes.  Its steepest slope is p, at the ENDS, where
-#     `x**g` had UNBOUNDED slope at 0 — that unbounded slope is what turned
-#     cave04 into grey plateaus with black holes punched through it.  The
-#     linear compression that follows scales even that down by `f`.
-#
-# The risk this family DOES carry is the opposite one: too large a p presses
-# the body dead flat, and a face with no relief left is as wrong as a restless
-# one.  So the ceiling is derived from the body rather than chosen: after the
-# curve and the linear step, the +/-FLAT_BAND band must still span at least
-# `_MIN_BODY_LEVELS` distinct output levels.
-#
-# 21 is the AUTHORED floor, not a round number.  Over all 3631 hand-tuned
-# reference height fields, counting the distinct levels actually occupied
-# inside each map's own +/-20 band:
-#
-#     min 21   p05 25   median 41   p95 41   max 41
-#
-# A +/-20 band spans 41 levels, so the median hand-tuned map uses EVERY one of
-# them and not one map in the corpus drops below 21.  Holding a corrected map
-# to that floor means it is never left with a poorer face than the poorest map
-# the author shipped.  (The guard measures the band's WIDTH, which is an upper
-# bound on occupied levels — taking the floor of the reference population
-# rather than a comfortable round number is what pays for that optimism.)
-#
-# `_MAX_FLATTEN_P` is only the bisection's upper bracket, for the degenerate
-# case where a field is narrower than the band and no compression is needed at
-# all.  It is not a tuning knob: the level guard is what actually binds.
+#: Output levels the +/-FLAT_BAND body must still span; 21 is the 3631-map reference floor.
 _MIN_BODY_LEVELS = 21
+#: Upper bracket for the p bisection only -- _MIN_BODY_LEVELS is what actually binds.
+_MAX_FLATTEN_P = 4.0
 _MAX_FLATTEN_P = 4.0
 
 
@@ -932,161 +825,21 @@ def _fit_flatten(cum, total, lo, hi, med, band, target, f):
     return p_hi
 
 
-# Amplitude a height field may span before it is compressed, and the ONE
-# number in this module that was calibrated rather than chosen.
-#
-# A hand-made height map works in BOTH engines: the user's own maps are
-# authored for Oblivion, rebuilt from the normal maps and hand-tuned, and they
-# render correctly in Skyrim too.  So a mod shipping good maps must come
-# through this conversion untouched, and only Oblivion/Nehrim's own raw alphas
-# get corrected.  Calibrated on 56 PAIRS — the same texture, hand-tuned on one
-# side and Nehrim's original on the other (`temp/parallax_pairs.csv`):
-#
-#     hand-tuned : min 130  p25 144  median 146  p75 147  max 148
-#     Nehrim     : min  95  p25 159  median 203  p75 254  max 255
-#
-#     cap 148 -> 100% of the hand-tuned set untouched, 83% of Nehrim's fixed
-#
-# Then TWO whole reference folders were measured, not just the paired subset,
-# and they do not agree with each other:
-#
-#     folder A  1738 height fields   median 145   max 148
-#     folder B  1893 height fields   median 153   max 156
-#
-# The same author normalises to ~145 in one set and ~153 in the other, so
-# "amplitude below X" is a CONVENTION test, not a law.  A cap of 150 — which
-# folder A alone appeared to justify — would have compressed all 1893 maps in
-# folder B.  That is exactly the damage this constant exists to prevent, and
-# it was caught only because a second folder got checked.
-#
-# Nehrim's over-deep textures start at 159, and the ones that actually drew
-# the complaint are 169 and up (`wandb` 171).  The two populations are barely
-# fifteen steps apart, so the threshold goes in the MIDDLE of that gap: 163
-# clears folder B's ceiling by seven and still catches everything from 169 up.
-# No texture on either side falls between 156 and 169, so the exact value
-# inside that window changes no behaviour — it only buys margin.
-#
-# 🔴 Treat this as FRAGILE.  It separates two populations ~15 steps apart, and
-# a mod that normalises to 170 WOULD be compressed.
-#
-# But it is the BEST AVAILABLE, and that was measured rather than assumed.
-# The obvious upgrade candidate is the tone-curve figure — whichever one is in
-# use — and as a DETECTOR it is worse.  Measured with the deep-third share over
-# 3631 good height fields vs Nehrim's 56:
-#
-#     amplitude   > 163      keeps 100% of good, catches 73% of bad
-#     deep share  >  20%     keeps  88%,          catches 80%
-#     deep share  >  40%     keeps  98%,          catches 48%
-#     amp>163 OR deep> 25%   keeps  93%,          catches 92%
-#     amp>163 OR deep> 50%   keeps  98%,          catches 80%
-#
-# Amplitude is the only rule that keeps ALL of them.  The reason is in the
-# spread: the hand-tuned deep share ran 0..94% (median 6.3), so some of those
-# maps look legitimately almost black and no threshold can tell them from
-# Nehrim's.  Their amplitude, by contrast, stops dead at 156.
-#
-# That measurement is also the one the outlier problem hit hardest — a share
-# taken off min..max is exactly what a pair of bright rivets distorts, so the
-# 0..94% spread above overstates how dark the hand-tuned set really is (see
-# `TARGET_FLAT_SHARE`).  The conclusion survives it: the band measure separates
-# the two populations 63% against 37%, which is a clean split for a CURVE
-# TARGET but nowhere near the "keeps 100% of good" a detector has to manage.
-# Do not swap the detector for the curve's figure; it has been tried twice.
-#
-# What this is NOT: the median's distance from mid-grey.  That was the obvious
-# theory and the same 56 pairs refute it — hand-tuned medians scatter 86..132
-# and Nehrim's overlap them, so any tolerance that spares the good maps also
-# spares half the bad ones (tol 40: 96% of theirs kept, only 53% of ours
-# corrected).  Do not reintroduce a centring step without new evidence.
+#: Amplitude a field may span before compression -- the DETECTOR; 163 sits in the 156..169 gap, and is FRAGILE.
 DEFAULT_MAX_RANGE = 163
 
-# Where a corrected field's median is moved to.  Also measured on the 56
-# pairs: the hand-tuned medians sit in a TIGHT band and Nehrim's do not.
-#
-#     hand-tuned : min 85  p25 102  median 117  p75 126  max 145
-#     Nehrim     : min  0  p25  63  median  93  p75 138  max 216
-#     in 100..135:  73% of the hand-tuned set, 23% of Nehrim's
-#
-# 117 is the middle of that band — just under mid-grey, not on it.
-#
-# 🔴 This is a CORRECTION, never a DETECTOR.  Whether a map needs work is
-# decided by amplitude alone; the medians of the two sets overlap far too
-# much to tell them apart (any tolerance sparing 96% of the good maps also
-# spares 53% of Nehrim's).  So the shift is applied ONLY to a field the
-# amplitude cap already condemned — a map that passes the cap is returned
-# untouched, median and all.
+#: Median a CORRECTED field is moved to; a correction, never a detector.
 TARGET_MEDIAN = 117
 
-# How dark a field's median may be before it is corrected FOR THAT ALONE.
-#
-# This is the second detector, and it exists because the band measure answered
-# the `durchgangD` question with a clear NO.  That texture — a practically
-# black wall, median 17, amplitude 158 — reads as **89.2% flat** on the new
-# measure, and correctly so: it IS flat, just parked entirely at the bottom.
-# Restlessness and off-centredness are two different defects and the curve
-# only fixes the first.
-#
-# The mechanism is why it matters.  A parallax shader offsets along the view
-# vector by (height - neutral), so a field whose whole surface sits near 0 does
-# not render as "deep" — it renders as a CONSTANT view-dependent UV shift, i.e.
-# the texture slides across the wall as the camera moves.  That is the same
-# swimming artefact an empty height map produces, which is exactly why an empty
-# one is refused outright (see the module docstring).
-#
-# 🔴 Centring was rejected once, and reintroducing it needed new evidence.
-# The old refutation stands for what it tested: a TOLERANCE AROUND MID-GREY,
-# measured on the 56 pairs, where the medians overlap so badly that sparing 96%
-# of the good maps also spares 53% of Nehrim's.  This is a different rule — a
-# ONE-SIDED FLOOR — and the evidence is the full 3631-map reference corpus
-# rather than 56 of them:
-#
-#     median level   hand-tuned : min  52  p05  94  median 125  p95 175
-#                    Nehrim     : min  17  p05  31  median 105  p95 169
-#
-#     floor < 45   touches 0 of 3631 hand-tuned (0.00%), catches 4 Nehrim maps
-#     floor < 60   touches 3 of 3631 (0.08%)
-#
-# NOTHING the author shipped is darker than 52.  The four maps this catches are
-# `durchgangD` (17), `durchgangA` (31), `decked` (32) and `bodend` (36) — the
-# exact set that sits just under the amplitude threshold at 153..159 and was
-# left shipping untouched.  45 sits in the middle of the empty gap between 36
-# and 52, the same way `DEFAULT_MAX_RANGE` sits in the gap between 156 and 169.
-#
-# What a map caught by THIS rule alone gets is deliberately minimal: the
-# re-centring shift and nothing else.  No compression, no tone curve.  A pure
-# translation cannot damage relief — every level, every gradient and every gap
-# survives it — so the fix reaches the defect and stops there.  The amplitude
-# detector remains the only thing that may compress a field.
+#: One-sided floor: below this a field is re-centered ALONE; nothing authored is darker than 52.
 MIN_MEDIAN = 45
 
-# Rejected by measurement, so it is not tried again: clamping the tails.  The
-# theory was that Nehrim's amplitude comes from a few extreme texels a p1..p99
-# clamp could shave.  It does not — core(p5..p95)/full is 0.68 for Nehrim and
-# 0.54 for the hand-tuned set, i.e. Nehrim's depth sits in the BODY of the
-# surface and the hand-tuned maps have relatively MORE tail.  A p1..p99 clamp
-# alone leaves Nehrim's amplitude at 83% and brings only 39% under the cap.
+
+#: How deep a CORRECTED field is taken -- a dial set by eye, kept apart from the detector; 0 = same as max_range.
+DEFAULT_TARGET_RANGE = 0
 
 
-# How deep a CORRECTED field is taken, as opposed to which fields get
-# corrected at all.  These must be two separate numbers.
-#
-# `max_range` is the DETECTOR and is pinned by the hand-tuned set (130..148):
-# drop it below 148 and the conversion starts flattening maps a modder built
-# on purpose, which is the one thing this must never do.
-#
-# `target_range` is how far a condemned map is taken, and it is free to go
-# lower.  It exists because measurement failed to explain the eye: Nehrim's
-# `wandb` corrected to amplitude 150 still reads as too strong in game while
-# the hand-tuned version at 143 reads as right — and neither amplitude (5%
-# apart), steepness (ours is 0.70x theirs in UV space) nor a material depth
-# parameter (shader type 3 has none, and Community Shaders exposes only
-# on/off switches) accounts for the difference.  So the depth of a corrected
-# map is a dial set by eye, and keeping it separate means turning it does not
-# cost anything a mod authored well.
-DEFAULT_TARGET_RANGE = 0        # 0 = same as max_range
-
-
-def normalise_height(texels, strength: float = 1.0,
+def normalize_height(texels, strength: float = 1.0,
                      max_range: int = DEFAULT_MAX_RANGE,
                      target_median: int = TARGET_MEDIAN,
                      target_range: int = DEFAULT_TARGET_RANGE,
@@ -1094,40 +847,14 @@ def normalise_height(texels, strength: float = 1.0,
                      min_median: int = MIN_MEDIAN):
     """Compress an over-deep height field — and leave a good one ALONE.
 
-    Both engines read the channel identically (white out, black in, mid-grey
-    neutral), so nothing here reinterprets the data.  What differs is the
-    DEPTH the shader gives it: Community Shaders computes
-    ``maxHeight = 0.1 * scale`` from an engine parameter no texture can
-    influence, and Oblivion's figure is unmeasurable from here (its parallax
-    lives in compiled shader packages).  Same map, deeper result.
+    Curve, then compression about the field's own median, then the shift,
+    limited so nothing clips past 0 or 255.  Each stage takes 0 to disable it,
+    and each argument defaults to the constant that documents it.
 
-    `max_range`  the cap above.  A field already inside it is returned
-                 unchanged, bit for bit — that is the property that protects
-                 a mod's own maps.  0 disables the cap.
-    `strength`   an extra uniform factor on top, 1.0 for none.  Reach for the
-                 cap first: a uniform factor is set by the worst offender and
-                 flattens the mild textures by the same amount, which throws
-                 away authored relief (a plaster wall is meant to be flatter
-                 than a cave wall).
-    `target_median`  where a CORRECTED field's median is moved to; 0 leaves
-                 it where it is.  Applies only when the cap or the strength
-                 already decided this map needs work.
-    `target_range`  how deep a CORRECTED field is taken; 0 means "to
-                 max_range".  Separate from the detector on purpose — see the
-                 constant — so the depth can be dialled down by eye without
-                 ever reaching a map the detector let through.
-    `flat_target`  how much of a CORRECTED field's surface the tone curve
-                 aims to leave within +/-`FLAT_BAND` of its median; 0 disables
-                 the curve.  This is the SHAPE correction, and it is the only
-                 one that changes how restless a surface reads.
-    `min_median`  the SECOND detector: a field whose median sits below this is
-                 parked at the bottom of the channel and gets the re-centring
-                 shift ALONE — no compression, no curve.  0 disables it.
+    `max_range` and `min_median` are the two DETECTORS: a field inside the cap
+    whose median clears the floor is returned bit for bit unchanged.
 
-    The tone curve runs first, then the compression around the field's own
-    median so the relief keeps its shape, and the shift last — limited so
-    nothing is pushed past 0 or 255, because clipping would flatten real
-    relief into a plateau.
+    See: docs/commentary/asset_convert_texture.md#oblivion-parallax-skyrim-height-maps
     """
     if not texels:
         return texels
@@ -1141,10 +868,8 @@ def normalise_height(texels, strength: float = 1.0,
         # detected as over-deep -> take it down to target_range, not merely
         # to the detection threshold
         f = min(f, (target_range or max_range) / rng)
-    # Sunk below anything the reference corpus contains: a DIFFERENT defect,
-    # and it earns a strictly smaller correction.  See MIN_MEDIAN.
-    off_centre = bool(min_median and target_median and med < min_median)
-    if f >= 1.0 and not off_centre:
+    off_center = bool(min_median and target_median and med < min_median)
+    if f >= 1.0 and not off_center:
         return texels                      # already fine: do not touch it
 
     # Shape first: press the body of the surface together around its own
@@ -1189,12 +914,12 @@ NEUTRAL_LEVEL = 128
 DEPTH_SCALE = 0.6
 
 
-def scale_depth(texels, factor: float = None, centre: int = NEUTRAL_LEVEL):
+def scale_depth(texels, factor: float = None, center: int = NEUTRAL_LEVEL):
     """Compress every height field toward the shader's neutral plane.
 
     One affine map, identical for every texture:
 
-        v' = centre + (v - centre) * factor
+        v' = center + (v - center) * factor
 
     so relative depth WITHIN a map and BETWEEN maps both survive exactly; only
     the absolute excursion shrinks.  `factor` 1.0 (or None -> DEPTH_SCALE)
@@ -1205,7 +930,7 @@ def scale_depth(texels, factor: float = None, centre: int = NEUTRAL_LEVEL):
     f = DEPTH_SCALE if factor is None else float(factor)
     if f == 1.0:
         return texels
-    lut = bytes(max(0, min(255, int(round(centre + (v - centre) * f))))
+    lut = bytes(max(0, min(255, int(round(center + (v - center) * f))))
                 for v in range(256))
     return bytearray(lut[v] for v in texels)
 
@@ -1217,12 +942,12 @@ def build_height_map(src_dds: str, out_path: str, strength: float = 1.0,
                      depth: float = None) -> bool:
     """Write the diffuse's alpha channel out as a BC4 height map.
 
-    Called from the mesh converter once per height texture.  Mesh conversion is
-    a process POOL and several meshes share a diffuse, so two workers can reach
-    the same output at once: the bytes go to a per-process temp name and are
-    moved into place with :func:`os.replace`, which is atomic on NTFS.  A reader
-    therefore never sees a half-written DDS, and the loser of the race simply
-    overwrites identical content.
+    Mesh conversion is a process POOL and several meshes share a diffuse, so
+    the bytes go to a per-process temp name and are moved into place with
+    :func:`os.replace`, atomic on NTFS.
+
+    Order is halve, blur, tone curve, then the global depth scale.
+    See: docs/commentary/asset_convert_texture.md#output-conditioning
     """
     try:
         with open(src_dds, 'rb') as f:
@@ -1236,10 +961,7 @@ def build_height_map(src_dds: str, out_path: str, strength: float = 1.0,
     if HEIGHT_DOWNSCALE == 2:
         w, h, texels = mitchell_halve(w, h, texels)
     texels = gaussian_blur(w, h, texels, blur_radius_for(w, blur_per_1000))
-    # Tone curve before the band: it fits onto a MEASURED share of the
-    # field, and fit_to_band is linear, so the calibrated TARGET_FLAT_SHARE
-    # survives the rescale untouched.
-    texels = normalise_height(texels, strength, max_range, TARGET_MEDIAN,
+    texels = normalize_height(texels, strength, max_range, TARGET_MEDIAN,
                               target_range)
     # Global depth scale, same factor on every map -- see scale_depth.
     texels = scale_depth(texels, depth)

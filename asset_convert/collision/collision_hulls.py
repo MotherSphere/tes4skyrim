@@ -37,7 +37,7 @@ _MIN_SPLIT_EXTENT_GU = 3.0
 _QUANT_GRIDS = (0.004, 0.008, 0.015)
 
 #: How far the visual AABB and the authored hull may disagree.
-_AABB_CENTRE_TOL = 0.35
+_AABB_CENTER_TOL = 0.35
 _AABB_EXTENT_LO = 0.6
 _AABB_EXTENT_HI = 1.67
 
@@ -90,7 +90,7 @@ def _covers_same_volume(pts_hk, hull_shape):
         h_lo, h_hi = hull_pts[:, axis].min(), hull_pts[:, axis].max()
         v_ext, h_ext = v_hi - v_lo, h_hi - h_lo
         max_ext = max(v_ext, h_ext, 1e-4)
-        if abs((v_lo + v_hi) - (h_lo + h_hi)) / 2 > _AABB_CENTRE_TOL * max_ext:
+        if abs((v_lo + v_hi) - (h_lo + h_hi)) / 2 > _AABB_CENTER_TOL * max_ext:
             return False
         ratio = (v_ext + 1e-4) / (h_ext + 1e-4)
         if not _AABB_EXTENT_LO <= ratio <= _AABB_EXTENT_HI:

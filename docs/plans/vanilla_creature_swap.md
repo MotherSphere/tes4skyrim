@@ -103,7 +103,7 @@ too weak, and a review caught real errors it would have caused:
   `Morroblivion\Creatures\SixthHouse\AshGhoul\skeleton.nif`.
 
 ```python
-# key: normalised (lowercased, forward-slashed) Model.MODL skeleton path,
+# key: normalized (lowercased, forward-slashed) Model.MODL skeleton path,
 # optionally + body set where ONE skeleton legitimately serves two creatures.
 BY_SKELETON = {
     'creatures/horker/skeleton.nif':                 HORKER,
@@ -126,16 +126,16 @@ genuinely serves several creatures (`Creatures\Dog`, `Creatures\Sheep`,
 `Creatures\Bear`, `Creatures\Deer`) — that is what keeps ram ≠ sheep and
 wolf ≠ dog ≠ fox.
 
-### 2.1 Variants: colours, tack, armour, and when they matter
+### 2.1 Variants: colors, tack, armour, and when they matter
 
 One Oblivion creature ships many body-part permutations. Keying on the *exact*
 part list explodes them into meaningless races: **15 body sets for 5 horse
-colours**, 4 for one skeleton, 14 for Nehrim's giants. Keying too loosely merges
+colors**, 4 for one skeleton, 14 for Nehrim's giants. Keying too loosely merges
 creatures that must stay apart. The split is:
 
 | Kind of variation | Example | Same race? | Why |
 |---|---|---|---|
-| **Colour / texture** | bay / black / grey / paint / chestnut horse | **yes** | Vanilla does exactly this: 5 colour skins (`SkinHorse`, `SkinHorseBlackHide`, `SkinHorseGreyHide`, `SkinHorsePalominoHide`, `SkinHorseBlacknWhiteHide`) all on **one** `HorseRace`. Colour lives in the skin ARMO, not the race. |
+| **Color / texture** | bay / black / grey / paint / chestnut horse | **yes** | Vanilla does exactly this: 5 color skins (`SkinHorse`, `SkinHorseBlackHide`, `SkinHorseGreyHide`, `SkinHorsePalominoHide`, `SkinHorseBlacknWhiteHide`) all on **one** `HorseRace`. Color lives in the skin ARMO, not the race. |
 | **Tack / equipment** | `saddle.nif`, `bridle.nif`, `bridle_db.nif` | **yes** | Vanilla ships `HorseSaddleAA` / `HorseHarnessAA` as separate ARMA on the same race. |
 | **Armour / clothing** | Nehrim giant `giantarmorsteel`, skeleton `bhelmet`/`skdbcuirass` | **yes** | Equipment on an identical body. Oblivion's 51 skeletons are **one** creature in 4 armour configs. |
 | **Hair / beard style** | `giantbeardred` vs `giantbeardblond`, `mane` vs `manelong` vs `maneroman` | **yes** | Cosmetic only. |
@@ -146,7 +146,7 @@ creatures that must stay apart. The split is:
 structural-parts whitelist that is never ignored.**
 
 ```python
-# Cosmetic: strip before comparing (colour is in the texture, not the mesh name)
+# Cosmetic: strip before comparing (color is in the texture, not the mesh name)
 COSMETIC = ('saddle', 'bridle', 'packsaddle', 'cargo', 'harness',
             'mane', 'tail', 'eye', 'hair', 'beard', 'moustache',
             'helmet', 'helm', 'armor', 'armour', 'greaves', 'cuirass',
@@ -169,7 +169,7 @@ Measured effect of the rule (base-body grouping vs raw part sets):
 |---|---|---|---|
 | Oblivion `skeleton` | 4 | **1** | 51 records, one race, 4 armour configs collapsed |
 | Oblivion `sheep` | 2 | **1** | Oblivion has no ram creature — all 16 are FULL="Sheep" |
-| Oblivion `horse` | 15 | **5** | one per colour — matching vanilla's 5 skins |
+| Oblivion `horse` | 15 | **5** | one per color — matching vanilla's 5 skins |
 | Nehrim `hillgiant` | 14 | **~3** | beard/armour collapsed, dark-skin variant kept |
 | Nehrim `dog` | 3 | **3** | wolf / dog / fox all preserved |
 
@@ -247,19 +247,19 @@ Two consequences worth stating:
    different birds, so this reads as intentional; flattening them into identical
    hens would not.
 
-#### How the swap then handles colour
+#### How the swap then handles color
 
-Since colour is not part of race identity, a swapped horse must not lose it.
+Since color is not part of race identity, a swapped horse must not lose it.
 Two options, to decide at implementation time:
 
-- **A (preferred): map colour → vanilla skin ARMO.** All five Oblivion coats have
+- **A (preferred): map color → vanilla skin ARMO.** All five Oblivion coats have
   a plausible vanilla counterpart (bay→`SkinHorse`, black→`SkinHorseBlackHide`,
   grey/white→`SkinHorseGreyHide`, chestnut→`SkinHorsePalominoHide`,
   paint→`SkinHorseBlacknWhiteHide`). The `NPC_` override carries `WNAM`, so the
   actor can name its own skin while sharing `HorseRace`. **Verify that
   `NPC_.WNAM` overrides the race skin before relying on this.**
-**Option B ("one colour for everything") is rejected** — a stable of identical
-horses is a visible regression, and the user has ruled it out. Colour must be
+**Option B ("one color for everything") is rejected** — a stable of identical
+horses is a visible regression, and the user has ruled it out. Color must be
 carried whenever vanilla has a counterpart skin.
 
 Where vanilla has **no** counterpart (Nehrim's black sheep vs the goat, which has
@@ -268,7 +268,7 @@ and must be flagged as such in the UI rather than silently flattened — see the
 chicken note above. A lossy row should default to OFF.
 
 Bears are the easy case: vanilla ships brown, black and snow, so all of
-Oblivion's and Nehrim's bear colours map one-to-one.
+Oblivion's and Nehrim's bear colors map one-to-one.
 
 ### 2.1 Evidence bar for adding a row
 
@@ -427,7 +427,7 @@ master entries.
 
 Follow `_open_create_lod_panel` (gui.py ~2519) — it is already the requested
 two-column shape, so this is a variation on an existing widget rather than a new
-one. Same dark `CLR[...]` palette, same centred `tk.Frame` card, same
+one. Same dark `CLR[...]` palette, same centered `tk.Frame` card, same
 `Apply`/`Cancel` footer.
 
 ```

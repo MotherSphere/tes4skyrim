@@ -69,7 +69,7 @@ def gradient_stops(gid, stops):
 
 
 def _tier(text, size, spacing, baseline, fill):
-    """One centred title tier as (edge_svg, face_svg).
+    """One centered title tier as (edge_svg, face_svg).
 
     Each glyph is emitted twice: a dark offset copy that reads as the carved
     edge, then the lit face over it.

@@ -2043,7 +2043,7 @@ class ScriptConverter:
         """Papyrus property name for a StreamMusic argument, or None.
 
         `raw_path` is spelled as the TES4 script spells it: a backslash or
-        forward-slash path, or a bare category name.  Normalise to the
+        forward-slash path, or a bare category name.  Normalize to the
         manifest's `source_rel` form (forward slashes, lowercase, no `data/`
         prefix, no extension) and look it up; a miss returns None so the caller
         emits the inert marker rather than binding a property to a record that

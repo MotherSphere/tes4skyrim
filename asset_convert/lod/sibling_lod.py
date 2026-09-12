@@ -214,7 +214,7 @@ def touched_worldspace_fids(plugin_esm: Path) -> set:
 
     Judged from THIS FILE'S OWN records only — a plugin's scope is what it
     itself places, never what another file's numbering implies. The returned
-    ids are NORMALISED (`lod_gen._formid_remap_table`) so they can be compared
+    ids are NORMALIZED (`lod_gen._formid_remap_table`) so they can be compared
     against a worldspace id resolved from a different file.
 
     Both halves matter. A raw FormID's index byte offsets into its own file's
@@ -838,9 +838,6 @@ def merge_cloud_bank(out_root: Path, merged_dir: Path, edid: str,
     if width <= 0.0 or height <= 0.0:
         return None
 
-    # Centred on the UNION's midpoint for the same reason it is sized off the
-    # union: that is the rectangle the map actually draws once every sibling
-    # is installed, and it is not centred on the worldspace origin.
     center = compute_center(min_x, min_y, max_x, max_y)
     if not generate_cloud_bank(edid, width, height, str(merged_dir),
                                center=center,

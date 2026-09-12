@@ -86,7 +86,7 @@ _PRONOUN = [
 
 
 def _collapse(text):
-    """Normalise whitespace and strip wrapper quotes."""
+    """Normalize whitespace and strip wrapper quotes."""
     text = re.sub(r"\s+", " ", (text or "").strip())
     return text.strip('"“”')
 

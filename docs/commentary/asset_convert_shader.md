@@ -56,7 +56,7 @@ mode-0 surfaces in the mesh, while all 40-odd wall and trim shapes are mode 1 �
 exactly the lit/unlit split the two Skyrim shaders encode.
 
 **Indicator 2 — additive blending.** A surface whose `NiAlphaProperty` sets
-`dst=ONE` ADDS its colour to the framebuffer, so it can never be ordinary lit
+`dst=ONE` ADDS its color to the framebuffer, so it can never be ordinary lit
 geometry: lighting it would double-count the light it already contributes.
 Vanilla agrees without exception — of **64** additively-blended shapes sampled
 across `meshes/effects` and `meshes/dungeons`, **64** use
@@ -65,7 +65,7 @@ across `meshes/effects` and `meshes/dungeons`, **64** use
 This second indicator exists because mode 0 is not always present: many FX
 meshes ship no `NiVertexColorProperty` at all, so the mode defaults to "lit".
 `dungeons/misc/fx/fxmistgroundeffect01` — the Ayleid-ruin ground mist — is five
-additively-blended AtmosphereCloud01 planes with no vertex-colour property, and
+additively-blended AtmosphereCloud01 planes with no vertex-color property, and
 every one became a LIT, normal-mapped surface with no soft fade: the visible
 rectangle that was reported. Across Oblivion's own FX directories **76 of 179**
 blended shapes declare no `lighting_mode`, so the gap is the common case.
@@ -170,12 +170,12 @@ qualify.
 shader ends up white in three different situations and only one of them is a
 flame: authored full white (**109** systems), a fallback because the source
 authored BLACK (**159**), and a fallback because a chromatic curve supplies the
-colour instead (**320**). Keying the flame test on the final value would skip the
+color instead (**320**). Keying the flame test on the final value would skip the
 depth fade on all **479** fallback cases — including the smoke plume in
 `fire\fireopensmallsmoke.nif`, which authors (0,0,0) and is exactly the kind of
 surface the fade exists for.
 
-### <a id="effect-shader-vertex-colors"></a>The vertex-colour flag must match the data
+### <a id="effect-shader-vertex-colors"></a>The vertex-color flag must match the data
 
 SSE renders geometry black when `slsf_2_vertex_colors` disagrees with what the
 mesh data actually carries, so the flag is set from `has_vertex_colors` rather
@@ -190,7 +190,7 @@ Oblivion dims an FX surface through `NiMaterialProperty.emissive_color` —
 `fxmist01` ships **(0.47, 0.47, 0.47)**. Forcing white DOUBLED every such
 effect, and on an additive quad that accumulates once per layer.
 
-White is used only as the fallback when the authored colour is (0,0,0), which
+White is used only as the fallback when the authored color is (0,0,0), which
 would otherwise render the surface black.
 
 The material alpha rides in the emissive ALPHA channel, because that is what the
@@ -251,7 +251,7 @@ no-regression choice.
 
 **Code:** `rewrite_tex_path` in `asset_convert/nif/tex_paths.py`
 
-**Normalise the separator FIRST.** Oblivion NIFs use both, sometimes in the same
+**Normalize the separator FIRST.** Oblivion NIFs use both, sometimes in the same
 file, so testing only for `textures\` let a forward-slash
 `textures/lowres/foo.dds` fall through to the else branch and come out as
 `Textures\tes4\textures/lowres/foo.dds` — a path that resolves to nothing, and
@@ -290,7 +290,7 @@ the resolver falls back through the master roots in order.
 **Code:** `_set_material_defaults` in `asset_convert/nif/geometry_shader.py`
 
 These were once never assigned at all, so every shape shipped at pyffi's
-defaults — glossiness 0.0 with a BLACK specular colour and the specular flag
+defaults — glossiness 0.0 with a BLACK specular color and the specular flag
 on, measured at **100% of 3931** shaders in our own output.
 
 The replacements are vanilla's modes, not Oblivion's values:
@@ -298,7 +298,7 @@ The replacements are vanilla's modes, not Oblivion's values:
 | Field | Value | Evidence |
 |---|---|---|
 | glossiness | 80 | Vanilla shader type 0 has 80 as both median AND mode — **1333 of 2961** sampled shaders, and the modal value in **12 of 15** top folders. |
-| specular colour | white | White in **56%** of vanilla, black in **3%**. |
+| specular color | white | White in **56%** of vanilla, black in **3%**. |
 | specular strength | 1.0 | The mode. Arcane University puts the typical band at 0.25–1.0, which vanilla's own 2.2 and 3.0 outliers ignore, so the mode is taken and the tail is not. |
 
 **Oblivion's glossiness is deliberately NOT carried over.** Its median is 10
@@ -309,25 +309,25 @@ Specular strength is uniform on purpose: the modulation belongs in the normal
 map's alpha, not here. The spec-mask check still runs, because its per-category
 counters are what tell the texture stage how much it had to synthesise.
 
-## The emissive colour, and when `own_emit` is cleared
+## The emissive color, and when `own_emit` is cleared
 <a id="emissive-own-emit"></a>
 
 **Code:** `_set_emissive` in `asset_convert/nif/geometry_shader.py`
 
-Skyrim **multiplies** the emissive colour by `emissive_multiple`, so a zero
-there leaves the surface black no matter what an animation does to the colour.
-Vanilla shapes carrying an emissive colour controller set `own_emit` in
+Skyrim **multiplies** the emissive color by `emissive_multiple`, so a zero
+there leaves the surface black no matter what an animation does to the color.
+Vanilla shapes carrying an emissive color controller set `own_emit` in
 **133 of 133** cases and never pair it with a 0 multiple, so the multiple is
 stamped to 1.0 whenever the flag goes on.
 
-The flag is CLEARED on a shape with no emissive colour and no emissive
+The flag is CLEARED on a shape with no emissive color and no emissive
 animation. The default preset turns `slsf_1_own_emit` on for every shape, and
 leaving it on for ordinary geometry costs overdraw for a contribution that is
 always (0,0,0).
 
-The animation test matters independently of the colour: a shape whose emissive
+The animation test matters independently of the color: a shape whose emissive
 is driven by a controller can author (0,0,0) as its FIRST key and still light up
-later, so the flag must survive an all-zero starting colour.
+later, so the flag must survive an all-zero starting color.
 
 ## Texture slots are never left empty
 <a id="texture-slots-never-empty"></a>
@@ -335,7 +335,7 @@ later, so the flag must survive an all-zero starting colour.
 **Code:** `_fill_texture_slots` in `asset_convert/nif/geometry_shader.py`
 
 **Slot 0, the diffuse.** A shape with no `NiTexturingProperty` at all is legal
-in Oblivion, which renders it with the flat `NiMaterialProperty` colour. Skyrim
+in Oblivion, which renders it with the flat `NiMaterialProperty` color. Skyrim
 has no such mode: `BSLightingShader::SetupMaterial` binds the diffuse
 UNCONDITIONALLY (SkyrimSE.exe 1.6.659 `+0x1412138` → `+0x1415790`,
 `mov rax,[rdx+0x48]` with `rdx = material->diffuse`), so a null diffuse is an
@@ -344,7 +344,7 @@ path: **0 of 772** `BSLightingShaderProperty` shapes sampled across Skyrim's own
 meshes ship an empty slot 0.
 
 `white.dds` is Skyrim's own neutral texture, so multiplying it by the material
-colour already carried across reproduces Oblivion's flat shading exactly.
+color already carried across reproduces Oblivion's flat shading exactly.
 
 **Slot 1, the normal.** The normal path is DERIVED from the diffuse, so it is a
 guess rather than authored data, and Oblivion content frequently has no `_n`
@@ -360,7 +360,7 @@ carries the same constant specular mask the texture stage bakes into maskless
 maps.
 
 The stand-in is the LAST resort: `resolve_normal_for` first tries the variant's
-own `_n`, then the one its base name shares across colour variants. When the
+own `_n`, then the one its base name shares across color variants. When the
 shape genuinely has no texturing property, slot 1 stays empty on purpose —
 vanilla ships normal-less shapes, so a fabricated `_n` would only dangle.
 
@@ -392,11 +392,11 @@ pyffi's defaults. Measured over 400 output meshes / 3931 lighting shaders:
 | | our output | vanilla Skyrim (type 0) |
 |---|---|---|
 | glossiness | **0.0 — 100%** | 80.0 median **and** mode |
-| specular colour | **black — 100%** | white 56.1%, black 3.0% |
+| specular color | **black — 100%** | white 56.1%, black 3.0% |
 | specular strength | 1.0 | 1.0 mode (44.7%) |
 | `SLSF1_Specular` | **on — 100%** | — |
 
-Glossiness 0 with a black specular colour and the flag on is the combination
+Glossiness 0 with a black specular color and the flag on is the combination
 that reads as a flat blown-out sheen.
 
 ## Vanilla census: 80 is real, the tail is not
@@ -432,15 +432,15 @@ Nehrim source, 4031 `NiMaterialProperty` from 1200 meshes:
 | | |
 |---|---|
 | glossiness median | **10.0**, with 59.4% sitting on exactly 10 |
-| specular colour | (0.9,0.9,0.9) 39.9%, black 32.1%, white 13.1% |
+| specular color | (0.9,0.9,0.9) 39.9%, black 32.1%, white 13.1% |
 
 10 is an authoring default, not a chosen value — and 10 in Skyrim is what HAIR
 uses, a very wide highlight. Carrying it across would give every Nehrim surface
 a hair-like sheen. **Glossiness is written as 80, never copied.**
 
-The specular colours are equally uninformative: only 170 of 4038 shapes carry
+The specular colors are equally uninformative: only 170 of 4038 shapes carry
 `NiSpecularProperty`, and without it Gamebryo renders no specular at all, so
-the colour on the other 95.8% was never used.
+the color on the other 95.8% was never used.
 
 ## The rule: slot 1's alpha decides
 <a id="rule-slot-1s-alpha-decides"></a>
@@ -520,8 +520,8 @@ Measured on 1200 Nehrim meshes / 4038 shapes:
 | signal | present | status |
 |---|---|---|
 | `NiStencilProperty` → `SLSF2_Double_Sided` | 3.5% | mapped |
-| emissive colour | 7.6% | mapped |
-| vertex colour `lighting_mode=0` → effect shader | 1.3% | mapped |
+| emissive color | 7.6% | mapped |
+| vertex color `lighting_mode=0` → effect shader | 1.3% | mapped |
 | `apply_mode=4` → parallax | 6.7% | mapped (opt-in) |
 | **glow texture slot** | **0.7%**, 588 `_g` files exist | **dropped** |
 | `apply_mode=3` (HILIGHT) | 3.1% | unexplained |
@@ -607,7 +607,7 @@ sitting right beside it.
 Measured over the merged Nehrim texture tree: of the variants whose own `_n` is
 missing, **201** have one under the base name, against **48** that ship their own
 alongside the base's — and those 48 are unaffected, because the variant's own is
-tried FIRST. The suffixes involved are colour and state words throughout
+tried FIRST. The suffixes involved are color and state words throughout
 (`_dark`, `_black`, `_red`, `_harvested`, `_haunted`, `_01`), i.e. variants of one
 surface rather than different materials.
 
@@ -759,7 +759,7 @@ and derivation is the fallback, base-name aware via `_resolve_map_for`.
 University on Emissive Color: "if the shader type is not 'Glow Shader', it will
 make the WHOLE MESH glow", while the glow shader "allows per-texel glow …
 applied additively using the color map in texture slot 2". So a rune stone whose
-glyph should glow was flooding its entire surface with the emissive colour.
+glyph should glow was flooding its entire surface with the emissive color.
 
 Slot 2 and shader type 2 come from AU's texture-slot table: "2 | Glow | Glow map
 / Skin Tint | none | `_g` / `_sk.dds` | BC1". The environment-map flag is cleared
@@ -767,7 +767,7 @@ alongside — AU: "The environment map shader is incompatible with glow mapping.
 
 **Emissive is defaulted to white when the source left it black.** Of **60** type-2
 shapes sampled across Skyrim's own meshes, ALL set `own_emit` and carry the glow
-flag, **55 of 60** carry a slot-2 texture, the modal emissive colour is white (21)
+flag, **55 of 60** carry a slot-2 texture, the modal emissive color is white (21)
 and the modal multiple is 1.0. Skyrim MULTIPLIES the glow map by the emissive, so
 leaving it black would keep the map and show nothing.
 

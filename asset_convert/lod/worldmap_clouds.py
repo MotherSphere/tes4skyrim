@@ -109,9 +109,9 @@ def cloud_model_path(editor_id: str) -> str:
 def compute_axis_scales(reach_x: float, reach_y: float) -> tuple:
     """Per-axis (sx, sy) from Bethesda's own deck-to-land ratio.
 
-    reach_x/reach_y: distance from the deck's CENTRE to the farthest land edge
+    reach_x/reach_y: distance from the deck's CENTER to the farthest land edge
     on that axis.  Not half the land span -- the sheet is symmetric about its
-    own centre, so what matters is the longer side.
+    own center, so what matters is the longer side.
 
     Each axis is given the same deck-to-land relationship the stock sheet has
     to Skyrim's own land, so feeding this Skyrim's land reproduces the stock
@@ -142,7 +142,7 @@ def framed_rect(nw_x, nw_y, se_x, se_y):
 
     MNAM stores the map's NW and SE CELL corners.  NW is the top-left, so it
     holds the smaller X and the LARGER Y; SE holds the larger X and the smaller
-    Y.  Returned min/max are normalised so the caller never has to care.
+    Y.  Returned min/max are normalized so the caller never has to care.
 
     The SE cell is inclusive -- the map frames through the far edge of that
     cell, not up to its near edge -- so the span runs to (se_x + 1) cells.
@@ -162,62 +162,23 @@ def framed_rect(nw_x, nw_y, se_x, se_y):
 def compute_center(min_x: float, min_y: float,
                    max_x: float, max_y: float) -> tuple:
     """World-unit (x, y) the sheet must sit over: the rectangle's midpoint.
-
-    A worldspace's NAM0/NAM9 rectangle is NOT centred on the worldspace origin
-    -- it is wherever its author laid the terrain out.  The stock bank IS
-    origin-centred (every sheet node has translation x=y=0 and vertices
-    symmetric about zero, verified against the shipped mesh), so scaling alone
-    leaves the deck sitting over (0,0) while the landmass sits somewhere else,
-    and the terrain on the far side of the origin runs out from under the
-    clouds.
-
-    NehrimWorldspace is the reported case: NAM0 (-266240,-188416) to NAM9
-    (110592,225280), midpoint (-77824, 18432).  The origin-centred deck hangs
-    east and north, leaving the WEST and SOUTH terrain bare -- exactly the two
-    edges seen in game.  16 of 34 Nehrim worldspaces and 31 of 84 Oblivion
-    worldspaces are not covered by an origin-centred sheet at their own scale.
+    See: docs/commentary/asset_convert_terrain.md#world-map-cloud-bank-sizing
     """
     return ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
 
 
 def _rescale_and_flatten(data, scales, keep: float, center=(0.0, 0.0)):
-    """Stretch, centre and flatten every sheet; `scales` is (sx, sy).
+    """Stretch, center and flatten every sheet; `scales` is (sx, sy).
 
-    Operates on a parsed graph, NOT on raw bytes.  Byte-patching is not an
-    option here: the BSAs ship this mesh in SSE BSTriShape form (96,851 bytes,
-    half-float packed vertices) while `references/Skyrim Meshes` holds the LE
-    NiTriShape form (182,953 bytes).  A patch written against either layout
-    silently no-ops on the other, which is exactly what happened to the first
-    version of this function.  sse_nif.read_nif normalises both to LE
-    NiTriShape, so the edit is done on the graph and written out LE.
-
-    Scale: X and Y are stretched INDEPENDENTLY (see compute_axis_scales), so
-    the deck can match a map whose aspect differs from Skyrim's.  A NIF node
-    `scale` is a single float and cannot express that, so the stretch is baked
-    into the VERTICES and each node's scale is set to 1.0 -- the node scale and
-    the vertex scale multiply, so leaving it at the stock 8.0 would apply the
-    factor twice.  Only the horizontal axes are touched; vertex Z (the sheet's
-    own relief) and the nodes' Z translations (cloud ALTITUDES) are preserved.
-
-    Centre: the sheet nodes' X/Y translations are set to `center`.  Stock is
-    (0,0) on all four, and the root above them is an identity-transform
-    BSFadeNode at scale 1.0, so a node translation is already in world units --
-    no division by the parent scale, and the node's own scale applies to its
-    vertices, not to its translation.  Setting rather than adding is safe for
-    the same reason the stock values are all zero, and keeps the operation
-    idempotent if the mesh is ever regenerated from a previous output.
-
-    Flatten: the stock sheets are not flat.  Each carries billowing Z relief --
-    up to 3523 local units (~28,000 world units at scale 8) over the interior,
-    with a skirt dropping to -899 at the rim.  That relief is modelled for
-    Skyrim's terrain, most visibly the bank piled around High Hrothgar; over a
-    converted worldspace it is a mountain of cloud on unrelated flat land.
-    `keep` is the fraction retained (0.0 = flat, 1.0 = untouched), applied
-    about each shape's MEDIAN z so the sheet settles onto its own base plane
-    instead of being dragged to local zero -- the rim skirt is part of the
-    silhouette, and collapsing everything to 0 would flare it up into the deck.
+    Operates on the PARSED graph, never on raw bytes.  The stretch is baked
+    into the vertices (node scale set to 1.0), node X/Y translations are SET
+    to `center`, and `keep` is the fraction of each shape's Z relief retained
+    about its MEDIAN z (0.0 = flat, 1.0 = untouched).  Vertex Z and the nodes'
+    Z translations (cloud ALTITUDES) are preserved.  UVs are scaled by
+    sx/_STOCK_NODE_SCALE so texel density stays constant in world units.
 
     Returns (n_nodes_scaled, n_shapes_flattened).
+    See: docs/commentary/asset_convert_terrain.md#world-map-cloud-bank-sizing
     """
     sx, sy = scales
     scaled = flattened = 0
@@ -225,10 +186,7 @@ def _rescale_and_flatten(data, scales, keep: float, center=(0.0, 0.0)):
         for block in root.tree():
             if not isinstance(block, NifFormat.NiTriShape):
                 continue
-            # The stretch lives in the vertices, so the node must not scale
-            # them a second time.
             block.scale = 1.0
-            # Z is the cloud ALTITUDE and is deliberately preserved.
             block.translation.x = center[0]
             block.translation.y = center[1]
             scaled += 1
@@ -236,31 +194,10 @@ def _rescale_and_flatten(data, scales, keep: float, center=(0.0, 0.0)):
             verts = shape_data.vertices if shape_data else None
             if not verts:
                 continue
-            # Stock vertices are symmetric about local (0,0), so a plain
-            # multiply stretches about the sheet's own centre.
             for v in verts:
                 v.x *= sx
                 v.y *= sy
 
-            # THE CLOUDS ARE A TEXTURE, NOT VERTEX ALPHA.  Every sheet samples
-            # textures\sky\SkyrimCloudsMap01.dds, so the visible pattern -- the
-            # open middle and the dense band around it -- lives in the UVs.
-            # Stretching vertices alone leaves the UV range untouched, which
-            # pins that dense band to the same FRACTION of the sheet no matter
-            # how big the sheet gets: on a worldspace shaped unlike Skyrim's it
-            # lands on playable land, and no amount of rescaling moves it.
-            #
-            # Scaling UVs by the SAME factor as the vertices keeps texel
-            # density constant in world units, so one cloud stays one cloud and
-            # the dense band stays out at the sheet's rim where Bethesda put it.
-            # The stock ranges run outside 0..1 (u -8.2..11.7) and the sampler
-            # is set to wrap (texture_clamp_mode 65283), so the pattern tiles
-            # and a wider range simply shows more of it -- no clamping artefact
-            # at the edges.
-            # The factor is the change in WORLD span, not the node scale: the
-            # vertices already carried the stock node scale of 8.0 once it was
-            # baked in, so scaling UVs by sx/sy directly would over-tile by
-            # 8x.  world_new / world_stock = sx / 8.0 per axis.
             uv_sets = getattr(shape_data, 'uv_sets', None)
             if uv_sets:
                 fu = sx / _STOCK_NODE_SCALE
@@ -275,10 +212,6 @@ def _rescale_and_flatten(data, scales, keep: float, center=(0.0, 0.0)):
                 for v in verts:
                     v.z = mid + (v.z - mid) * keep
                 flattened += 1
-            # Bounding sphere must follow the geometry or the engine can cull
-            # the sheet against a volume it no longer occupies.  Unconditional:
-            # the X/Y stretch above always changes the extent, even when no
-            # flattening is requested.
             shape_data.update_center_radius()
     return scaled, flattened
 
@@ -287,31 +220,18 @@ def generate_cloud_bank(editor_id: str, width: float, height: float,
                         out_root: str, flatten: float = 0.0,
                         center=(0.0, 0.0), land_rect=None,
                         write: bool = True) -> str:
-    """Write a scaled, centred cloud bank for one worldspace; return its MODL path.
+    """Write a scaled, centered cloud bank for one worldspace; return its MODL path.
 
-    land_rect: (min_x, min_y, max_x, max_y) of the worldspace's REAL LAND, in
-    world units.  This is what the sizing is driven from -- the sheet is grown
-    until its clear middle reaches the farthest land edge, so the opaque band
-    lands beyond the terrain.  When given it supersedes width/height entirely.
-
-    width/height: legacy span-based sizing, kept for callers that have no land
-    rectangle to offer.
+    land_rect: (min_x, min_y, max_x, max_y) of the worldspace's REAL LAND in
+    world units; supersedes width/height, which is legacy span-based sizing.
     out_root: the plugin's output folder (the one that holds `meshes\\`).
-    center: world-unit (x, y) the deck is centred on.
+    center: world-unit (x, y) the deck is centered on.
+    write: False validates and returns the MODL path without writing a file.
 
-    write: False computes and validates the bank but writes no file,
-    returning the MODL path it WOULD have written. The mesh is ONE file at
-    a fixed path shared by every plugin in a worldspace, so the per-plugin
-    copies were rival versions of it -- each sized to its own bounds, the
-    install order picking a winner. `sibling_lod.merge_cloud_bank` writes
-    the single authoritative copy, sized to the UNION of every sibling's
-    land, into the LOD mod that installs last. MODL is the same string
-    either way, and every validity check above still runs, so a worldspace
-    whose bank cannot be built returns None here exactly as before.
-
-    Returns None when the vanilla source mesh is unavailable, so the caller
-    simply omits MODL and the engine falls back to its own default -- exactly
-    today's behaviour, never a broken model reference.
+    Returns None when the source mesh is unavailable or its layout is not the
+    one verified against, so the caller omits MODL and the engine falls back
+    to its own default rather than a broken model reference.
+    See: docs/commentary/asset_convert_terrain.md#world-map-cloud-bank-sizing
     """
     from asset_convert.sources.skyrim_assets import get_asset_bytes
     from asset_convert.nif.sse_nif import read_nif
@@ -320,12 +240,8 @@ def generate_cloud_bank(editor_id: str, width: float, height: float,
     if not raw:
         return None
 
-    # read_nif normalises the BSA's SSE BSTriShape graph to LE NiTriShape and
-    # marks the data LE, so the write below produces an LE NIF (uv2=83), which
-    # SSE loads natively.
     data = read_nif(raw)
     if land_rect:
-        # Reach from the deck's centre to the farthest land edge on each axis.
         mnx, mny, mxx, mxy = land_rect
         reach_x = max(abs(mnx - center[0]), abs(mxx - center[0]))
         reach_y = max(abs(mny - center[1]), abs(mxy - center[1]))
@@ -335,8 +251,6 @@ def generate_cloud_bank(editor_id: str, width: float, height: float,
                                      compute_axis_scales(reach_x, reach_y),
                                      flatten, center)
     if scaled == 0:
-        # Not the layout we verified against -- ship nothing rather than a
-        # mesh we may have mangled.
         return None
 
     rel = cloud_model_path(editor_id)

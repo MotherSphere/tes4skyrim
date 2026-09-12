@@ -140,7 +140,7 @@ def open_notches(verts, tris, cell=None, near=256.0):
 
     THE METRIC THAT WAS MISSING.  `crossed_boundary_edges` only sees a crack
     when a walked line CROSSES it, and `count_missing` only samples the walked
-    centreline — so a notch beside the centreline reads as perfectly healthy on
+    centerline — so a notch beside the centerline reads as perfectly healthy on
     both while being plainly visible (and unwalkable) in a render.  That blind
     spot is how "0 holes, min width 88u" got reported for a staircase that had
     two V-cracks bitten out of it.

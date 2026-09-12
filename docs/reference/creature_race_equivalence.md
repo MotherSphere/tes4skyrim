@@ -101,7 +101,7 @@ equivalent for animation donation, keyword assignment, and sound routing.
 
 | Oblivion folder | Oblivion creature | Skyrim race | FormID | Notes |
 |---|---|---|---|---|
-| `bear` | Black / Brown Bear | `BearBlackRace` / `BearBrownRace` | `000131E8` / `000131E7` | Direct colour-for-colour match. `BearSnowRace` `000131E9` has no Oblivion counterpart. |
+| `bear` | Black / Brown Bear | `BearBlackRace` / `BearBrownRace` | `000131E8` / `000131E7` | Direct color-for-color match. `BearSnowRace` `000131E9` has no Oblivion counterpart. |
 | `dog` | Dog | `DogRace` | `000131EE` | Same quadruped canine rig; Skyrim's dog is the pipeline's template creature. |
 | `dog` | Wolf / Timber Wolf | `WolfRace` | `0001320A` | Oblivion shares one folder for dog+wolf; Skyrim splits them. Match is per-CREA, not per-folder. |
 | `horse` | Horse (all coats) | `HorseRace` | `000131FD` | Same rig, same mount role. See [horse_rideability_plan.md](../plans/horse_rideability.md). |

@@ -131,6 +131,7 @@ Audit: `tools/validate/gamebryo_seq_check.py` (check 3).  Guarded by
 through the real converter on both crashing meshes.
 
 ### 🔴 LODSettings must COVER the terrain, or the worldspace CTDs on entry (2026-08-10)
+<a id="lodsettings-must-cover-the-terrain"></a>
 
 Crashes `crash-2026-08-09-23-15-19` through `crash-2026-08-10-00-16-34`, all
 byte-identical: `EXCEPTION_ACCESS_VIOLATION` at `SkyrimSE.exe+050E6AD`,
@@ -154,9 +155,19 @@ LODGen still emitted tiles out to (-32,-32).
 Fix, in two parts:
 - Extents are measured from the **CELLS** (always carry XCLC), unioned with
   MNAM only when MNAM is populated.
-- `size` grows from 4 until the square covers `[sw, ne)`; **SW is the literal
-  terrain corner, NOT snapped or centred**, and `maxLOD` tracks `size`
-  (capped at 32) rather than being hardcoded to 32.
+- The square is anchored and grown until it covers `[sw, ne)`, and `maxLOD`
+  tracks `size` (capped at 32) rather than being hardcoded to 32.
+
+The root must contain every TILE, not merely every cell: LODGen snaps each
+tile's origin DOWN to a multiple of its own level (a level-16 tile covering cell
+-9 is named `...16.-16.y`), so tiles start below the literal terrain corner. SW
+is therefore anchored at a multiple of `max_lod` and the square sized from there.
+`max_lod` is the coarsest level emitted, capped at 32, and is chosen FIRST
+because it sets the anchor granularity; both grow together, the pair recomputed
+each round so the anchor tracks the level. Growing is always safe. An earlier
+attempt that snapped SW down to a multiple of `size` never converges for a span
+crossing the origin -- the gap grows as fast as the size -- which is why the
+anchor granularity is `max_lod`, not `size`.
 
 Ground truth — vanilla `.lod` files extracted from `Skyrim - Meshes0.bsa`
 (layout `<hhIII` = SWx i16, SWy i16, size u32, minLOD u32, maxLOD u32):
@@ -167,11 +178,9 @@ Ground truth — vanilla `.lod` files extracted from `Skyrim - Meshes0.bsa`
 | dlc01falmervalley | (-16, -13) | 32 | 4 | 32 |
 | skuldafnworld | (0, -21) | 64 | 4 | 32 |
 
-The new formula reproduces the first two **exactly** from their cell extents,
-which is what confirms it rather than merely being self-consistent. Note SW is
-unaligned in all three — an earlier attempt that snapped SW down to a multiple
-of `size` never converges for a span crossing the origin (the gap grows as
-fast as the size). Guarded by
+The formula reproduces the first two **exactly** from their cell extents, which
+is what confirms it rather than merely being self-consistent. Vanilla also
+confirms SW is REAL, not centered, and that `maxLOD` is not always 32. Guarded by
 `tests/test_asset_convert.py::TestLODSettingsCoversTheTerrain`.
 
 ### Terrain LOD (SSELodGen) — data chain
@@ -191,10 +200,10 @@ Two pieces, both native, both re-enabled in the pipeline (`generate_lod` + `gene
 - **Compositor orientation contract (fixed 2026-07-09 — the "large single color areas" bug was three separate defects):**
   1. **Quadrants with no BTXT base layer** (22.6% of Tamriel quadrants, whole sea floor) rendered flat grey-128. The engine's default for unpainted land is `Landscape\Default.dds` → `DEFAULT_LAND_TEXTURE = tes4\landscape\default.dds`. Cells with NO LAND record now also composite (default texture) instead of a flat fill.
   2. **V ran the wrong way**: the diffuse tile is written image-row-0 = NORTH, so world V must DECREASE as the image row grows. Sampling with ascending V mirrored every quadrant and broke ground-texture continuity at every quadrant boundary (horizontal banding every half cell). Same flip applies to VTXT opacity grids and VCLR (LAND row 0 = SOUTH → `np.flipud` to image space), and to the heightmap-derived normal map (`_heightmap_normal_rgb` flips + negates the row gradient so the `_n.dds` matches the diffuse orientation — it was N/S-mirrored vs the diffuse before).
-  3. **No underwater murk**: vanilla/xLODGen LOD diffuse bakes submerged terrain toward a flat murky colour; without it the sea floor reads as bright land. `composite_cell(heights=, water_height=)` blends toward `MURK_COLOR` by depth (`MURK_FULL_DEPTH=512`, cap `MURK_MAX=0.9`).
+  3. **No underwater murk**: vanilla/xLODGen LOD diffuse bakes submerged terrain toward a flat murky color; without it the sea floor reads as bright land. `composite_cell(heights=, water_height=)` blends toward `MURK_COLOR` by depth (`MURK_FULL_DEPTH=512`, cap `MURK_MAX=0.9`).
   - Ground truth for row-0=north: xLODGen's own `tamriel.32.0.32.dds` (northern Sea of Ghosts at the TOP).
 - `.btr` structure = `BSMultiBoundNode` "chunk" → child[0] `NiTriShape` "land" (scale=level, local 0..4096 verts, shader type 18 LODLandscapeNoise, no normals/vcol), child[1] optional WATER node → `BSMultiBound`/`BSMultiBoundAABB`. Loads in-game; AABB magnitude matches vanilla LOD4. (xLODGen source only READS .btr for object-face culling — terrain .btr generation is entirely ours.)
-- **Land UVs are REQUIRED and meaningful** (fixed 2026-07-09): vanilla maps the tile texture across the tile with `u = x/4096`, `v = 1 − y/4096` (v=0 = NORTH edge = DDS row 0). "UVs are irrelevant for terrain .btr" was only true of how xLODGen *reads* them — the ENGINE samples them. All-zero UVs make every triangle sample one texel → each tile renders as a single flat colour → the in-game/world-map "hard-edged checkerboard, one colour per tile" symptom. Water shape has NO UVs (num_uv_sets=0), matching vanilla.
+- **Land UVs are REQUIRED and meaningful** (fixed 2026-07-09): vanilla maps the tile texture across the tile with `u = x/4096`, `v = 1 − y/4096` (v=0 = NORTH edge = DDS row 0). "UVs are irrelevant for terrain .btr" was only true of how xLODGen *reads* them — the ENGINE samples them. All-zero UVs make every triangle sample one texel → each tile renders as a single flat color → the in-game/world-map "hard-edged checkerboard, one color per tile" symptom. Water shape has NO UVs (num_uv_sets=0), matching vanilla.
 - **LOD water (added 2026-07-09, vanilla-exact)**: child[1] = `BSMultiBoundNode` named `WATER` (scale 1) → one shape with an independent flat quad per water cell (4 verts/2 tris each, cell-local size 4096/level, Z = water height / level, NO shader/UV/normals — the engine textures it from WRLD NAM3). LOD4 uses `BSSegmentedTriShape` with EXACTLY 16 segments (fixed 4×4 grid, column-major sx*4+sy, so the engine can hide quads over loaded cells); LOD8/16/32 use plain `NiTriShape`. Segment binary layout (nif.xml `BSGeometrySegmentData`): `flags:byte=0, start_index:uint (tri-POINTS, 0 when segment empty), num_primitives:uint`; PyFFI's `BSSegment` fields are misaligned over the same 9 bytes — write `internal_index = start<<8` and `flags.bsseg_water = 1` (== num_prims 2 << 8). WATER AABB: XY = quad bbox in world units rel. tile origin; Z spans [min water height, max(max height, 0)]. Water cells = CELL HasWater (DATA bit 0x02) AND terrain dips below the cell water height (XCLW override valid only in ±1e9, else WRLD DNAM default).
   - **The old CTD** (BSMultiBoundNode "Water" → null deref): the engine's LOD-water path derefs the worldspace's WATR via **WRLD NAM3** — the fix is NOT to avoid the node, it's to write NAM2/NAM3 = Skyrim.esm DefaultWater (0x18) + NAM4 (LOD water height, 0 for Oblivion) in `convert_WRLD`. Also: TES4 CELL XCLW `-2147483648.0` = "use default" sentinel — must be OMITTED on conversion, not written as a literal height.
 - Normal map derived from the heightmap gradient (`_heightmap_normal_rgb` + real BC5 via `_encode_bc4_block`), replacing the old flat normal so distant terrain is lit.
@@ -245,7 +254,7 @@ Olava the Feeble.
 
 **Our implementation**: `asset_convert/lava_surface.py` generates the plane,
 `tes5_import/actors/lava_placement.py` places it. Oblivion's `oblivionlava06.dds` is
-already full colour (DXT1 blocks decode to `(230,97,49)`, `(222,64,32)`; mean
+already full color (DXT1 blocks decode to `(230,97,49)`, `(222,64,32)`; mean
 channel spread 151/255), so it goes straight into `source_texture` and the
 greyscale-to-palette path is NOT used — setting `slsf_1_greyscale_to_palette_color`
 without binding a gradient samples a missing texture.
@@ -284,6 +293,24 @@ converted meshes; a bare `3` differs) and controller `flags = 0x48`
 advance). `NiFloatInterpolator.float_value` may be `0.0`: our shipped,
 in-game-confirmed scrolling meshes (streetlamps, flame atronach) use `0.0` and
 animate fine, so it is **not** the blocker it first appears to be.
+
+### <a id="lava-shader-flags"></a>The shader flags are copied from Dawnguard, minus one bit
+
+`flags1 = 0x80000010`, `flags2 = 0x21` on Dawnguard's `DweSpecialForgeLava01`,
+copied rather than guessed. We set `slsf_1_z_buffer_test`,
+`slsf_2_z_buffer_write`, `slsf_2_vertex_colors` and `slsf_2_double_sided`, and
+deliberately DROP `slsf_1_greyscale_to_palette_color` (0x10): that bit tells the
+shader to look the source texture's greyscale value up in `greyscale_texture`,
+and with no palette bound it samples a missing texture. Our source is already
+full color, so it stays off and `greyscale_texture` stays empty.
+
+`slsf_2_vertex_colors` obliges the geometry to CARRY vertex colors — the engine
+reads them as a per-vertex multiplier, so opaque white (1,1,1,1) leaves the
+texture untouched. Declaring the flag without the data is the mismatch case.
+
+`slsf_2_double_sided` is not cosmetic: the winding faces up, but the player
+stands IN the lava (the WATR still governs the swim) and sees the plane from
+BELOW at that moment, where a single-sided surface disappears entirely.
 
 Guarded by `tests/test_lava_surface.py` (5 tests, each asserting one of the
 silent-failure properties).
@@ -911,7 +938,35 @@ byte-for-byte copy of `_far.nif`.
 ## Scoping a LAND scan to one worldspace
 <a id="land-scan-scoping"></a>
 
-**Code:** `scan_land_file` in `asset_convert/lod/terrain_lod.py`.
+**Code:** `parse_land_records`, `scan_land_file` in
+`asset_convert/lod/terrain_lod.py`.
+
+Overlays are keyed by grid coordinate, so a later file's LAND for a cell simply
+replaces the earlier one -- exactly override semantics. That is what lets an
+override plugin's regraded terrain reach LOD: DLCBattlehornCastle rewrites VHGT
+on **10 Tamriel cells**, and reading only the master left distant terrain showing
+the ORIGINAL ground while the loaded cells showed the new ground.
+
+`parse_land_records` resolves the worldspace FormID ONCE, from the file that
+DEFINES the worldspace, and hands it to every overlay scan rather than letting
+each overlay look it up itself: an override plugin routinely edits a master's
+worldspace while shipping no WRLD record, and the unscoped fallback would then
+sweep in every OTHER worldspace it carries. Only the base file may fall back to
+"take everything" (`allow_unscoped`); for an overlay that fallback is the
+corruption measured below.
+
+That FormID is NORMALIZED into the load-order-wide space before it is handed
+across, because it is compared against ids from a DIFFERENT file. A raw id from
+one file means nothing in another, and comparing an unnormalized one is exactly
+the cross-file mistake normalization exists to prevent.
+
+`scan_land_file` tracks CELL grid coords alongside each LAND with a lightweight
+group scanner: GRUP type 6 is the cell children group (label = cell FormID) and
+type 1 the world children group (label = parent WRLD FormID). The target
+worldspace FormID is found first by a fast linear scan; when this file overrides
+the worldspace without shipping its WRLD record, its edits live under a type-1
+GRUP labelled with the DEFINING file's FormID, so scoping on `known_wrld_fid` is
+exact and still excludes every other worldspace the plugin carries.
 
 `known_wrld_fid` is the target worldspace's FormID as resolved from the file
 that DEFINES it. An override plugin edits a master's worldspace through the
@@ -1047,8 +1102,8 @@ the parallax height-map writer shares its BC4 encoder.
 ### <a id="dxt1-is-vectorised-over-blocks"></a>DXT1 is vectorised over blocks
 
 For each 4×4 block the encoder takes the per-channel min and max as the DXT1
-endpoints (`c0 > c1`, opaque 4-colour mode) and assigns each pixel the nearest
-of the four interpolated colours. The palette is re-expanded **from** 565 — the
+endpoints (`c0 > c1`, opaque 4-color mode) and assigns each pixel the nearest
+of the four interpolated colors. The palette is re-expanded **from** 565 — the
 scalar version built its palette from `c565_to_rgb` of the quantised endpoints,
 and matching that is what keeps the output byte-identical.
 
@@ -1155,3 +1210,135 @@ their `_n` normals shipped. They are named by `_lod.nif` meshes whose base
 `MetalWorkQuad02a/03a`), so a destem fallback has no valid target. The
 rowhouse model is placed by **0 STAT records**; the satellite tripod by 2.
 Neither reaches a shipped tile, so the purple count stays 0.
+
+## Planning a create-LOD run before anything bakes
+<a id="create-lod-run-planning"></a>
+
+**Code:** `main`, `_worldspace_fid_resolver` in `tools/release/create_lod.py`.
+
+Every worldspace is resolved to its owner and overlay stack BEFORE any bake
+starts, so a bad selection is reported as a plan rather than discovered halfway
+through an hour of baking. `owner_map` resolves all of them in ONE pass over the
+load order instead of re-listing every plugin per worldspace.
+
+Staged meshes are swept up front rather than trusting the post-bake cleanup: a
+killed run would otherwise pin them forever, and because this mod installs LAST
+to win the tile overwrite, a stale mesh here silently overrides every plugin's
+current copy.
+
+WRLD-FormID lookups are memoised per (owner, edid). One owner's read resolves
+every wanted worldspace while its bytes are in hand: several worldspaces share an
+owner -- **Oblivion.esm owns 18** -- and resolving each independently re-read its
+**613 MB**. Jobs are built in worldspace order, not owner order, so the bytes are
+held only for the duration of one owner's lookups and only the resolved FormIDs
+persist.
+
+Ids are NORMALIZED into the load-order-wide space because they are compared
+against ids from OTHER plugins (`touched_worldspace_fids`), and a raw id is only
+meaningful inside the file it came from.
+
+## The world-map cloud bank is scaled AND recentered
+<a id="world-map-cloud-bank-sizing"></a>
+
+**Code:** `compute_center`, `_rescale_and_flatten`, `generate_cloud_bank` in
+`asset_convert/lod/worldmap_clouds.py`; `merge_cloud_bank` in
+`asset_convert/lod/sibling_lod.py`.
+
+### Why the deck must move, not just grow
+
+A worldspace's NAM0/NAM9 rectangle is NOT centered on the worldspace origin --
+it is wherever its author laid the terrain out. The stock bank IS
+origin-centered (every sheet node has translation x=y=0 and vertices symmetric
+about zero, verified against the shipped mesh), so scaling alone leaves the deck
+over (0,0) while the landmass sits elsewhere, and terrain on the far side of the
+origin runs out from under the clouds.
+
+NehrimWorldspace is the reported case: NAM0 (-266240,-188416) to NAM9
+(110592,225280), midpoint (-77824, 18432). The origin-centered deck hangs east
+and north, leaving the WEST and SOUTH terrain bare -- exactly the two edges seen
+in game. **16 of 34** Nehrim worldspaces and **31 of 84** Oblivion worldspaces
+are not covered by an origin-centered sheet at their own scale.
+
+`merge_cloud_bank` centers on the UNION's midpoint for the same reason it sizes
+off the union: that is the rectangle the map actually draws once every sibling is
+installed.
+
+### Parsed graph, not byte patching
+
+The BSAs ship this mesh in SSE BSTriShape form (**96,851 bytes**, half-float
+packed vertices) while `references/Skyrim Meshes` holds the LE NiTriShape form
+(**182,953 bytes**). A patch written against either layout silently no-ops on the
+other, which is what happened to the first version of `_rescale_and_flatten`.
+`sse_nif.read_nif` normalizes both to LE NiTriShape and marks the data LE, so the
+edit is done on the graph and written out LE (uv2=83), which SSE loads natively.
+
+Stock vertices are symmetric about local (0,0), so a plain multiply stretches
+about the sheet's own center.
+
+### Sizing, centering, flattening
+
+X and Y are stretched INDEPENDENTLY (see `compute_axis_scales`) so the deck can
+match a map whose aspect differs from Skyrim's. A NIF node `scale` is a single
+float and cannot express that, so the stretch is baked into the VERTICES and each
+node's scale set to 1.0 -- node scale and vertex scale multiply, so leaving the
+stock 8.0 would apply the factor twice. Only the horizontal axes are touched:
+vertex Z (the sheet's own relief) and the nodes' Z translations (cloud ALTITUDES)
+are preserved.
+
+Sheet node X/Y translations are SET to the center. Stock is (0,0) on all four and
+the root above them is an identity-transform BSFadeNode at scale 1.0, so a node
+translation is already in world units -- no division by the parent scale, and the
+node's own scale applies to its vertices, not its translation. Setting rather
+than adding is idempotent if the mesh is regenerated from a previous output.
+
+The stock sheets are not flat: each carries billowing Z relief up to **3523**
+local units (~28,000 world units at scale 8) over the interior, with a skirt
+dropping to **-899** at the rim. That relief is modelled for Skyrim's terrain,
+most visibly the bank piled around High Hrothgar; over a converted worldspace it
+is a mountain of cloud on unrelated flat land. `keep` is the fraction retained
+(0.0 = flat, 1.0 = untouched), applied about each shape's MEDIAN z so the sheet
+settles onto its own base plane instead of being dragged to local zero -- the rim
+skirt is part of the silhouette, and collapsing everything to 0 would flare it up
+into the deck.
+
+The bounding sphere is updated unconditionally: the X/Y stretch always changes
+the extent, even when no flattening is requested, and a stale volume lets the
+engine cull the sheet.
+
+### The clouds are a TEXTURE, not vertex alpha
+
+Every sheet samples `textures\sky\SkyrimCloudsMap01.dds`, so the visible pattern
+-- the open middle and the dense band around it -- lives in the UVs. Stretching
+vertices alone leaves the UV range untouched, pinning that dense band to the same
+FRACTION of the sheet however big it gets: on a worldspace shaped unlike
+Skyrim's it lands on playable land, and no rescaling moves it.
+
+Scaling UVs by the SAME factor as the vertices keeps texel density constant in
+world units, so one cloud stays one cloud and the dense band stays at the rim
+where Bethesda put it. The stock ranges run outside 0..1 (u -8.2..11.7) and the
+sampler is set to wrap (`texture_clamp_mode` 65283), so the pattern tiles and a
+wider range simply shows more of it -- no clamping artefact at the edges.
+
+The factor is the change in WORLD span, not the node scale: the vertices already
+carried the stock node scale of 8.0 once it was baked in, so scaling UVs by sx/sy
+directly would over-tile by 8x. `world_new / world_stock = sx / _STOCK_NODE_SCALE`
+per axis.
+
+### One file, written once
+
+`land_rect` is the worldspace's REAL LAND rectangle in world units and supersedes
+width/height entirely: the sheet is grown until its clear middle reaches the
+farthest land edge, so the opaque band lands beyond the terrain. width/height is
+legacy span-based sizing kept for callers with no land rectangle.
+
+The mesh is ONE file at a fixed path shared by every plugin in a worldspace, so
+per-plugin copies were rival versions of it -- each sized to its own bounds, the
+install order picking a winner. `write=False` computes and validates the bank
+without writing, returning the MODL path it WOULD have written;
+`sibling_lod.merge_cloud_bank` writes the single authoritative copy, sized to the
+UNION of every sibling's land, into the LOD mod that installs last. MODL is the
+same string either way, and every validity check still runs.
+
+When the sheet layout is not the one verified against (`scaled == 0`) or the
+vanilla source mesh is unavailable, None is returned: the caller omits MODL and
+the engine falls back to its own default, never a broken model reference.

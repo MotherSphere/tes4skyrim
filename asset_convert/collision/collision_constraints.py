@@ -30,7 +30,7 @@ def _vec_cross(a, b):
 
 
 def _vec_set_unit(dst, xyz, w=0.0):
-    """Normalise xyz and store into a PyFFI Vector4."""
+    """Normalize xyz and store into a PyFFI Vector4."""
     x, y, z = xyz
     mag = math.sqrt(x * x + y * y + z * z)
     if mag > 1e-6:
@@ -450,7 +450,7 @@ _SYNTH_TWIST = 0.087266
 def _add_synth_ragdoll_constraint(data, child_body, parent_body):
     """Append a bhkRagdollConstraint joining child_body to parent_body.
 
-    Pivots at the child body's own centre expressed in each body's local space
+    Pivots at the child body's own center expressed in each body's local space
     (both bodies' `center` fields are already in Skyrim Havok units at this
     point, so the pivot needs no further scaling).  Frames are axis-aligned:
     twist = X, plane = Y, motor = Z — the orthonormal basis Skyrim's 2010

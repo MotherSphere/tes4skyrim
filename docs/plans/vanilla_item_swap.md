@@ -189,7 +189,7 @@ built and measured:
 
 Centroid UV sampling is not a correct rasteriser (no perspective-correct
 interpolation), and it does not need to be: at thumbnail size the question is
-"is this the same object, roughly this shape and colour", which it answers.
+"is this the same object, roughly this shape and color", which it answers.
 
 ### 4.1 ⚠ Known gap: the vanilla side does not render yet
 
@@ -262,7 +262,7 @@ one more category in the same modal, emitted into the same override ESP.
 | Mechanism | override the record, repoint one field | **redirect every referrer; do not emit the record at all** |
 | Referrers | placed REFR/ACHR | `CLMT.WLST`, `REGN.RDWT`, script `Weather` properties, and the WTHR itself |
 | Size gate | OBND ratio (§2) | not applicable — weather has no geometry |
-| Extra win | better art | **skips the whole NAM0 luminance-normalisation and IMGS-minting path** |
+| Extra win | better art | **skips the whole NAM0 luminance-normalization and IMGS-minting path** |
 
 Four consequences worth carrying into the implementation, all already stated in
 the weather doc:
@@ -299,8 +299,8 @@ substitution target for the plain `Snow` rows.
 
 Weather is a category in the same modal, gated the same way — but with **no size
 column** (nothing to measure) and **no Mode A/B choice** (redirect is the only
-mechanism). The preview is a swatch of the weather's sky/fog colours rather than
-a mesh render, which the NAM0 colour table supplies directly.
+mechanism). The preview is a swatch of the weather's sky/fog colors rather than
+a mesh render, which the NAM0 color table supplies directly.
 
 ## 5. Work order
 

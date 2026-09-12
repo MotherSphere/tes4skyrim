@@ -43,12 +43,15 @@ def _is_count_key(key: str) -> bool:
     return key.endswith('Count')
 
 
-# Per-list field normalisers, for TES4 fields whose export value carries
-# UNINITIALISED CS MEMORY alongside the real data. QSTA 'Flags' is a u8
-# (Compass Marker Ignores Locks) followed by 3 unused garbage bytes
-# (wbDefinitionsTES4: wbInteger(itU8) + wbUnused(3)) — comparing the raw u32
-# reported 58 quest-target "changes" whose meaningful byte was identical.
 def _mask_u8(value: str) -> str:
+    """The low byte of an integer export value, as a string; input on failure.
+
+    Normalizes TES4 fields whose export value carries UNINITIALIZED CS MEMORY
+    beside the real data.  QSTA 'Flags' is a u8 (Compass Marker Ignores Locks)
+    plus 3 unused garbage bytes (wbDefinitionsTES4: wbInteger(itU8) +
+    wbUnused(3)); comparing the raw u32 reported 58 quest-target "changes"
+    whose meaningful byte was identical.
+    """
     try:
         return str(int(value) & 0xFF)
     except (ValueError, TypeError):
@@ -100,7 +103,7 @@ def _split_indexed(record: dict) -> tuple:
 
 
 def _list_as_multiset(name: str, entries: dict) -> list:
-    """Normalise one indexed list into an order-independent comparable form."""
+    """Normalize one indexed list into an order-independent comparable form."""
     out = []
     for _idx, fields in sorted(entries.items()):
         normed = []

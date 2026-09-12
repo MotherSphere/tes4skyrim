@@ -1121,7 +1121,7 @@ def test_bake_block_transform_folds_offset_into_verts():
     """A PRN piece's shapes share ONE bone frame; per-shape offsets go to verts.
 
     Regression for the Imperial Legion helm, whose two shapes ('Helmet:0' at
-    the origin, 'default' at x=-1.6) rendered as a centred half plus a shifted
+    the origin, 'default' at x=-1.6) rendered as a centered half plus a shifted
     half once the bone position was ADDED to each shape's own translation.
     """
     from asset_convert.character.skin_retarget import bake_block_transform

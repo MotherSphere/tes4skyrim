@@ -337,8 +337,7 @@ CULL_SLIVER_AREA_FRAC = 0.12
 # cull could then remove (measured on Pinarus: area-3 MICRO triangles parked
 # beside a door forever).
 DECIMATE_PIN_RADIUS = 8.0
-# Vertices within this of a door CENTRE are pinned as a fallback for doors
-# that carry no wedge ring (withdrawn/interior-side quads).
+#: Pin radius about a door CENTER; fallback for doors carrying no wedge ring.
 DECIMATE_PIN_CENTER_RADIUS = 24.0
 # Vertices within this of a PATHGRID NODE are pinned.  A node is a junction
 # the walked lines meet AT; outline-moving collapses and the sliver cull had

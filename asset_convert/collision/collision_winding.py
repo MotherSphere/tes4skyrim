@@ -18,7 +18,7 @@ from asset_convert.collision.collision_falloutnv import is_fallout_source
 AUTHORED_NORMAL_DOT = -0.3
 
 def face_normal(tri):
-    """Normalised face normal for a triangle given as three xyz tuples."""
+    """Normalized face normal for a triangle given as three xyz tuples."""
     (v0, v1, v2) = tri
     ux, uy, uz = v1[0]-v0[0], v1[1]-v0[1], v1[2]-v0[2]
     vx, vy, vz = v2[0]-v0[0], v2[1]-v0[1], v2[2]-v0[2]

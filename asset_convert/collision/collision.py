@@ -60,7 +60,7 @@ def _triangulate_strips(strips_data):
 
 
 def _find_normal(verts, a, b, c):
-    """Return normalised face normal for triangle (a,b,c) in a vertex list."""
+    """Return normalized face normal for triangle (a,b,c) in a vertex list."""
     va, vb, vc = verts[a], verts[b], verts[c]
     ux, uy, uz = vb[0]-va[0], vb[1]-va[1], vb[2]-va[2]
     vx, vy, vz = vc[0]-va[0], vc[1]-va[1], vc[2]-va[2]
@@ -1551,35 +1551,18 @@ def _offset_collision_shape_verts(co, ox, oy, oz):
     """Add (ox, oy, oz) game-unit offset to all collision shape vertices.
 
     Bakes a child NiNode's world-space translation into the shape so the
-    collision stays in the correct position after the node is hoisted to the
-    root (which sits at the origin).
+    collision stays in place after the node is hoisted to the root (which sits
+    at the origin).  Traverses bhkCollisionObject -> body -> shape, unwrapping
+    a bhkMoppBvTreeShape to reach the inner shape.  A bhkNiTriStripsShape takes
+    the offset as-is; a bhkPackedNiTriStripsShape stores verts at 1/7 game
+    units, so the offset is divided by 7 first.
 
-    BOTH mesh shape types must be handled, and they store vertices at
-    DIFFERENT scales:
-
-      * bhkNiTriStripsShape      — game units (×7 Havok units) → add as-is.
-      * bhkPackedNiTriStripsShape — 1/7 game units (i.e. Oblivion Havok
-        units) → the offset must be divided by 7 first.
-
-    Handling only the strips case silently dropped the offset for every
-    packed-shape mesh, leaving its collision centred on the origin while the
-    visual mesh sat elsewhere.  Battlehorn's stackstairsmid02b is the case in
-    point: a `collisionStackBalconyMid02b` node at Z=+394.5 whose collision
-    came through at z[-332.8..332.8] instead of z[61.7..727.3] — the shape
-    ends up half a storey low, which on a stair/balcony wedge reads in-game
-    as the collision being flipped upside-down.  Its sibling
-    stackbalconymid02.nif has the identical node offset but ships a
-    bhkNiTriStripsShape, so it was always converted correctly — the pair is
-    the A/B that isolates the shape type as the discriminator.
-
-    Traverses: bhkCollisionObject → body → shape → (bhkMoppBvTreeShape →)
-    bhkNiTriStripsShape | bhkPackedNiTriStripsShape
+    See: docs/commentary/asset_convert_collision.md#packed-shape-vertex-scale
     """
     rb = getattr(co, 'body', None)
     if rb is None:
         return
     shape = getattr(rb, 'shape', None)
-    # Unwrap bhkMoppBvTreeShape to get at the inner shape
     if shape is not None and isinstance(shape, NifFormat.bhkMoppBvTreeShape):
         shape = shape.shape
     if shape is None:

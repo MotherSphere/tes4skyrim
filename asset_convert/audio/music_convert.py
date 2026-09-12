@@ -21,6 +21,10 @@ for dialogue and wrong for a soundtrack.
 The manifest this writes (`music_tracks.json`) is what the importer turns into
 MUST/MUSC records; it carries the duration ffmpeg measured, because MUST.FLTV
 is a real float in seconds the engine schedules against.
+
+xWMAEncode's legal and native bitrate sets, the measured SNR ladder behind
+`BITRATE_LADDER`, and the vanilla 48 kb/s calibration are recorded in
+docs/commentary/asset_convert_audio.md#bitrate-native-rates-only-scaled.
 """
 from asset_convert.game_paths import current_namespace
 import json
@@ -44,74 +48,45 @@ _DEFAULT_EXPORT = paths.EXPORT
 
 BS = chr(92)
 
-# Source extensions worth converting.  A source already in .xwm is re-encoded
-# through the same path, which normalises the bitrate and is cheap.
+#: Convertible source extensions; an .xwm source is re-encoded to normalize its bitrate.
 MUSIC_SRC_EXTS = ('.mp3', '.wav', '.xwm')
 
-# xWMAEncode accepts ONLY these bitrates -- anything else fails outright with
-# XWMA_E_UNSUPPORTED_BITRATE, so 128000 is not selectable however natural it
-# looks.
+#: The only rates xWMAEncode accepts; anything else fails XWMA_E_UNSUPPORTED_BITRATE.
 XWMA_BITRATES = (20000, 32000, 48000, 64000, 96000, 160000, 192000)
 
-# ...and of those, only a SUBSET is native per (sample rate, channels).  From
-# xWMAEncode's own usage text:
-#
-#     44100Hz mono:   32000, 48000
-#     44100Hz stereo: 32000, 48000, 96000, 192000
-#     48000Hz stereo: 48000, 64000, 96000, 160000, 192000
-#
-#   "Other combinations are supported by resampling the source data and/or
-#    using a bitrate of 48kbps as a fallback"
-#
-# 🛑 64000 and 160000 are NOT native at 44.1 kHz.  Asking for either silently
-# RESAMPLES the output to 48 kHz -- verified by reading the fmt chunk of the
-# result, not by trusting the request:
-#
-#     asked 96000  -> 96 kb/s @ 44100 Hz  (native)
-#     asked 160000 -> 160 kb/s @ 48000 Hz (RESAMPLED)
-#
-# We normalise every source to 44.1 kHz stereo before encoding, so the middle
-# row above is the only one that applies and 160000 would buy a rate conversion
-# nothing asked for.  Never widen this tuple without re-reading that table.
+#: Of those, the subset NATIVE at 44.1 kHz stereo -- 64000/160000 silently resample to 48 kHz.
 NATIVE_44K_STEREO = (32000, 48000, 96000, 192000)
+
+#: The subset native at 44.1 kHz mono.
 NATIVE_44K_MONO = (32000, 48000)
 
-# Source bitrate -> target.  Re-encoding lossy->lossy compounds artifacts, so
-# spending 192k on a 128k mp3 preserves that mp3's existing damage more
-# faithfully without recovering anything: measured SNR against the source PCM
-# is 20.9 dB for a 128k source at 96k, but 25.6 dB for a 320k source at the
-# same 96k.  The ceiling is the SOURCE, so the target tracks it.
-#
-# For calibration, vanilla Skyrim ships ALL its music at 48 kb/s 44.1 kHz
-# stereo (measured: mus_combat_01/mus_dungeon_01 in Skyrim - Sounds.bsa, and
-# all 49 loose AE soundtrack files), so even the bottom rung here is vanilla
-# parity and the top is 4x it.
+#: (source kb/s <=, target bits/sec): the target tracks the source, whose quality is the ceiling.
 BITRATE_LADDER = (
-    #  source kb/s <=, target bits/sec
     (64,   32000),
     (128,  48000),
     (224,  96000),
     (10 ** 9, 192000),
 )
 
-# Used when the source bitrate cannot be determined (a .wav or an unreadable
-# header): the middle of the ladder, native, and double vanilla.
+#: Used when the source bitrate is undeterminable: mid-ladder, native, double vanilla's 48k.
 MUSIC_BITRATE_DEFAULT = 96000
 
 
 def pick_bitrate(src_kbps, channels: int = 2) -> int:
     """Native xWMA bitrate for a source of `src_kbps`, as bits/sec.
 
-    Always returns a rate that is native at 44.1 kHz for the given channel
-    count, because convert_music_file normalises every input to 44.1 kHz before
-    the encoder sees it.
+    Always returns a rate native at 44.1 kHz for the given channel count --
+    convert_music_file normalizes every input to 44.1 kHz before the encoder
+    sees it -- clamping to the top of that set when the ladder overshoots it
+    (mono tops out at 48000).
+
+    See: docs/commentary/asset_convert_audio.md#bitrate-native-rates-only-scaled
     """
     allowed = NATIVE_44K_MONO if channels == 1 else NATIVE_44K_STEREO
     if not src_kbps:
         target = MUSIC_BITRATE_DEFAULT
     else:
         target = next(t for cap, t in BITRATE_LADDER if src_kbps <= cap)
-    # Clamp into the native set for this channel count (mono tops out at 48k).
     return target if target in allowed else max(allowed)
 
 MANIFEST_NAME = 'music_tracks.json'

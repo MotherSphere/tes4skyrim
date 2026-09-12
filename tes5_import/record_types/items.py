@@ -99,9 +99,7 @@ def convert_KEYM(rec: dict) -> bytes:
     return _simple_object(rec, 'KEYM', extra_subs=extra)
 
 
-# Normalised TES4 model path -> {'open'/'close'/'loop': TES4 SOUN FormID}, for
-# doors whose open/close sound is authored in the MESH rather than on the
-# record.  Populated by load_door_model_sounds() in import Phase 0.
+#: MESH-authored door sounds: path -> {'open'/'close'/'loop': SOUN FormID}.
 _DOOR_MODEL_SOUNDS: dict = {}
 
 
@@ -349,9 +347,12 @@ def convert_FLOR(rec: dict) -> bytes:
     return _simple_object(rec, 'FLOR', extra_subs=extra)
 
 
-# --- FURN marker data -------------------------------------------------------
-# TES5 FURN MNAM bits 0-23 enable NIF marker POSITION 0-23 (xEdit "Sit 0..23").
-_FURN_SEATS: dict = {}  # normalised MODL path -> seat list (see cluster_seats)
+# ---------------------------------------------------------------------------
+# FURN marker data
+# ---------------------------------------------------------------------------
+
+#: MODL path -> seat list (cluster_seats); MNAM bits 0-23 enable NIF marker 0-23.
+_FURN_SEATS: dict = {}
 # Original TES4 base FormID (uppercase 8-hex string) -> origin shift for its
 # model.  The NIF converter re-origins marker-bearing models to the vanilla
 # floor-origin convention (the engine anchors seated actors to the REFR z),

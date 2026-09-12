@@ -127,7 +127,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('cell', nargs='?', help='cell EditorID or FormID')
-    ap.add_argument('--ref', help='centre on this placed reference FormID '
+    ap.add_argument('--ref', help='center on this placed reference FormID '
                                   '(finds its cell automatically)')
     ap.add_argument('--pad', type=float, default=512.0,
                     help='half-extent around --ref (default 512)')

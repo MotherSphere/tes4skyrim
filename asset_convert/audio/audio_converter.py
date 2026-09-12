@@ -749,41 +749,27 @@ def organize_voice_files(
     lipgenerator_path: 'str | None' = None,
     prune: bool = True,
 ) -> dict:
-    """Reorganise extracted TES4 voice files into TES5 directory layout.
+    """Reorganise extracted TES4 voice files into the TES5 directory layout.
 
-    TES4 layout: <source_dir>/sound/Voice/<plugin>/<Race>/<Gender>/<topic>_<infoFID>_<idx>.mp3
-    TES5 layout: <dest_dir>/Sound/Voice/<plugin>/<VoiceType>/<infoFID_shifted>_<idx>.fuz
+    `<source_dir>/sound/Voice/<plugin>/<Race>/<Gender>/<topic>_<infoFID>_<idx>.mp3`
+    becomes `<dest_dir>/Sound/Voice/<plugin>/<VoiceType>/<infoFID_shifted>_<idx>.fuz`.
 
-    With ``convert_audio`` each MP3/WAV goes ffmpeg -> WAV -> xWMAEncode ->
-    XWM; a line with a transcript also gets a .lip track and is packed into a
-    .fuz, which is the only container SSE reads lip data from.
+    `voice_map` and `lip_text` are dicts keyed on the 24-bit InfoFormID, or the
+    paths of the importer's `<esm>.voicemap.txt` / `<esm>.liptext.txt`; each
+    voicemap value is a bare prefix or a (prefix, [vtyps]) pair, normalized here
+    to the pair form.  `ffmpeg_path`, `xwmaencode_path` and `lipgenerator_path`
+    are auto-detected when None.  `copy=False` moves instead of copying.
 
-    Args:
-        source_dir:       Root extracted asset directory (contains 'sound/' subfolder).
-        dest_dir:         Root output directory for organised files.
-        plugin_name:      Override the plugin folder name (auto-detected from BSA path).
-        copy:             If True (default), copy files; if False, move source files.
-        convert_audio:    Convert MP3/WAV → XWM/FUZ (default True).
-        ffmpeg_path:      Path to ffmpeg executable (default 'ffmpeg').
-        formid_index:     Load-order index byte for the plugin (default 1).
-        xwmaencode_path:  Path to xWMAEncode.exe (auto-detected if None).
-        voice_map:        {info_fid24: prefix} or the importer's
-                          `<esm>.voicemap.txt`; files are renamed to it.
-        lip_text:         {(info_fid24, resp_num): text} or the importer's
-                          `<esm>.liptext.txt`; enables .lip generation.
-        lipgenerator_path: Path to LipGenerator.exe (auto-detected if None).
+    Returns a dict with keys: organized, skipped, no_match, errors,
+    unmapped_races.
 
-    Returns:
-        dict with keys: organized, skipped, no_match, errors, unmapped_races.
-
-    Race folders come from the plugin's own RACE records, and pruning runs
-    after conversion even when nothing converted. See: docs/commentary/asset_convert_audio.md#pruning-stale-voice-output
+    See: docs/commentary/asset_convert_audio.md#voice-file-naming-prefix
+    and docs/commentary/asset_convert_audio.md#pruning-stale-voice-output
     """
     source_dir = Path(source_dir)
     dest_dir   = Path(dest_dir)
     if isinstance(voice_map, (str, Path)):
         voice_map = load_voice_map(voice_map)
-    # Normalise: values may be a bare prefix (str) or (prefix, [vtyps]).
     if voice_map:
         voice_map = {k: (v if isinstance(v, tuple) else (v, []))
                      for k, v in voice_map.items()}

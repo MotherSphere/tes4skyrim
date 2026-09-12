@@ -1692,7 +1692,7 @@ def follow_scene(b: Bridge, refs: list, say=None) -> 'str | None':
 
     So the player is moved TO the cast -- never the cast to the player -- and
     re-anchored whenever it falls out of range. Anchoring on the actor the scene
-    currently centres on keeps force-greet radii (400-500 units) satisfied.
+    currently centers on keeps force-greet radii (400-500 units) satisfied.
 
     Returns the ref the player was anchored to, or None if none could be found.
     """

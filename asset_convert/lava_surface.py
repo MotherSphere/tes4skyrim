@@ -90,7 +90,7 @@ _SCROLL_PERIOD = 20.0
 
 
 def _plane_geometry(size: float, z: float, uv_repeats: float):
-    """A flat, upward-facing grid centred on the origin at height `z`."""
+    """A flat, upward-facing grid centered on the origin at height `z`."""
     verts, normals, uvs, tris = [], [], [], []
     step = size / _GRID
     half = size / 2.0
@@ -119,7 +119,14 @@ def _plane_geometry(size: float, z: float, uv_repeats: float):
 
 def _build_shape(texture_rel: str, size: float, z: float,
                  scroll_u: float, scroll_v: float):
-    """One lava NiTriShape with the Dawnguard effect-shader profile."""
+    """One lava NiTriShape with the Dawnguard effect-shader profile.
+
+    Carries opaque-white vertex colors (the shader declares
+    slsf_2_vertex_colors), an empty greyscale_texture because Oblivion's lava
+    image is already full color, and a double-sided flag set.
+
+    See: docs/commentary/asset_convert_terrain.md#lava-shader-flags
+    """
     verts, normals, uvs, tris = _plane_geometry(size, z, _UV_REPEATS)
 
     tsd = NifFormat.NiTriShapeData()
@@ -131,9 +138,6 @@ def _build_shape(texture_rel: str, size: float, z: float,
     tsd.num_uv_sets = 1
     tsd.bs_num_uv_sets = 1
     tsd.uv_sets.update_size()
-    # Vertex colours must exist because the shader declares
-    # slsf_2_vertex_colors (as Dawnguard's lava does); the engine reads them
-    # as a per-vertex multiplier, so opaque white leaves the texture untouched.
     tsd.has_vertex_colors = True
     tsd.vertex_colors.update_size()
     for i in range(len(verts)):
@@ -158,9 +162,6 @@ def _build_shape(texture_rel: str, size: float, z: float,
 
     shader = NifFormat.BSEffectShaderProperty()
     shader.source_texture = texture_rel.encode('latin1')
-    # No greyscale_texture: Oblivion's lava image is already full colour, so
-    # there is nothing for a gradient palette to map.  Dawnguard needs one
-    # only because its source is a colourless turbulence pattern.
     shader.greyscale_texture = b''
     # 0xFF03 = wrap S | wrap T in the low byte, with the high byte vanilla
     # always sets.  Both Dawnguard's lava and this pipeline's own converted
@@ -178,12 +179,6 @@ def _build_shape(texture_rel: str, size: float, z: float,
     shader.soft_falloff_depth = 100.0
     shader.uv_scale.u = 1.0
     shader.uv_scale.v = 1.0
-    # Flags copied from Dawnguard's DweSpecialForgeLava01 (flags1 0x80000010,
-    # flags2 0x21) rather than guessed, MINUS the one bit that is specific to
-    # its source art: slsf_1_greyscale_to_palette_color (0x10) tells the
-    # shader to look the source texture's greyscale value up in
-    # greyscale_texture.  Setting it with no palette bound would sample a
-    # missing texture; our source is already full colour, so it stays off.
     shader.shader_flags_1.slsf_1_z_buffer_test = 1
     shader.shader_flags_2.slsf_2_z_buffer_write = 1
     shader.shader_flags_2.slsf_2_vertex_colors = 1
@@ -258,7 +253,7 @@ def _scroll_spans(scroll_x: float, scroll_y: float):
 
     Only the RATIO of the authored speeds is meaningful across engines (the
     magnitudes are per-frame offsets in Oblivion's own shader), so the faster
-    axis is normalised to one full texture repeat per loop and the other is
+    axis is normalized to one full texture repeat per loop and the other is
     scaled against it.  A record that authors no scroll still creeps, because
     static lava reads as plastic.
     """

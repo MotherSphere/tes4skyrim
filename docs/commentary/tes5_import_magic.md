@@ -144,7 +144,7 @@ converted and unused. Since the mesh pipeline is now solid, this data is
 recoverable — it just has nowhere to land today.
 
 Note also that `EFSH` conversion itself is partial: it writes a 128-byte DATA
-populated only through offset 44 (flags, fill colour, 6 fill-alpha floats) and
+populated only through offset 44 (flags, fill color, 6 fill-alpha floats) and
 zeroes the rest.
 
 Supporting record types with **no writer at all**: `ARTO`, `RFCT`, `IPDS`,

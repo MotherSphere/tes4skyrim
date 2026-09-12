@@ -480,17 +480,13 @@ class TestEngineBranchPath:
     def test_bare_tree_gets_no_leaves(self):
         """A tree the engine gives no leaves must ship none.
 
-        dtree01 is a bare dead tree: its leaf level stores child_freq = 0, so
-        the engine generates zero leaves.  The dump therefore records an
-        EXPLICIT zero, and the reader must distinguish that from "this dump
-        has no leaf chunk at all".
-
-        Regression: it did not, and fell back to the Python foliage -- pasting
-        264 leaf cards, placed against PYTHON branches, onto engine bark they
-        never matched.  They floated up to 36% of the tree diagonal off the
-        model, wearing a mania leaf atlas on a dementia tree.
+        dtree01 stores child_freq = 0 on its leaf level, so the engine grows
+        zero leaves and the dump records an EXPLICIT zero -- an empty ARRAY,
+        never None, distinct from "no leaf chunk at all".  Reading that as
+        None fell back to the Python foliage: 264 leaf cards placed against
+        PYTHON branches, up to 36% of the tree diagonal off the engine bark.
         """
-        from asset_convert.speedtree.spt_engine_geom import (read_leaf_centres, run_dump,
+        from asset_convert.speedtree.spt_engine_geom import (read_leaf_centers, run_dump,
                                                    build_tree_engine,
                                                    engine_available)
         if not engine_available():
@@ -505,11 +501,10 @@ class TestEngineBranchPath:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             dump = run_dump(src, Path(td) / 'dtree01.bin', seed=581987)
-            centres = read_leaf_centres(dump)
-            # an explicit zero is an empty ARRAY, never None
-            assert centres is not None, \
+            centers = read_leaf_centers(dump)
+            assert centers is not None, \
                 'a zero leaf count must be recorded, not omitted'
-            assert len(centres) == 0
+            assert len(centers) == 0
 
             geo = build_tree_engine(tree, src, seed=581987,
                                     cache_dir=Path(td))

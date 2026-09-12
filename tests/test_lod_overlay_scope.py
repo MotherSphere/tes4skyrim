@@ -59,7 +59,7 @@ def _plugin(tmp_path: Path, name: str, payload: bytes,
 
 
 def _norm(fid: int, masters=('Skyrim.esm', 'Oblivion.esm')) -> int:
-    """The load-order-wide id these tests' MASTER-owned raw ids normalise to."""
+    """The load-order-wide id these tests' MASTER-owned raw ids normalize to."""
     from asset_convert.lod.esm_scan import global_file_index
     top = fid >> 24
     owner = masters[top] if top < len(masters) else None
@@ -124,7 +124,7 @@ def test_scope_is_per_file_not_shared(tmp_path):
     naming two unrelated records. Judging them jointly would put the interior
     plugin into the exterior plugin's worldspace.
 
-    Normalisation is what makes this hold structurally rather than by luck:
+    Normalization is what makes this hold structurally rather than by luck:
     each file's 02 resolves to a DIFFERENT global byte, so the two ids are no
     longer equal even as plain integers.
     """
@@ -143,7 +143,7 @@ def test_scope_is_per_file_not_shared(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The normalisation itself
+# The normalization itself
 # ---------------------------------------------------------------------------
 
 def _remap(esm: Path, fid: int) -> int:

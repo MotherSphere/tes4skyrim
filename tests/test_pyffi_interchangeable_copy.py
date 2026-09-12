@@ -7,6 +7,7 @@ makes that safe: the result must equal what PyFFI's own two-hop path produces,
 attribute for attribute, and the copy must be INDEPENDENT of the source (the
 converter mutates the copy in place while still reading the original).
 """
+import inspect
 import os
 import sys
 
@@ -14,6 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from asset_convert.nif import pyffi_monkey_patch
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 apply_patches()
 from pyffi.formats.nif import NifFormat
@@ -92,7 +94,7 @@ def test_patch_is_installed():
 
 @pytest.mark.parametrize('colors,uvsets,normals', [
     (True, 1, True),
-    (False, 1, True),     # no vertex colours
+    (False, 1, True),     # no vertex colors
     (True, 0, True),      # no uv sets
     (False, 0, False),    # bare positions only
     (True, 2, True),      # two uv sets (2-D array path)
@@ -154,6 +156,5 @@ def test_shape_to_strips_round_trip():
 
 def test_env_toggle_documented():
     """The A/B escape hatch must keep working (used by tools/nif/nif_perf.py)."""
-    import inspect
     src = inspect.getsource(pyffi_monkey_patch)
     assert 'TESCONV_PYFFI_NO_SINGLE_HOP_COPY' in src

@@ -14,11 +14,11 @@ that function for the details.
                                                                conversion
     load_mesh_bounds(cache_path)                             — import_main.py
 
-Path keys are normalised: lowercase, forward slashes, relative to the mesh
+Path keys are normalized: lowercase, forward slashes, relative to the mesh
 output directory root.  Example: "tes4/furniture/chairnoble01.nif".
 
 Records store raw TES4 model paths like "Furniture\\ChairNoble01.NIF"; after
-prefix_path() and normalisation these map to the same key.
+prefix_path() and normalization these map to the same key.
 """
 
 import json

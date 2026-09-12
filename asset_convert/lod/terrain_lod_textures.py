@@ -12,7 +12,7 @@ This module reproduces that:
   LTEX (output ESM) --TNAM--> TXST --TX00--> tes4\\landscape\\<name>.dds
 
 Each LAND cell has 4 quadrants (BL, BR, TL, TR), each a 17x17 vertex grid
-(quadrants share their centre row/column).  A quadrant has one BASE layer
+(quadrants share their center row/column).  A quadrant has one BASE layer
 (BTXT, opaque) plus up to N ALPHA layers (ATXT+VTXT), where VTXT gives a
 per-vertex opacity at position index (row*17+col within the quadrant).
 
@@ -51,6 +51,9 @@ CELL_PX = 64
 MURK_COLOR = np.array([54.0, 66.0, 62.0], dtype=np.float32)
 MURK_FULL_DEPTH = 512.0    # game units below water at which murk saturates
 MURK_MAX = 0.9             # never fully hide the ground texture
+
+#: Fraction of the VCLR light map applied (0=off, 1=full x2 range).
+VCLR_SHADE_STRENGTH = 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +254,24 @@ def _sample_tiled(rgb_tile: np.ndarray, us: np.ndarray, vs: np.ndarray) -> np.nd
     return rgb_tile[np.ix_(py, px)]
 
 
+def _apply_vclr_shading(out: np.ndarray, colors: np.ndarray,
+                        cell_px: int) -> np.ndarray:
+    """Modulate `out` by the cell's VCLR luminance (baked AO / lighting).
+
+    `colors` is 33x33 with row 0 = south, flipped here to image orientation.
+    VCLR is a light map centered on ~0.5 = neutral (x2 = unshaded); the full
+    x2 range produced hard cell seams (per-cell VCLR discontinuities) and
+    crushed shadows, so the shading is blended only partway toward neutral.
+    """
+    from PIL import Image
+    shade = Image.fromarray(np.flipud(colors).copy(), 'RGB').resize(
+        (cell_px, cell_px), Image.BILINEAR)
+    shade = np.asarray(shade, dtype=np.float32) / 255.0
+    lum = shade.mean(axis=2, keepdims=True) * 2.0
+    mult = 1.0 + (lum - 1.0) * VCLR_SHADE_STRENGTH
+    return np.clip(out * mult, 0, 255)
+
+
 def composite_cell(layers: dict, colors: np.ndarray, ltex_map: dict,
                    tex_root: Path, cell_gx: int, cell_gy: int,
                    cell_px: int = CELL_PX, tex_size: int = 128,
@@ -313,20 +334,8 @@ def composite_cell(layers: dict, colors: np.ndarray, ltex_map: dict,
 
         out[rs, cs] = quad_img
 
-    # Modulate by VCLR luminance shading (baked AO / lighting).  colors is 33x33
-    # with row 0 = south — flip to image orientation.  VCLR is a light map
-    # centred ~0.5 = neutral (x2 = unshaded).  Applying the full x2 range
-    # produced hard cell seams (per-cell VCLR discontinuities) and crushed
-    # shadows, so blend the shading only partway toward neutral.
     if colors is not None:
-        from PIL import Image
-        shade = Image.fromarray(np.flipud(colors).copy(), 'RGB').resize(
-            (cell_px, cell_px), Image.BILINEAR)
-        shade = np.asarray(shade, dtype=np.float32) / 255.0
-        lum = shade.mean(axis=2, keepdims=True) * 2.0          # 0..2, 1=neutral
-        SHADE_STRENGTH = 0.4                                    # 0=off, 1=full
-        mult = 1.0 + (lum - 1.0) * SHADE_STRENGTH
-        out = np.clip(out * mult, 0, 255)
+        out = _apply_vclr_shading(out, colors, cell_px)
 
     # Bake the underwater murk: blend submerged pixels toward a flat murky
     # color by depth, like vanilla LOD diffuse (the LOD water sheet alone is

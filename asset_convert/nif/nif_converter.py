@@ -186,7 +186,7 @@ _SKYRIM_VERSIONS = {
     (0x14020007, 83),  # FO3/FNV share the version, differing only in uv2
 }
 
-#: Havok unit scale, Oblivion to Skyrim: bodies, mass centres, primitive dims.
+#: Havok unit scale, Oblivion to Skyrim: bodies, mass centers, primitive dims.
 _HAVOK_SCALE = 0.1
 
 # ---------------------------------------------------------------------------
@@ -244,7 +244,7 @@ def _convert_furniture_markers(markers, root):
 
 
 def _norm_tex_ref(raw):
-    """Normalise a NIF texture path to a key relative to the textures root.
+    """Normalize a NIF texture path to a key relative to the textures root.
 
     'Textures\\tes4\\foo\\Bar.DDS' -> 'tes4/foo/bar.dds'.  Returns None for
     anything that isn't a texture (file_name also carries non-DDS paths).
@@ -406,8 +406,7 @@ _CREATURE_EQUIP_NODES = (
                       'Bip01 Spine'),                           'QUIVER'),
 )
 
-# Spell-cast nodes. Vanilla rigs carry one per hand plus a body-centre node;
-# without them a casting creature's effect art has nowhere to attach.
+#: Spell-cast attach points: one per hand plus a body-center node, as vanilla rigs carry.
 _CREATURE_MAGIC_NODES = (
     ('NPC L MagicNode [LMag]', ('Bip01 L Hand',),               'SHIELD'),
     ('NPC R MagicNode [RMag]', ('Bip01 R Hand',),               'WEAPON'),
@@ -627,7 +626,7 @@ def _run_animation_passes(root, stats):
     follows the walk and precedes rest visibility and sequence-name
     collection; the autoplay split precedes collect_sequence_names so the
     behaviour graph is built from the final names; shader controllers attach
-    after the type match; interpolator normalising runs last.
+    after the type match; interpolator normalizing runs last.
     See: docs/commentary/asset_convert_nif.md#post-walk-animation-passes
     """
     match_seq_shader_types(root)
@@ -694,7 +693,7 @@ def _demote_billboard_root(root, bb_mode):
     return plain
 
 
-def _normalise_billboard_root(data, i, root):
+def _normalize_billboard_root(data, i, root):
     """Demote a billboard root over particles, else wrap it; the new root.
 
     A NiBillboardNode re-orients its ENTIRE subtree every frame, which
@@ -1001,8 +1000,8 @@ def _to_fade_node(data, i, root, stats, src_path, wants_gnd_marker):
     return fade
 
 
-def _normalise_fade_root(root, stats, src_path):
-    """Apply the root-normalisation passes to an already-BSFadeNode root.
+def _normalize_fade_root(root, stats, src_path):
+    """Apply the root-normalization passes to an already-BSFadeNode root.
 
     The NiNode->BSFadeNode swap carries these across; a root that is already
     a BSFadeNode never reaches it.
@@ -1019,12 +1018,12 @@ def _convert_one_root(data, i, root, stats, fix_textures, src_path, creature,
                       nif_basename, has_skin, is_worn_armor, wants_gnd_marker):
     """Convert one root in place.
 
-    Root normalisation, the NiNode->BSFadeNode swap (or the worn-armor
+    Root normalization, the NiNode->BSFadeNode swap (or the worn-armor
     equivalent), the tree walk, the animation passes and the collision work,
     in the order each depends on the last.
     """
     root = _wrap_geometry_root(data, i, root, stats)
-    root = _normalise_billboard_root(data, i, root)
+    root = _normalize_billboard_root(data, i, root)
     zero_fallout_root_rotation(root)
 
     is_sky = stats.get('_sky_type') is not None
@@ -1033,7 +1032,7 @@ def _convert_one_root(data, i, root, stats, fix_textures, src_path, creature,
     elif type(root).__name__ == 'NiNode' and is_worn_armor:
         prepare_armor_root(root)
     elif not is_worn_armor and not is_sky:
-        _normalise_fade_root(root, stats, src_path)
+        _normalize_fade_root(root, stats, src_path)
 
     if isinstance(getattr(root, 'controller', None),
                   NifFormat.NiControllerManager):

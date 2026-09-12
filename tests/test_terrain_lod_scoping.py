@@ -75,12 +75,15 @@ def _plugin(worldspaces, masters=('Skyrim.esm', 'Oblivion.esm')) -> bytes:
 
 TARGET_FID = 0x0100003C
 
-# `known_wrld_fid` is resolved from the plugin that DEFINES the worldspace and
-# handed to scans of OTHER files, so it travels in the normalised space (see
-# lod_gen._formid_remap_table). With the standard master list above, index byte
-# 01 is Oblivion.esm; `_norm` states that mapping explicitly rather than
-# hard-coding whatever integer the global table happens to assign.
 def _norm(fid: int, masters=('Skyrim.esm', 'Oblivion.esm')) -> int:
+    """Return *fid* with its index byte rewritten into the global-file space.
+
+    `known_wrld_fid` is resolved from the plugin that DEFINES the worldspace
+    and handed to scans of OTHER files, so it travels in the normalized space
+    (lod_gen._formid_remap_table).  With the standard master list, index byte
+    01 is Oblivion.esm; stating the mapping here beats hard-coding whatever
+    integer the global table happens to assign.
+    """
     from asset_convert.lod.esm_scan import global_file_index
     owner = (masters[fid >> 24] if (fid >> 24) < len(masters) else None)
     assert owner is not None, 'test ids should name a declared master'

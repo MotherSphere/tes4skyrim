@@ -25,7 +25,7 @@
 // Every predicate mirrors corridor_grow.py operation for operation, because
 // each encodes a geometry contract that was expensive to get right:
 //
-//   * The wall test sweeps the INTERVAL [prev, d] via a slab centred on the
+//   * The wall test sweeps the INTERVAL [prev, d] via a slab centered on the
 //     midpoint with half the step as depth -- a point probe steps over a wall
 //     that falls between samples (that caused 124 through-wall triangles).
 //   * On a hit, RIBBON_GROW_BISECT bisections land the rail AT the wall; a
@@ -196,7 +196,7 @@ struct TriGrid {
 // --------------------------------------------------------------------------
 // Thin oriented slab vs triangle (mirrors _tri_hits_slab).
 //
-// The slab is centred at (cx,cy): half_w along the edge tangent (~actor
+// The slab is centered at (cx,cy): half_w along the edge tangent (~actor
 // width), `depth` along the march direction (thin), Z span [z_lo, z_hi].
 // Tested by projecting into the slab's own 2D frame and running SAT against
 // the axis-aligned rectangle, gated by Z overlap.
@@ -312,7 +312,7 @@ inline bool walk_sample(const TriGrid& g, double x, double y, double near_z,
 }
 
 // --------------------------------------------------------------------------
-// Neighbour field: nearest roughly-parallel OTHER edge centreline.
+// Neighbour field: nearest roughly-parallel OTHER edge centerline.
 // --------------------------------------------------------------------------
 struct Seg { double ax, ay, bx, by, dx, dy, midz; int i, j; };
 
@@ -610,7 +610,7 @@ PyObject* py_grow_strips(PyObject*, PyObject* args) {
 // point only tests strips whose bounding box actually contains it.
 // --------------------------------------------------------------------------
 struct Strip {
-    // Centreline (a -> b), carrying the strip's own slope.
+    // Centerline (a -> b), carrying the strip's own slope.
     double ax, ay, az, bx, by, bz;
     double half;                 // admission radius for a rectangle strip
     int poly_off, poly_n;        // outline vertices in `poly` (0 = rectangle)

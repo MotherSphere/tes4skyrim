@@ -132,9 +132,11 @@ def tokenize(source: str) -> list[Token]:
     Newlines are significant (a statement is a line), and comments are KEPT --
     they are round-tripped into the output, and dropping them here would lose
     the authored intent the converted Papyrus preserves.
+
+    Both CRLF and a lone CR appear in sources; line endings are normalized to
+    LF first so the column arithmetic on every emitted Token is honest.
     """
     out: list[Token] = []
-    # `\r\n` and a lone `\r` both appear; normalise so column maths is honest.
     text = source.replace('\r\n', '\n').replace('\r', '\n')
     line = 1
     line_start = 0

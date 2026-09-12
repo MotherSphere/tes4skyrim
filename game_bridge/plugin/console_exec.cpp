@@ -285,7 +285,7 @@ bool ExecOne(const std::string& cmd, std::string* err, void* target = nullptr) {
 // inside the game -- including sequences that read state, branch on it, and
 // act, all within one compile.
 //
-// Statements are separated by newlines (or ';' from the caller, normalised
+// Statements are separated by newlines (or ';' from the caller, normalized
 // here). Each is compiled and run in order against the same selected
 // reference, which is what makes a scripted probe coherent: the selection
 // cannot drift between statements the way it can across separate round trips.

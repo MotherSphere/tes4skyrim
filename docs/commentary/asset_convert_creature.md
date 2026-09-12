@@ -619,7 +619,7 @@ Vanilla requires the anim skeleton's bone 0 `NPC Root [Root]` to be **exactly
 identity** (dog referencePose[0] = t(0,0,0) q(0,0,0,1); it is the node the
 engine equates with the reference's world position, at the actor's ground
 origin). Oblivion's `Bip01` root carries an **arbitrary authored bind
-transform**, and `BONE_RENAMES` renames it in place without normalising:
+transform**, and `BONE_RENAMES` renames it in place without normalizing:
 
 | creature | `Bip01` bind translation | rotation |
 |---|---|---|
@@ -638,7 +638,7 @@ sits at (0,−20,+27.3) instead of the origin.
 
 This is a real deviation from the engine contract and a plausible second
 contributor to death-frame misplacement on those 33 creatures. It was NOT
-changed together with the keyframe fix: normalising the root means
+changed together with the keyframe fix: normalizing the root means
 re-expressing every bone transform, every animation track and every skinned
 mesh bind, which would touch the 9 creatures that currently work. Do it as its
 own scoped pass with its own in-game verification — do not bundle it.
@@ -952,7 +952,7 @@ Two traps, both measured:
   into its rotation rows and `set_transform()` re-decomposes that, so arithmetic
   on `m_43` did not survive — again Z 21.2 instead of 10.6.
 
-The pile is then centred on its own origin in X/Y. Whatever offset survives is
+The pile is then centered on its own origin in X/Y. Whatever offset survives is
 drift inside the creature's rig (the ghost's from the death clip, the wraith's
 from the shape's authored rest position), and a placed object must straddle the
 point `AttachAshPile` drops it at, which is also the point the engine builds the
@@ -1017,6 +1017,24 @@ piles are uv2=83 with `BSLightingShaderProperty` + `NiAlphaProperty`).
 cannot be activated — all six vanilla `DefaultAshPile*` are ACTI) that the
 CREA VMAD then binds. Skyrim's `DefaultAshPileGhost` survives only as the
 fallback for a dissolving creature whose skeleton carries no pile.
+
+<a id="pile-acti-record-fields"></a>
+**THE PILE ACTI'S OBND IS READ FROM THE SHIPPED MESH, NEVER GUESSED.** The
+engine builds the activation target from OBND, so it must match the geometry
+the player sees. A guessed symmetric box put the click target beside the
+visible pile in game ("I still can't activate the ectoplasm on the ground"),
+and no single fixed size can serve both piles: the ghost's is ~21 units
+across, the wraith's ~92. `_pile_mesh_bounds` reads the emitted NIF;
+`extract_death_pile` centers the mesh on its own origin in X/Y, so the bounds
+are symmetric there and carry the real Z range. Only when the mesh cannot be
+read does the record fall back to the `(-24,-24,-4)→(24,24,16)` box.
+
+The other two required fields follow `DefaultAshPileGhost` (0x00101048)
+verbatim: `PNAM` is the marker color, which xEdit marks `SetRequired`, and
+`FNAM` is a U16 flag word of 0 — neither "No Displacement" nor "Ignored by
+Sandbox". `FULL` is the crosshair prompt (see
+[the phantom section](#ghost-pile-phantom) for why a nameless ACTI is
+unclickable); ours reads "Ectoplasm", for what the player sees.
 
 <a id="ghost-pile-phantom"></a>
 **THE PILE'S CLICK TARGET IS A `bhkSimpleShapePhantom`, NOT A RIGID BODY.**

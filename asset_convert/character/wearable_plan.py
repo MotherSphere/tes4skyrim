@@ -86,7 +86,7 @@ def body_part_for_flags(biped_flags: int):
 
 
 def _norm(path: str) -> str:
-    """Normalise an export model path to a lowercase mesh-relative key.
+    """Normalize an export model path to a lowercase mesh-relative key.
 
     The export escapes backslashes, so a model path arrives as
     'armor\\\\fur\\\\m\\\\gauntlets.nif' — collapse the doubling, or every key

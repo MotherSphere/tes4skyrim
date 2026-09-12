@@ -176,7 +176,8 @@ def test_unsafe_paths_rejected(bad):
     ('./x/./y.nif', 'x/y.nif'),
     ('a/b/../c.nif', 'a/c.nif'),
 ])
-def test_safe_paths_normalised(good, want):
+def test_safe_paths_normalized(good, want):
+    """safe_relpath returns the forward-slashed, dot-collapsed relative path."""
     assert archive.safe_relpath(good) == want
 
 

@@ -523,6 +523,24 @@ reference. Regression: `test_actor_script_relocated_to_placed_ref`,
 `test_shared_base_keeps_script_and_adds_ref`.
 
 ## 8. `PLDT` alias locations must be type 8, not type 9 (2026-07-20)
+<a id="player-target-is-the-reference"></a>
+### A player package target is the REFERENCE, never the base NPC_
+
+"The player", however TES4 spelled it, is the specific reference `PlayerRef`.
+Oblivion routinely writes it as Object-ID plus the player's base `NPC_`
+(0x07), but Skyrim's escort/follow procedures need a *reference* to act on,
+and vanilla is emphatic about which one: **Skyrim.esm names the player as a
+package target 543x as (type 0, 0x14) against just 6x as (type 1, 0x07)**.
+Left as an Object-ID the engine holds a base form rather than an actor to
+follow, so the package is SELECTED but its procedure never engages —
+**Morroblivion's chargen guard said "follow me" and stood still**.
+
+`resolve_target` normalizes to the reference FIRST, before the alias lookup,
+so the lookup sees 0x14 and a quest package still routes the player through
+its quest reference alias (`PTDA` type 4). That aliasing is what lets the
+package outrank the actor's standing schedule, so it must not be
+short-circuited.
+
 <a id="8-pldt-alias-locations-must"></a>
 
 The fix in §7 was necessary but not sufficient — after it, `sv` on Pinarus showed

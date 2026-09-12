@@ -29,7 +29,7 @@ no tokens, so stored length IS rendered length.
 
 The table is keyed on the SOURCE TEXT rather than plugin+EditorID+stage, so
 identical journal text resolves to one entry wherever it appears and no
-per-plugin bookkeeping is needed. Keys are normalised with `_key()` -- the same
+per-plugin bookkeeping is needed. Keys are normalized with `_key()` -- the same
 whitespace collapse the table was built with.
 
 Coverage is Oblivion.esm, the official Oblivion DLCs (Knights.esp,
@@ -56,7 +56,7 @@ OBJECTIVE_MAX_CHARS = 71
 
 
 def _key(text: str) -> str:
-    """Normalise a source journal string to its table key."""
+    """Normalize a source journal string to its table key."""
     return ' '.join((text or '').split())
 
 

@@ -2394,7 +2394,7 @@ distinct ids, across Nehrim, Morrowind_ob and Translation), but both
 `_QUOTED_MEMBER_RE` and `_QUOTED_NAME_RE` required a letter or underscore
 first, so those kept their quotes. Only `_safe_property_name` saved them: it
 strips the quotes *and* prefixes the `d` that makes the name legal Papyrus, so
-quoted and unquoted spellings happened to normalise to the same property
+quoted and unquoted spellings happened to normalize to the same property
 (verified for all 12 sampled ids). Anything reading the name without going
 through it would have hit the `_MQ01Tate_` failure that
 `_QUOTED_NAME_RE`'s own comment describes — a property bound to nothing,

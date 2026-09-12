@@ -259,6 +259,24 @@ def _run_cell(job):
             sliv, micro, dt)
 
 
+def _door_model_map(by_type):
+    """Return a MAP of low-24 DOOR FormID -> model key, never a bare set.
+
+    Matches import_main._build_door_fid_set.  A bare set makes _collect_doors
+    take its legacy membership-only path, which skips panel centering AND the
+    per-model threshold axis/width -- so every debug tool measured doors with
+    width 0 and the default orientation while the real pipeline used the
+    measured ones.
+    """
+    out = {}
+    for d in by_type.get('DOOR', []):
+        f = d.get('FormID')
+        m = get_str(d, 'Model.MODL') or get_str(d, 'MODL')
+        if f and m:
+            out[int(f, 16) & 0xFFFFFF] = _model_key(m)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--export', default='export/Oblivion.esm')
@@ -306,18 +324,7 @@ def main():
                         for p in by_type.get('PGRD', [])}
         land_by_cell = {(ld.get('ParentCELL') or '').upper(): ld
                         for ld in by_type.get('LAND', [])}
-        # MAP (not a set): fid -> model key, matching
-        # import_main._build_door_fid_set.  A bare set makes _collect_doors take
-        # its legacy membership-only path, which skips panel centring AND the
-        # per-model threshold axis/width — so every debug tool measured doors
-        # with width 0 and the default orientation while the real pipeline used
-        # the measured ones.
-        door_fids = {}
-        for d in by_type.get('DOOR', []):
-            f = d.get('FormID')
-            m = get_str(d, 'Model.MODL') or get_str(d, 'MODL')
-            if f and m:
-                door_fids[int(f, 16) & 0xFFFFFF] = _model_key(m)
+        door_fids = _door_model_map(by_type)
         cells = by_type.get('CELL', [])
 
         with open(cache, 'wb') as fh:

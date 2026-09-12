@@ -92,7 +92,7 @@ def v4(v, scale=1.0):
 def capsule_inertia(shape, mass):
     """Principal inertia diagonal (Ixx, Iyy, Izz) of a solid capsule.
 
-    `shape` is (radius, vertexA, vertexB); the result is about the centre of
+    `shape` is (radius, vertexA, vertexB); the result is about the center of
     mass, expressed axis-aligned so the axis holding the segment gets the
     axial moment and the other two the radial one.  Replaces Oblivion's
     authored diagonals, whose anisotropy diverges Havok's solver, and clamps

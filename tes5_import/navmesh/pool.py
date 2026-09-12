@@ -71,7 +71,7 @@ def ensure_cell_grid(cell: dict) -> None:
 
 
 def _model_key(model: str) -> str:
-    """Normalise a TES4 model path to the mesh_bounds cache key.
+    """Normalize a TES4 model path to the mesh_bounds cache key.
 
     Lowercase, forward slashes, game-namespace prefix, '.nif' suffix --
     e.g. 'Furniture\\ChairNoble01.NIF' -> 'tes4/furniture/chairnoble01.nif'.
@@ -117,7 +117,7 @@ def _low_fid(rec: dict):
 
 
 def build_base_model_index(by_type: dict, master_export: dict = None) -> dict:
-    """Map raw low-24 base-object FormID -> normalised model key.
+    """Map raw low-24 base-object FormID -> normalized model key.
 
     Only blocking base types are indexed, so carving never removes triangles
     under doors, lights, markers or actors.  `master_export` is REQUIRED for a
@@ -135,9 +135,9 @@ def build_base_model_index(by_type: dict, master_export: dict = None) -> dict:
 
 
 def build_door_fid_set(by_type: dict, master_export: dict = None) -> dict:
-    """Map raw low-24 DOOR base FormID -> normalised model key (or None).
+    """Map raw low-24 DOOR base FormID -> normalized model key (or None).
 
-    The key matches door_centers_cache so `_collect_doors` can panel-centre each
+    The key matches door_centers_cache so `_collect_doors` can panel-center each
     door.  Membership of the map doubles as the "is this a DOOR base" test, so
     `master_export` is REQUIRED for a plugin with masters.
 

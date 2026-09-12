@@ -101,6 +101,25 @@ rotation is unsupported any more, but because that case would have to compose th
 WRAPPER's transform too.
 
 ## Inverted collision winding — "I fall through the floor" (SOLVED 2026-07-20; **rewritten 2026-08-20, see round 3 below**)
+### <a id="packed-shape-vertex-scale"></a>A packed shape stores verts at 1/7 scale
+
+`_offset_collision_shape_verts` must handle BOTH mesh shape types, and they
+store vertices at DIFFERENT scales:
+
+- `bhkNiTriStripsShape` — game units (x7 Havok units) -> add the offset as-is.
+- `bhkPackedNiTriStripsShape` — 1/7 game units (Oblivion Havok units) -> the
+  offset must be divided by 7 first.
+
+Handling only the strips case silently dropped the offset for every
+packed-shape mesh, leaving its collision centered on the origin while the
+visual mesh sat elsewhere. Battlehorn's `stackstairsmid02b` is the case in
+point: a `collisionStackBalconyMid02b` node at Z=+394.5 whose collision came
+through at z[-332.8..332.8] instead of z[61.7..727.3] — the shape ends up half a
+storey low, which on a stair/balcony wedge reads in-game as the collision being
+flipped upside-down. Its sibling `stackbalconymid02.nif` has the identical node
+offset but ships a `bhkNiTriStripsShape`, so it was always converted correctly
+— the pair is the A/B that isolates the shape type as the discriminator.
+
 <a id="inverted-collision-winding-i-fall"></a>
 Falling through floors in Nehrim (worst in caves) that are solid in Oblivion. **Source-data corruption, not a conversion bug** — the converter faithfully reproduced broken input.
 
@@ -128,7 +147,7 @@ The first rewrite (coplanar contradiction + co-located visual face) scored 35.8%
   1. **Relative orientation (`_orient_components`).** Two triangles sharing an edge are consistently wound **iff they traverse that shared edge in opposite directions** — the standard manifold-orientation test. Weld coincident vertices, BFS the shared-edge graph, flip whatever disagrees. No thresholds, no normals, no flatness. It undoes the dropped parity exactly and is **completely inert on correctly wound input**.
   2. **Absolute sign (only where step 1 cannot help).** Step 1 makes a component self-consistent but cannot tell outward from inside-out, because flipping *every* triangle of a component is also self-consistent. So per component: a **closed** component must enclose positive volume; otherwise the **render mesh** decides (artist winding is correct by construction). Undecided ⇒ leave alone.
 - **Weld per geometry group** (`shape_tri_groups`). A shape can hold several independent pieces — one `NiTriStripsData` block each, or one packed sub-shape each — that merely touch in space. Welding across that seam fuses them into one component and forces a single orientation on both.
-- **The visual vote needs a quorum, not more geometry.** Every false positive measured on already-correct collision had `cov == 1`: a single stray facet (the far skin of a slab, or a decorative mesh passing nearby) condemning a whole component. Requiring **half the component to have seen evidence**, with trust radius `0.30` hu, removes them and still fixes uniformly-reversed floors. Attempts to separate the cases by *geometry* instead (signed-volume floor, area-normalised "solidity") both failed — volume is meaningless on the open sheets that dominate here.
+- **The visual vote needs a quorum, not more geometry.** Every false positive measured on already-correct collision had `cov == 1`: a single stray facet (the far skin of a slab, or a decorative mesh passing nearby) condemning a whole component. Requiring **half the component to have seen evidence**, with trust radius `0.30` hu, removes them and still fixes uniformly-reversed floors. Attempts to separate the cases by *geometry* instead (signed-volume floor, area-normalized "solidity") both failed — volume is meaningless on the open sheets that dominate here.
 - **Result** (shipped code, scored against the Oblivion originals):
 
   | Tree | recall | broken |
@@ -410,7 +429,7 @@ Besides the non-T rotation root cause above, the "chains/traps look right but ne
 - Root cause: Oblivion clutter ships ONE bhkConvexVerticesShape hull per object. A convex hull FILLS EVERY CONCAVITY — a goblet's hull fills the waist around the thin stem (collision radius 2.7-3.0 vs visual 1.6), a pitcher's hull fills the entire handle gap (y ±4.7 where the visual handle is ±0.53). AABB comparisons hide this (hull AABB == visual AABB exactly); compare CROSS-SECTIONS at concave features instead. Vanilla authors compound shapes instead (glazedgoblet01 = bhkListShape of cup box + stem box).
 - Fix (`_decompose_clutter_hull` in collision.py): dynamic (mass>0) plain-bhkRigidBody single-convex-hull clutter is rebuilt as a bhkListShape of per-piece hulls: recursive binary split of the VISUAL vertices along the axis-aligned cut minimising total hull volume (scipy ConvexHull; accept cut if ≥10% volume gain, depth ≤3 → ≤8 pieces). Each half extends past the first vertex ring on the far side of the cut, or sparse vertex rows leave unfilled collision bands between pieces. Piece planes = scipy hull equations deduped, w = d − radius (vanilla stores planes pushed out by the convex radius). bhkRigidBodyT excluded (shape frame ≠ node frame). Frame sanity check vs the original hull AABB bails out when collision was authored differently from visuals. Result: goblet stem 2.7-3.0 → 1.8-2.4 (tighter than vanilla's box corners), pitcher handle strip y ±0.6.
 - **Havok material conversion (was missing entirely)**: Oblivion materials are a 0-31 enum; Skyrim materials are CRC32 hashes (SkyrimHavokMaterial, values in references/nif 0.10.0.0.xml). `_convert_materials()` in collision.py maps them (`_OB_TO_SK_MATERIAL`); unmapped values leave the engine with an unknown material (no impact sounds/decals/stair-walk flag). **PyFFI trap: EnumBase.set_value() only LOGS "invalid enum value" and returns** for values outside its old enum list — must write `item._value` directly. PyFFI instantiates ONE material item per read context (typed OblivionHavokMaterial even when reading Skyrim CRC files — repr shows `<INVALID (...)>`, harmless; read/write via `_get_havok_material`/`set_havok_material`).
-- **Inertia scale regression**: collision.py had drifted to `_INERTIA_SCALE = 0.1` with a bogus justification comment ("Havok normalises by body scale internally"). Correct value is `_HAVOK_SCALE**2 = 0.01` (inertia ∝ mass·length², lengths scale 0.1) — verified: vanilla silverjug01 stores I_x=0.031 = m(3r²+h²)/12 exactly in SI/Havok metres. The 0.1 scale left inertia ~10× too large → sluggish rotation / "too much inertia" feel when grabbing or knocking clutter. (tests/test_asset_convert.py `_INERTIA_SCALE = 0.1` still asserts the old value and needs updating.)
+- **Inertia scale regression**: collision.py had drifted to `_INERTIA_SCALE = 0.1` with a bogus justification comment ("Havok normalizes by body scale internally"). Correct value is `_HAVOK_SCALE**2 = 0.01` (inertia ∝ mass·length², lengths scale 0.1) — verified: vanilla silverjug01 stores I_x=0.031 = m(3r²+h²)/12 exactly in SI/Havok metres. The 0.1 scale left inertia ~10× too large → sluggish rotation / "too much inertia" feel when grabbing or knocking clutter. (tests/test_asset_convert.py `_INERTIA_SCALE = 0.1` still asserts the old value and needs updating.)
 - Note on masses: Oblivion authored masses differ per-item from Skyrim equivalents with no consistent ratio (OB silver pitcher 8.0 vs vanilla silver jug 0.8, but OB ceramic goblet 0.4 ≈ vanilla goblets 0.5-0.8) — masses stay unconverted.
 - tes4/tes5_nif_analyzer print `BoundSphere` (NiTriShapeData center/radius) and bhkConvexVerticesShape vertex `extents` for this kind of investigation.
 
@@ -431,7 +450,7 @@ basis, so each joint kind needs its own derivation.
 ### <a id="limited-hinge-fix"></a>Limited hinge
 
 1. **`perp_2_axle_in_b_1` does not exist in Oblivion's descriptor.** Left zero
-   the sign spawns at a wrong tilt. Derive as `perp_b2 × axle_b`, normalised.
+   the sign spawns at a wrong tilt. Derive as `perp_b2 × axle_b`, normalized.
    Vanilla Skyrim stores `w=-1` on both `perp_2_axle_in_a_1` and
    `perp_2_axle_in_b_1`.
 2. **Clamp `max_friction`.** Oblivion stores 3.0; Skyrim signs use 0.01. At
@@ -583,7 +602,7 @@ at exactly 0.000000**, matching their skeleton.hkx ragdolls.
 An orphan body — one no constraint reaches — gets a synthesized
 `bhkRagdollConstraint` to its parent, on the vanilla atronach rock-joint
 template shared with `hkx_ragdoll`: cone 50°, plane ±90°, twist ±5°,
-friction 0. Pivots sit at the child body's own centre expressed in each body's
+friction 0. Pivots sit at the child body's own center expressed in each body's
 local space (both `center` fields are already in Skyrim Havok units by then).
 Frames are axis-aligned — twist = X, plane = Y, motor = Z — the orthonormal
 basis the 2010 layout requires, since a zero motor ships a singular basis.

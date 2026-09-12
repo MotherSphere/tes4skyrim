@@ -47,7 +47,7 @@ triangulated on its own:
 HEIGHT — the vertex, not the triangle, owns it
 
 Every output vertex gets its Z from a corridor that covers it, along that
-corridor's own centreline, so each triangle sits on the pathgrid line's own
+corridor's own centerline, so each triangle sits on the pathgrid line's own
 slope (principle 2) and a staircase keeps its rise.
 
 Crucially the height is a property of THE POINT AND ITS STOREY, never of
@@ -79,7 +79,7 @@ construction — the door coverage is preserved exactly, nothing is deleted.
 HEIGHT
 
 Every output vertex gets its Z from a corridor that covers it, along that
-corridor's own centreline, so each triangle sits on the pathgrid line's own
+corridor's own centerline, so each triangle sits on the pathgrid line's own
 slope (principle 2) and a staircase keeps its rise.  Heights are never discarded
 and reconstructed — each ribbon already knows its Z everywhere along itself.
 """
@@ -699,7 +699,7 @@ def _emit_surfaces(v2, t2, levels):
     return state['verts'], tris
 
 def _walked_line_index(strips, cellsz):
-    """Bucket sampled points along every ribbon centreline by plan cell."""
+    """Bucket sampled points along every ribbon centerline by plan cell."""
     lines = {}
     for s in strips:
         ax, ay, az = s['a'][0], s['a'][1], s['a'][2]

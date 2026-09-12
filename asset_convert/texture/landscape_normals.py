@@ -71,7 +71,7 @@ def _dxt1_to_dxt5_blocks(color_data, alpha):
 def _dxt3_to_dxt5_blocks(block_data, alpha):
     """DXT3 -> DXT5 blocks, replacing the explicit alpha with a constant.
 
-    Both are 16 bytes per block and share the trailing 8-byte COLOUR block
+    Both are 16 bytes per block and share the trailing 8-byte COLOR block
     verbatim; only the leading alpha block differs.  Going to DXT5 rather than
     rewriting DXT3's nibbles in place buys an EXACT value -- DXT3 quantises
     alpha to multiples of 17, so 64 would land on 68.
@@ -86,7 +86,7 @@ def _dxt3_to_dxt5_blocks(block_data, alpha):
 
 
 def _dxt5_set_alpha_blocks(block_data, alpha):
-    """Rewrite DXT5 blocks to a constant alpha; colour untouched."""
+    """Rewrite DXT5 blocks to a constant alpha; color untouched."""
     n_blocks = len(block_data) // 16
     src = np.frombuffer(block_data, dtype=np.uint8).reshape(n_blocks, 16)
     out = src.copy()
@@ -201,13 +201,12 @@ def default_normal_rel() -> str:
 def write_default_normal(textures_root, alpha=None, size=32):
     """Write the shared flat normal (128,128,255) with a constant mask.
 
-    `textures_root` is the TEXTURES root; the namespace segment is
-    appended here. Call AFTER normalize_specular_alpha, which would
-    otherwise count this constant-alpha stand-in as one more file it fixed.
+    `textures_root` is the TEXTURES root; the namespace segment is appended
+    here.  Call AFTER normalize_specular_alpha.  Every 16-byte DXT5 block is an
+    8-byte constant-alpha block plus a 4-byte color block with c0 == c1 and a
+    zero index word, so each texel resolves to c0.
 
-    DXT5, not the uncompressed form `lod_gen` uses for atlases: the alpha must
-    be a REAL specular mask, and `spec_mask` reads an uncompressed DDS as
-    'no_alpha' whatever its content.
+    See: docs/commentary/asset_convert_texture.md#default-normal-is-dxt5
     """
     if alpha is None:
         alpha = DEFAULT_MASK_ALPHA
@@ -216,9 +215,9 @@ def write_default_normal(textures_root, alpha=None, size=32):
 
     # RGB565 for (128,128,255): R=16, G=32, B=31
     c565 = (16 << 11) | (32 << 5) | 31
-    colour = struct.pack('<HHI', c565, c565, 0)      # c0, c1, all indices -> c0
+    color = struct.pack('<HHI', c565, c565, 0)
     alpha_blk = bytes((alpha, alpha, 0, 0, 0, 0, 0, 0))
-    block = alpha_blk + colour                        # 16 bytes
+    block = alpha_blk + color
 
     dims = []
     w = h = size

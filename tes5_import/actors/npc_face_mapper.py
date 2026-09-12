@@ -48,8 +48,8 @@ NAM9 / FGGS mapping note:
 
   Mapping strategy:
     1. Parse the 50 FGGS floats.
-    2. Normalise them: the typical magnitude of Oblivion FGGS coefficients
-       observed in Oblivion.esm spans roughly ±3.  We clamp/normalise to
+    2. Normalize them: the typical magnitude of Oblivion FGGS coefficients
+       observed in Oblivion.esm spans roughly ±3.  We clamp/normalize to
        [-1, 1] by dividing by a per-slot scale factor (empirically chosen).
     3. Each Skyrim slider receives a weighted sum of the FGGS coefficients
        that most strongly influence that facial region, as documented by

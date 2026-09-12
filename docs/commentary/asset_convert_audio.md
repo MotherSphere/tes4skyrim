@@ -113,7 +113,7 @@ result rather than trusting the request:
 | **160000** | 160 | **48000** | 2.25 MB | **RESAMPLED** |
 | 192000 | 192 | 44100 | 2.69 MB | native |
 
-We normalise every source to 44.1 kHz stereo before encoding, so only the
+We normalize every source to 44.1 kHz stereo before encoding, so only the
 `44100Hz stereo` row applies. `pick_bitrate()` never returns anything outside
 `NATIVE_44K_STEREO` / `NATIVE_44K_MONO`.
 

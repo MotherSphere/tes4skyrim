@@ -30,7 +30,7 @@ Dump format (written by spt_engine_dump.cpp):
     per strip:  indexCount uint32, indices uint32[indexCount]
     'SPTL'                     4 bytes   (optional, leaf chunk)
     leafCount     uint32
-    centres       float32[count*3]  one XYZ per leaf, same space as coords
+    centers       float32[count*3]  one XYZ per leaf, same space as coords
 
 Only vertices a strip references carry valid data -- the engine leaves each
 buffer's tail uninitialised (NaN) -- so the reader re-indexes to the used set.
@@ -189,8 +189,8 @@ def read_dump(path: Path):
     return co, no, uv, strips
 
 
-def read_leaf_centres(path: Path) -> np.ndarray | None:
-    """The dump's optional 'SPTL' chunk: (N,3) engine-space leaf centres.
+def read_leaf_centers(path: Path) -> np.ndarray | None:
+    """The dump's optional 'SPTL' chunk: (N,3) engine-space leaf centers.
 
     Returns None for a dump written before leaf support, so an old cached
     .bin degrades to bark-only rather than failing.
@@ -281,17 +281,13 @@ def orphan_ring_triangles(co: np.ndarray, strips, no_arr: np.ndarray | None = No
                            ring: int = 0) -> np.ndarray:
     """Triangles for vertex blocks the strip list never references.
 
-    The engine's LOD-0 strip list is INCOMPLETE: on treecottonwoodsu it covers
-    only 1,484 of 2,044 vertices, leaving 11 contiguous blocks unreferenced --
-    every one of them a whole number of 14-vertex rings, including block
-    [0..167] (12 rings, z 0..7.3, radius to 8.5), which is the FLARED TRUNK
-    BASE.  Without these the tree renders with no root flare (drawn base
-    radius 3.1 against a real 8.5), which is exactly what was reported.
-
-    Each block is a tube: consecutive rings of `ring` vertices, so it can be
-    stitched back into quads directly.  The ring size is inferred as the
-    largest common divisor of the block lengths, which is unambiguous in
-    practice (all blocks are multiples of 14 on cottonwood).
+    The engine's LOD-0 strip list is INCOMPLETE and one unreferenced block is
+    the FLARED TRUNK BASE.  Each block is a tube -- consecutive rings of `ring`
+    vertices -- stitched back into open quad runs; `ring` is inferred as the
+    largest common divisor of the block lengths.  Winding is DERIVED, never
+    assumed: each quad points its geometric normal away from the tube
+    centerline.
+    See: docs/commentary/asset_convert_speedtree.md#6z-lod-0-strip-list
     """
     n = len(co)
     covered = np.zeros(n, bool)
@@ -411,12 +407,6 @@ def orphan_ring_triangles(co: np.ndarray, strips, no_arr: np.ndarray | None = No
         # genuinely open ring stays open.
         base = np.arange(ring_k - 1, dtype=np.int64)
         nxt = base + 1
-        # WINDING: the engine's own strips carry it, but these repair quads
-        # are stitched by us, so it has to be derived rather than assumed --
-        # guessing produced inward-facing normals (the tube rendered
-        # inside-out).  Orient each quad so its geometric normal points AWAY
-        # from the tube's centreline, which is outward for a closed tube
-        # regardless of how the ring happens to be ordered.
         block_tris = []
         for r in range(nrings - 1):
             if len(joinable) and not joinable[r]:
@@ -427,7 +417,6 @@ def orphan_ring_triangles(co: np.ndarray, strips, no_arr: np.ndarray | None = No
             b1 = a1 + ring_k
             t0 = np.stack([a0, b0, a1], 1)
             t1 = np.stack([a1, b0, b1], 1)
-            # outward reference: quad midpoint minus the two rings' centre
             axis_c = 0.5 * (cents[r] + cents[r + 1])
             pa, pb, pc = co[t0[:, 0]], co[t0[:, 1]], co[t0[:, 2]]
             nrm = np.cross(pb - pa, pc - pa)
@@ -555,7 +544,7 @@ def _collision_from_engine(geo: TreeGeometry, strips, remap, verts) -> None:
     no stem identity -- it is one flat buffer -- but each STRIP is one branch's
     tube, so the strip is the natural unit.  A strip's radius is estimated from
     its own cross-section: the median distance from its vertices to its
-    centreline axis.  Strips thinner than the same threshold are skipped, so
+    centerline axis.  Strips thinner than the same threshold are skipped, so
     the collision shape matches the generator's trunk-and-thick-limbs rule
     rather than making every twig solid.
     """
@@ -620,31 +609,25 @@ def _card_extents(m, tree_size: float):
     return w, h
 
 
-def _leaf_groups_from_centres(tree, centres: np.ndarray, seed: int | None):
+def _leaf_groups_from_centers(tree, centers: np.ndarray, seed: int | None):
     """Leaf-card groups built on the ENGINE's own leaf positions.
 
-    The engine emits ONE camera-facing billboard per leaf; Skyrim cannot do
-    that, so each centre becomes two crossed quads (the one sanctioned
-    deviation).  Everything that decides WHERE a leaf goes -- and how many
-    there are -- comes from the engine, so foliage follows the same branch
-    skeleton the bark was built from.
-
-    Card size, map selection and the UV crop follow the rules already proven
-    in docs/commentary/asset_convert_speedtree.md (sections 6g/6t): the map is a uniform
-    random index per leaf, and the card is `size.x/size.y * K * 0.5`.
+    Each engine center becomes two crossed quads: the one sanctioned deviation,
+    since Skyrim cannot render the engine's camera-facing billboards.  Position,
+    count, map selection (uniform random index) and card size
+    (`size.x/size.y * K * 0.5`, where `K = tree.size * WORLD_SCALE`) all come
+    from the engine.  Returns (leaf_groups, n_leaves).
+    See: docs/commentary/asset_convert_speedtree.md#6x-leaf-geometry-extractable-leaf
     """
     from asset_convert.speedtree.spt_generator import leaf_card
 
-    # The generator's leaf-size scale: local to build_tree as
-    # `K = tree.size * WORLD_SCALE`, not a module constant.
-
     leaf_maps = [m for m in tree.leaf_maps
                  if m.texture and 'fileloaderror' not in m.texture.lower()]
-    if not leaf_maps or not len(centres):
+    if not leaf_maps or not len(centers):
         return [], 0
 
     rng = np.random.default_rng((seed or 0) & 0xFFFFFFFF)
-    verts = centres * ENGINE_TO_WORLD
+    verts = centers * ENGINE_TO_WORLD
     canopy = verts.mean(axis=0)
 
     # UV source: composite-map quads (section 10002) when the tree ships them,
@@ -693,14 +676,13 @@ def _leaf_groups_from_centres(tree, centres: np.ndarray, seed: int | None):
 def build_tree_engine(tree, spt_path: Path, seed: int | None = None,
                       exe: str = '', cache_dir: Path | None = None,
                       with_leaves: bool = True) -> TreeGeometry:
-    """Engine bark (+ optional Python leaves) as a TreeGeometry.
+    """Engine bark (+ optional engine leaves) as a TreeGeometry.
 
-    Raises `EngineUnavailable` when the engine path cannot run; callers are
-    expected to fall back to `spt_generator.build_tree`.
-
-    `with_leaves` grafts the Python generator's leaf groups onto the engine
-    bark.  The engine's own leaves are camera-facing billboards Skyrim cannot
-    render, so they are not used (see docs/commentary/asset_convert_speedtree.md).
+    Raises `EngineUnavailable` when the engine path cannot run; callers fall
+    back to `spt_generator.build_tree`.  `with_leaves` builds foliage on the
+    ENGINE's leaf centers; an EMPTY center array means zero leaves and the tree
+    keeps none.  Only a dump with NO leaf chunk falls back to Python foliage.
+    See: docs/commentary/asset_convert_speedtree.md#6aa-no-leaf-chunk-vs
     """
     spt_path = Path(spt_path)
     # Availability is checked BEFORE the cache lookup: a stale dump left over
@@ -737,24 +719,11 @@ def build_tree_engine(tree, spt_path: Path, seed: int | None = None,
     _collision_from_engine(geo, strips, remap, geo.bark_verts)
 
     if with_leaves:
-        # Leaf POSITIONS come from the engine too: each terminal branch child
-        # IS one leaf attachment (0x793597 sets the leaf-vs-tube switch, and
-        # 0x79352a calls the leaf path instead of the tube path), so foliage
-        # follows the very skeleton the bark was built from.  Only the CARD
-        # shape is ours -- the engine's camera-facing billboards cannot be
-        # expressed in Skyrim, so each leaf becomes two crossed quads.
-        centres = read_leaf_centres(dump)
-        if centres is not None:
-            # Includes the EXPLICIT-ZERO case: a tree the engine gave no
-            # leaves keeps none.  Falling back to the Python foliage here
-            # pasted 264 cards onto dtree01 (a bare dead tree) that were
-            # placed against Python branches, not the engine's -- they
-            # floated up to 36% of the tree diagonal off the bark.
-            geo.leaf_groups, geo.n_leaves = _leaf_groups_from_centres(
-                tree, centres, seed)
+        centers = read_leaf_centers(dump)
+        if centers is not None:
+            geo.leaf_groups, geo.n_leaves = _leaf_groups_from_centers(
+                tree, centers, seed)
         else:
-            # Only when the dump carries NO leaf chunk at all (written before
-            # leaf support): fall back rather than shipping bare wood.
             try:
                 py = build_tree(tree, seed=seed)
                 geo.leaf_groups = py.leaf_groups

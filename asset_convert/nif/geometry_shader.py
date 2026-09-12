@@ -297,7 +297,7 @@ def _build_sky_shader(ts, tex_set, diffuse_path, sky_type, stats):
 # ---------------------------------------------------------------------------
 
 def _is_additive(alpha_prop):
-    """Whether the alpha property blends with dst=ONE, i.e. adds its colour."""
+    """Whether the alpha property blends with dst=ONE, i.e. adds its color."""
     if alpha_prop is None:
         return False
     flags = int(alpha_prop.flags)
@@ -438,7 +438,7 @@ def _build_effect_shader(ts, tex_set, si, flip_ctrl, diffuse_path,
 # ---------------------------------------------------------------------------
 
 def _set_material_defaults(shader):
-    """Stamp vanilla's modal glossiness, specular colour and strength.
+    """Stamp vanilla's modal glossiness, specular color and strength.
 
     Oblivion's own glossiness is deliberately not carried across.
     See: docs/commentary/asset_convert_shader.md#shader-material-defaults
@@ -451,11 +451,11 @@ def _set_material_defaults(shader):
 
 
 def _set_emissive(shader, sf1, r, g, b, animated):
-    """Carry NiMaterialProperty's emissive colour onto the Skyrim shader.
+    """Carry NiMaterialProperty's emissive color onto the Skyrim shader.
 
-    Skyrim MULTIPLIES the colour by emissive_multiple, so the multiple is
+    Skyrim MULTIPLIES the color by emissive_multiple, so the multiple is
     stamped to 1.0 whenever the flag goes on. The flag is cleared on a shape
-    with neither an emissive colour nor an emissive animation.
+    with neither an emissive color nor an emissive animation.
     See: docs/commentary/asset_convert_shader.md#emissive-own-emit
     """
     if not (r > 0.0 or g > 0.0 or b > 0.0 or animated):

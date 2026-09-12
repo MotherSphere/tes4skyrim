@@ -12,7 +12,7 @@ import math
 from . import params
 
 def _badness(verts, t):
-    """Normalised shape badness; 1.0 = exactly at the contract boundary.
+    """Normalized shape badness; 1.0 = exactly at the contract boundary.
 
     max(edge_ratio / MAX_EDGE_RATIO, aspect / MAX_TRI_ASPECT): the ratio term
     catches needles (one short edge), the aspect term catches CAPS (all edges

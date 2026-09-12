@@ -131,7 +131,13 @@ def load_by_type(export_dir, reindex=False):
 
 
 def load_cell(export_dir, cell_arg, load_collision=True):
-    """Return a dict with cell/refrs/pgrd/land/nodes/edges/base_model."""
+    """Return a dict with cell/refrs/pgrd/land/nodes/edges/base_model.
+
+    `door_fids` maps raw low-24 DOOR base FormID -> model key, so _collect_doors
+    can correct the door point from the REFR pivot (hinge) to the panel center
+    via the door-centers cache (test-navmesh-2 centering; master used the raw
+    offset hinge position).
+    """
     if load_collision:
         ce.load_collision(str(assets_for(export_dir) / 'collision_cache.bin'),
                           quiet=True)
@@ -206,10 +212,6 @@ def load_cell(export_dir, cell_arg, load_collision=True):
                         seen.add(key)
                         edges.append(key)
 
-    # door_fids maps raw low-24 DOOR base FormID -> model key, so _collect_doors
-    # can correct the door point from the REFR pivot (hinge) to the panel centre
-    # via the door-centres cache (test-navmesh-2 centering; master used the raw
-    # offset hinge position).
     door_fids = {}
     for d in by_type.get('DOOR', []):
         f = d.get('FormID')

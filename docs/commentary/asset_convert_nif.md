@@ -87,7 +87,7 @@ The `-ExtractAssets` flag triggers BSA extraction and mesh conversion:
 1. **BSA Extraction** — Uses `bsab.exe` (from external/fnv-to-fo4/bin/bsab/) to extract meshes and textures from Oblivion BSA archives
 2. **Mesh Conversion** — Uses PyFFI-based NIFConverter (from external/NIFConverter/) to convert Oblivion NIF 20.0.0.4/5 → Skyrim NIF 20.2.0.7
 3. **Texture Copy** — DXT textures from Oblivion are compatible with Skyrim; copied as-is under `tes4\` namespace
-   - **Path rewriting (`rewrite_tex_path`) must normalise separators FIRST** (fixed 2026-07-27). Oblivion NIFs mix `/` and `\`, sometimes in one file. Testing only for a backslash `'textures\'` prefix let `textures/lowres/foo.dds` fall through and come out as `Textures\tes4\textures/lowres/foo.dds` — a path resolving to nothing, so the mesh renders untextured and the LOD tiles built from it reference 100 nonexistent textures. 96 Morrowind_ob source NIFs hit this; **zero Oblivion.esm ones**, which is why it stayed hidden.
+   - **Path rewriting (`rewrite_tex_path`) must normalize separators FIRST** (fixed 2026-07-27). Oblivion NIFs mix `/` and `\`, sometimes in one file. Testing only for a backslash `'textures\'` prefix let `textures/lowres/foo.dds` fall through and come out as `Textures\tes4\textures/lowres/foo.dds` — a path resolving to nothing, so the mesh renders untextured and the LOD tiles built from it reference 100 nonexistent textures. 96 Morrowind_ob source NIFs hit this; **zero Oblivion.esm ones**, which is why it stayed hidden.
    - `textures\lowres\` is an Oblivion **_far.nif authoring convention** for low-res LOD copies (pyffi ships a `modify_texturepathlowres` spell writing exactly this prefix, documented "used mainly for making _far.nifs"). We ship no lowres tree — converted textures live at the normal path — so the segment is **dropped**, resolving the reference to the real texture. The rewrite is idempotent on already-correct `Textures\tes4\…` paths.
 4. **BSA Repacking** — Not yet automated. Use BSArch.exe or Skyrim CK Archive tool.
 
@@ -139,7 +139,7 @@ The `-ExtractAssets` flag triggers BSA extraction and mesh conversion:
   ```
   The last two name real `NiNode`s, so **the palette is not stale** — only the `:0` form needs translating. It means "geometry child 0 of `CandleSkinny01`", which after conversion is the shape carrying the `BSLightingShaderProperty` (block-named `Tri Tri Light_Com_Chandelier_01 2 0` under the other convention, `Tri <parent> <index>`). Resolve it by walking the named node's subtree, collecting shader-bearing geometry in tree order, and taking the Nth; then rewrite the entry's `node_name` to that real block name so the engine can re-bind at run time. The source `node_name` bytes are empty — the name lives only in the palette — so none of this is visible unless you resolve the offsets.
   **Do NOT "fix" this by deleting the entry.** That was tried first and is wrong twice over: it silently drops the chandelier's emissive flicker (a faithful conversion must keep it — the curve is 5 keys, 0→3s, and survives byte-identical), and emptying the sequence strands its `NiControllerManager` with **0 sequences**, which the engine dereferences exactly the same way — crash log named `RCX/RDI = NiControllerManager*`, `RAX = 0`, on `BSFadeNode "CandleSkinny01"`. Vanilla census: **0/8 managers have 0 sequences; 0/17 sequences are empty.** This was the Seyda Neen Census & Excise Office CTD — the chandelier is placed **7×** in that one room. *(Pre-existing and NOT part of this fix: 24 empty `Forward`/`Backward` sequences on `morroblivion\flora\*anim.nif` — separate issue, no manager involved.)*
-- **Skyrim reads ONE UV set — a second one overruns the engine's vertex buffer (2026-08-01, `_clamp_uv_sets`)**: this was the **Seyda Neen Census & Excise Office CTD**. On disk the u16 **`BS Data Flags`** is a bitfield (`references/nif [version].xml` → `BSGeometryDataFlags`): **low 6 bits = UV-set COUNT** (mask 0x003F), bits 6–11 = Havok Material, **bit 12 (0x1000) = Has Tangents**. PyFFI splits that one field into `num_uv_sets` + `extra_vectors_flags`, which is why `extra_vectors_flags = 16` writes bit 12 — the converter's comment calling it an enum ("0=none, 16=has binormal+tangent") is wrong, it is a bitfield. The count is the **only** thing telling the engine how many `TexCoord` arrays follow the vertex colours, so a mesh that stores **2** sets while `BSLightingShaderProperty` binds 1 leaves the vertex buffer a whole array short: the copy runs past the end of the allocation and faults on a **non-temporal store** — `vmovntdq [rcx+N], ymm` where `rcx` is 32-byte aligned and `rcx+N` is exactly the first byte past a 64 KB page. That alignment signature (`memcpy` ≥4 KB, destination landing precisely on the page boundary) is the tell for a short destination buffer, **not** a bad pointer. Oblivion authors the extra set for detail/overlay passes Skyrim has no slot for; set 0 is the diffuse UVs every shader samples, so the surplus is dropped. Census: **2,233 vanilla shapes carry 0 or 1 UV sets, NEVER 2**; we shipped 2 on 5 meshes, including `morro\f\furnucomutableu05.nif` — the file the crash log named in its `inputFilePath`. Also note `bhkCompressedMeshShapeData` blocks legitimately dwarf these (500 KB+), so "big block" alone is not a signal.
+- **Skyrim reads ONE UV set — a second one overruns the engine's vertex buffer (2026-08-01, `_clamp_uv_sets`)**: this was the **Seyda Neen Census & Excise Office CTD**. On disk the u16 **`BS Data Flags`** is a bitfield (`references/nif [version].xml` → `BSGeometryDataFlags`): **low 6 bits = UV-set COUNT** (mask 0x003F), bits 6–11 = Havok Material, **bit 12 (0x1000) = Has Tangents**. PyFFI splits that one field into `num_uv_sets` + `extra_vectors_flags`, which is why `extra_vectors_flags = 16` writes bit 12 — the converter's comment calling it an enum ("0=none, 16=has binormal+tangent") is wrong, it is a bitfield. The count is the **only** thing telling the engine how many `TexCoord` arrays follow the vertex colors, so a mesh that stores **2** sets while `BSLightingShaderProperty` binds 1 leaves the vertex buffer a whole array short: the copy runs past the end of the allocation and faults on a **non-temporal store** — `vmovntdq [rcx+N], ymm` where `rcx` is 32-byte aligned and `rcx+N` is exactly the first byte past a 64 KB page. That alignment signature (`memcpy` ≥4 KB, destination landing precisely on the page boundary) is the tell for a short destination buffer, **not** a bad pointer. Oblivion authors the extra set for detail/overlay passes Skyrim has no slot for; set 0 is the diffuse UVs every shader samples, so the surplus is dropped. Census: **2,233 vanilla shapes carry 0 or 1 UV sets, NEVER 2**; we shipped 2 on 5 meshes, including `morro\f\furnucomutableu05.nif` — the file the crash log named in its `inputFilePath`. Also note `bhkCompressedMeshShapeData` blocks legitimately dwarf these (500 KB+), so "big block" alone is not a signal.
 - **A block type with no RTTI in SkyrimSE.exe is a hard CTD — audit with `tools/validate/nif_block_type_audit.py` (2026-08-01)**: `NiStream` constructs each block by looking its type NAME up in a factory registry. If the engine has no such class the slot is never built, and a link to it hands `NiPointer::operator=` a non-NiObject pointer; the engine runs `lock cmpxchg [ptr-0x10]` on the "refcount", which lands in **read-only `.rdata`** → `EXCEPTION_ACCESS_VIOLATION` while loading the mesh. No Papyrus trace, and **invisible to PyFFI**, which reads and writes the dead block happily. Diagnosis route (all three tools were essential): `tools/disasm/address_lib.py --log <crash>` to translate the Steam-build stack into GOG RVAs, `tools/disasm/skyrim_disasm.py --disasm` to read the faulting function, and `--find <ClassName>` to check RTTI. **`NiUVController` was the only such type** across 3000 converted meshes — searching RTTI for `NiUV` returns *only* `NiUVData`. It hit 8 Ghostfence meshes (`morro\x\exuggufence*`, `morroblivion\architecture\ghostgate\fence01*`). Note the whole Oblivion controller family is likewise absent from the exe (`NiFlipController`, `NiMaterialColorController`, `NiTextureTransformController`, `NiAlphaController` — all already converted elsewhere); `NiUVController` was simply missed. Run the audit after any converter change that can emit a new block type.
 - **`NiUVController` → `BS*ShaderPropertyFloatController` (2026-08-01, `_collect_uv_ctrls`)**: it is Oblivion's UV-scroll animation carried on the **geometry** controller chain rather than on `NiTexturingProperty`. `NiUVData.uv_groups` is a fixed 4-entry array — **[U offset, V offset, U scale, V scale]** — holding the same curves a `NiTextureTransformController` would, so each populated group (≥2 keys; a single key is a constant) becomes one shader float controller through the existing `_attach_tex_transform_ctrls` path and `_TEX_TRANSFORM_VARS` mapping. Harvest must run **before** `_strip_dead_geometry_controllers`, which now also unlinks `NiUVController`. Ghostfence emits 6 controllers per mesh (U Offset 20 + V Offset 22 × 3 shapes). Shapes used purely as `NiPSysMeshEmitter` sources (`fence01.nif`'s `ForceField2`) legitimately end up with no shader and therefore no controller — that is correct, not a regression.
 - **Emitter controller flags** (`NiPSysEmitterCtlr`/`NiPSysUpdateCtlr`/`NiPSysModifierActiveCtlr`): Oblivion ships flags=0x08 (Active only); **OR in 0x48** (Active | Compute-Scaled-Time, bit 0x40 default-true in Skyrim) — do NOT overwrite, because Oblivion's NiPSysUpdateCtlr carries CLAMP cycle bits (0x0c) that vanilla keeps (campfire01burning UpdateCtlr = 0x4c, EmitterCtlr = 0x48). Without Compute-Scaled-Time the birth-rate interpolator can evaluate to 0 (no particles).
@@ -155,9 +155,9 @@ The `-ExtractAssets` flag triggers BSA extraction and mesh conversion:
 - **Fire/effect QUAD emissive (`process_geometry`, flip_ctrl path)**: BSEffectShaderProperty.emissive_multiple defaults to 0.0 → the flame quad renders BLACK. Fire is self-illuminated: set emissive_multiple=1.0. emissive_color is taken from the source `NiMaterialProperty`, falling back to (1,1,1) only when the source declares no emissive at all (see the next entry).
 - **FX BRIGHTNESS + THE RECTANGULAR BOUNDING BOX (2026-08-07, `_apply_fx_soft_effect` + the `is_additive_fx` route)** — user report: "smoke effects such as in Vilverin are incredibly bright… way brighter than in Oblivion and difficult to see through, and many transparent effects have what appears to be a rectangular bounding box around them". Three separate defects, all in the FX shader path:
   1. **Authored emissive was discarded.** Both the quad and particle paths hardcoded `emissive_color=(1,1,1,1)`, throwing away Oblivion's own `NiMaterialProperty.emissive_color` — which is precisely how Oblivion dims an FX surface. `dungeons/misc/fx/fxmist01` ships (0.47,0.47,0.47) and `fxmistgroundeffect01` ships (0.13,0.16,0.17); both were being promoted to full white. Under **additive** blending (dst=ONE) the excess accumulates per overlapping layer, so a multi-plane mist reads as blinding and opaque instead of translucent. Now carried across verbatim; white only when the source emissive is pure black. `NiMaterialProperty.alpha` (previously dropped on the effect path entirely) goes to `emissive_color.a`.
-  2. **`emissive_multiple` was a blanket 1.5 on every particle system.** That is a *fire* value, but the same code path converts smoke, mist, steam and dust. Vanilla census of 1,164 blended FX shapes: **1.0 in 852**; the brighter values are authored per-effect, never applied wholesale. Now 1.0, with the authored colour doing the dimming.
+  2. **`emissive_multiple` was a blanket 1.5 on every particle system.** That is a *fire* value, but the same code path converts smoke, mist, steam and dust. Vanilla census of 1,164 blended FX shapes: **1.0 in 852**; the brighter values are authored per-effect, never applied wholesale. Now 1.0, with the authored color doing the dimming.
   3. **`slsf_1_soft_effect` was never set anywhere.** Without it a blended FX quad intersecting solid geometry is hard-cut along the intersection line, so the billboard shows **its own quad edge** — the reported rectangle. Vanilla census (1,198 BSEffectShaderProperty shapes across meshes/effects + meshes/dungeons): additive `0x100d` → soft_effect=1 in **417/470**, blended `0x10ed` → **224/362**, *no* NiAlphaProperty → soft_effect=0 in **322/332**. So the rule is **blended FX gets the fade, unblended does not**; `soft_falloff_depth` = **100.0** (the commonest value, 250/521 on mist/smoke/fog geometry, and what vanilla uses for ambient room fog).
-- **`lighting_mode == 0` is NOT the only unlit indicator — ADDITIVE BLENDING IS THE SECOND (same fix)**: the FX/lit discriminator was `NiVertexColorProperty.lighting_mode == LIGHTING_E`, but **many Oblivion FX meshes ship no `NiVertexColorProperty` at all**, so the mode defaulted to "lit" and genuine FX geometry took `BSLightingShaderProperty` — lit, normal-mapped, no soft fade. `fxmistgroundeffect01` (the Ayleid-ruin ground mist the user saw in Vilverin) is exactly this: additively-blended AtmosphereCloud01 planes with no vertex-colour property, so **all 30 shapes** were misrouted. Across Oblivion's own FX directories **76 of 179** blended shapes declare no lighting_mode. A surface whose NiAlphaProperty sets **dst=ONE** adds its colour to the framebuffer and therefore cannot be lit geometry (lighting it double-counts the light it already contributes). Vanilla agrees without exception: of 64 additively-blended shapes sampled, **64/64 use BSEffectShaderProperty, 0 use the lighting shader**. **Plain alpha blending is deliberately excluded** — the same census shows 3 legitimate BSLightingShaderProperty cases (glass/ice), so widening the rule to all blending would misroute real lit geometry. Blast radius measured before shipping: across a 250-mesh sample of architecture/clutter/dungeons only 10 shapes newly reroute, all `textures\effects\` blood decals and FlameTower quads.
+- **`lighting_mode == 0` is NOT the only unlit indicator — ADDITIVE BLENDING IS THE SECOND (same fix)**: the FX/lit discriminator was `NiVertexColorProperty.lighting_mode == LIGHTING_E`, but **many Oblivion FX meshes ship no `NiVertexColorProperty` at all**, so the mode defaulted to "lit" and genuine FX geometry took `BSLightingShaderProperty` — lit, normal-mapped, no soft fade. `fxmistgroundeffect01` (the Ayleid-ruin ground mist the user saw in Vilverin) is exactly this: additively-blended AtmosphereCloud01 planes with no vertex-color property, so **all 30 shapes** were misrouted. Across Oblivion's own FX directories **76 of 179** blended shapes declare no lighting_mode. A surface whose NiAlphaProperty sets **dst=ONE** adds its color to the framebuffer and therefore cannot be lit geometry (lighting it double-counts the light it already contributes). Vanilla agrees without exception: of 64 additively-blended shapes sampled, **64/64 use BSEffectShaderProperty, 0 use the lighting shader**. **Plain alpha blending is deliberately excluded** — the same census shows 3 legitimate BSLightingShaderProperty cases (glass/ice), so widening the rule to all blending would misroute real lit geometry. Blast radius measured before shipping: across a 250-mesh sample of architecture/clutter/dungeons only 10 shapes newly reroute, all `textures\effects\` blood decals and FlameTower quads.
 
 ## Rewriting the particle modifier chain
 <a id="psys-modifier-vocabulary"></a>
@@ -186,9 +186,9 @@ emitter's life span they are treated as fractions of a unit lifetime — Oblivio
 fire values are small (grow 0.0, fade 0.2), and vanilla ramps peak ~1.0 and taper
 to ~0.1.
 
-### <a id="authored-particle-color"></a>The particle colour is AUTHORED, never a palette
+### <a id="authored-particle-color"></a>The particle color is AUTHORED, never a palette
 
-Skyrim's `BSPSysSimpleColorModifier` holds exactly three colours plus the
+Skyrim's `BSPSysSimpleColorModifier` holds exactly three colors plus the
 percentages at which each is reached, while Oblivion's `NiPSysColorModifier`
 points at a `NiColorData` curve of arbitrary length — so that curve is sampled at
 its start, middle and end.
@@ -200,7 +200,7 @@ instead of the pale green its `NiColorData` actually specifies
 white ramp with an alpha envelope is the honest default — it tints nothing rather
 than inventing a hue.
 
-### <a id="alpha-envelope-vs-color-curve"></a>An alpha envelope is not a colour curve
+### <a id="alpha-envelope-vs-color-curve"></a>An alpha envelope is not a color curve
 
 Oblivion uses `NiPSysColorModifier` for two unrelated jobs, and they need
 opposite handling when deciding the shader tint:
@@ -208,12 +208,12 @@ opposite handling when deciding the shader tint:
 - **an ALPHA ENVELOPE** — an achromatic ramp, R==G==B at every key, whose only
   real content is the alpha fade. `fxcloudthick01`, `fxcloudthin01` and
   `fxdustcloud01` all ship exactly (0,0,0,0) → (1,1,1,1) → (0,0,0,0). It
-  contributes NO colour, so the material's `emissive_color` is the only
+  contributes NO color, so the material's `emissive_color` is the only
   brightness the effect has.
-- **a real COLOUR CURVE** — chromatic keys, R≠G≠B. `creatures/ghost`'s `PArray*`
+- **a real COLOR CURVE** — chromatic keys, R≠G≠B. `creatures/ghost`'s `PArray*`
   systems ramp (0.702, 0.831, 0.745) → (0.514, 0.647, 0.561), the ghost's pale
   green, against a near-black 0.039 material. Here the CURVE is the authored
-  colour and the material is just a carrier, so deferring to the curve is right —
+  color and the material is just a carrier, so deferring to the curve is right —
   carrying 0.039 through would multiply the green down to ~0.027 and render the
   ghost black.
 
@@ -230,7 +230,7 @@ envelope — and chroma is called only on a real spread (`hi > 0.02` and
 
 Flags match vanilla fire (`slighthousefire.nif` "Fireball"): `flags1` is
 `z_buffer_test` only, `flags2` is `vertex_colors` only — particles do not write
-depth, and they modulate colour per-vertex.
+depth, and they modulate color per-vertex.
 
 **UV scale must be set explicitly.** PyFFI defaults it to (0,0), which collapses
 EVERY particle UV to the texture's top-left texel — transparent on flame textures
@@ -249,13 +249,13 @@ glaring and opaque instead of translucent. Vanilla's overwhelming default is 1.0
 (**852/1164** blended FX shapes); brighter values are authored per effect, not
 applied blanket. Oblivion states the intended brightness in
 `NiMaterialProperty.emissive_color`, so the multiple stays neutral and the
-authored colour does the dimming.
+authored color does the dimming.
 
 Whitening the shader when the curve is merely an alpha envelope is what made
 Ayleid-ruin fog blinding: `fxcloudthick01` authors (0.078, 0.078, 0.078) against
 a plain (0,0,0,0)→(1,1,1,1)→(0,0,0,0) ramp, so whitening over-brightened it
 **12.8×** on additively blended geometry that Belda layers several planes deep. A
-`NiVertexColorProperty` alone is likewise not a colour source — every one of those
+`NiVertexColorProperty` alone is likewise not a color source — every one of those
 fog meshes carries one — so it does not force the tint either.
 
 **Every particle system gets its OWN NiAlphaProperty.** Vanilla particles always
@@ -443,7 +443,7 @@ block after the swap must retarget *all* of them — it already handled
 - Skyrim: `BSFurnitureMarkerNode` (inherits BSFurnitureMarker) with FurniturePosition using `heading` (float, radians), `animation_type` (ushort: 1=Sit, 2=Sleep, 4=Lean), `entry_properties` (bitflags: front, behind, right, left, up)
 - **CRITICAL SEMANTIC DIFFERENCE**: Oblivion positions are ENTRY POINTS — where the NPC stands on the floor ~51-106 units AWAY from the furniture, one marker per approach direction (a single chair has 3-4). Skyrim positions are the actual SIT/SLEEP spots (hip position), one per physical seat. A 1:1 position copy produces N duplicate seats with inconsistent headings (NPCs sit sideways/backwards) at the wrong place.
 - **Conversion** (`_convert_furniture_markers` in nif_converter.py): compute a seat candidate per entry, cluster candidates within 20 units, emit ONE Skyrim position per cluster. Verified to reproduce vanilla marker topology exactly (chair→1 pos front|right|left; bench→3 pos; bed→1 sleep pos right|left).
-- **Seat candidate**: sit entries stand a FIXED distance from their seat — 51.5 (side refs 11/12) / 55.0 (front/behind refs 13/14) — walk that far along the approach direction (handles curved benches like anviltreebenchseat01; a bench's side entry is 51.5 from the END seat so it clusters correctly). Sleep entry distances vary per bed (67-106), so instead project the geometry-bbox centre onto the approach ray (entries always point across the hip line).
+- **Seat candidate**: sit entries stand a FIXED distance from their seat — 51.5 (side refs 11/12) / 55.0 (front/behind refs 13/14) — walk that far along the approach direction (handles curved benches like anviltreebenchseat01; a bench's side entry is 51.5 from the END seat so it clusters correctly). Sleep entry distances vary per bed (67-106), so instead project the geometry-bbox center onto the approach ray (entries always point across the hip line).
 - **Heading** (= direction occupant faces; for sleep = head→feet direction): `heading = orientation/1000 + offset[ref]` where offset = {1: −π/2, 2: +π/2, 3: −π/2, 4: 0, 11: −π/2, 12: +π/2, 13: 0, 14: +π}. 100% consistent across all 48 marker-bearing Oblivion.esm furniture NIFs. The old blanket `+π` rule was only right for ref 14. Ref semantics: 1/11 = occupant's left side, 2/12 = right side, 13 = behind occupant (step over / sit without turning), 14 = in front (approach facing seat, turn, sit), 3 = mat side entry, 4 = mat head-end crawl entry (3/4 verified against sleepingmat01's pillow bump; pillow end = taller z bump, calibrated on Skyrim bedroll01 where the marker proves head=+Y).
 - **Z**: entry markers stand ON THE FLOOR in mesh coords (Oblivion furniture origins are at mid-height, so entry z is negative). Skyrim marker z = entry_z + 34.0 (sit) or + 37.0931 (sleep) — the vanilla floor-relative hip heights. All 24 Oblivion bed mattress surfaces lie 36.5-42 above their entry z, so floor+37.09 lands on the mattress. The old `z = -src.z` rule floated NPCs ~34 units in the air (it looked right on chairs only because origin-at-mid-height makes |−z| ≈ seat height by coincidence).
 - **Entry flags** are relative to the final heading: flag = side of the seat the entry point lies on (front if (entry−seat)·facing > 0.5, etc.) — NOT a fixed per-ref mapping.
@@ -467,7 +467,7 @@ sequence has to be rewritten rather than copied.
 The module owns the whole animation half of a NIF: the controller-manager
 rewrite, root-accumulation handling, the string-palette resolution, shader
 controller binding and retargeting, morph emulation, and the blend-interpolator
-normalising that must follow all of them.
+normalizing that must follow all of them.
 
 ## Accum-root classification
 <a id="accum-root-classification"></a>
@@ -1013,7 +1013,7 @@ format, leaving their triangle partitions alone.
 
 **Code:** `_finalise_inv_markers` in `asset_convert/nif/nif_converter.py`
 
-Weapons and shields sit in Skyrim's normalised attachment frames — the Prn node
+Weapons and shields sit in Skyrim's normalized attachment frames — the Prn node
 convention and the SHIELD attach transform — so the vanilla-derived constant
 markers written earlier are already exact and are left alone.
 
@@ -1065,7 +1065,7 @@ already in NIF object space, not Havok space, so they carry over verbatim.
 ## Billboard and geometry roots
 <a id="billboard-roots"></a>
 
-**Code:** `_normalise_billboard_root`, `_wrap_geometry_root` in
+**Code:** `_normalize_billboard_root`, `_wrap_geometry_root` in
 `asset_convert/nif/nif_converter.py`
 
 **A `NiBillboardNode` root re-orients its ENTIRE subtree to face the camera
@@ -1317,7 +1317,7 @@ The repairs are chosen so the mesh degrades locally rather than globally:
 | UV | zeroed |
 | vertex | moved to the mesh's finite centroid |
 | normal / tangent / bitangent | +Z |
-| vertex colour channel | 1.0 |
+| vertex color channel | 1.0 |
 | bound sphere | recomputed after the vertices are fixed |
 
 A bad vertex goes to the centroid rather than the origin because that
@@ -1326,7 +1326,7 @@ A bad vertex goes to the centroid rather than the origin because that
 ### <a id="shapes-that-declare-no-vertices"></a>A shape that declares vertices and ships none
 
 `LeyawiinLowerDoor01` in `leyawiinhouselower01.nif` is the measured case:
-`num_vertices=16`, `has_vertices=False`, yet normals, colours, UVs and 6
+`num_vertices=16`, `has_vertices=False`, yet normals, colors, UVs and 6
 triangles all still index 16 of them. Oblivion tolerates it — there is nothing
 to draw, so it draws nothing — but anything that walks the faces and reaches
 for a vertex does not.
@@ -1399,6 +1399,14 @@ indexing vertex 15. LODGen happened to tolerate that; the next tool would not.
 - Stats: 113 Oblivion.esm SPTs → 116 tree-record NIFs, 0 fail, all 116 collision-sane + MOPP-clean. Tests: `tests/test_spt_convert.py` (19 tests: parser, generator, NIF builder, TREE import).
 
 ## Book inventory art (INAM reading rigs) — books were invisible with no text when opened (SOLVED 2026-07-18)
+<a id="nif-texture-path-basename"></a>
+NIF texture paths are ALWAYS backslash-separated, whatever the host OS.
+`os.path.basename` splits only on `/` off Windows, so any code comparing a NIF
+texture path's leaf must normalize TO forward slashes before calling it -- that
+direction works on both, since Windows accepts `/` too. Normalizing to
+backslashes instead silently never matches on Linux.
+`asset_convert/ui/book_inam.py:_tex_basename` is the shared helper.
+
 <a id="book-inventory-art-books-were"></a>
 
 - **Why books failed**: Skyrim's BookMenu renders the BOOK record's INAM inventory-art mesh, never the world MODL. The vanilla INAM meshes (`clutter\books\book02\character assets\bookskyrim01.nif`, `clutter\books\note01\note02.nif`) are rigged: skinned page-turn bone chains ("Book CoverPage Turn1-6", "Book TurnPage1-10", "Note Fold1-3"), a `BSBehaviorGraphExtraData` pointing at `Clutter\Books\Book01\Book01Project.hkx` that drives the open/page-turn animation, and a 4-vert `PageText` NiTriShape (with `NiStringExtraData 'Keep' = "NiHide"`) the engine swaps for the rendered page text. A static (converted Oblivion) mesh as INAM opens invisible with no text. INAM must always be present — BookMenu null-derefs without it.
@@ -1647,7 +1655,7 @@ did not**, while **149/149** sampled *source* shapes carried a real diffuse path
 The data was always present and simply never read.
 
 Slot order is identical to Skyrim's (0 diffuse, 1 normal, 2 glow), so the paths
-need no remapping — only `rewrite_tex_path`, which already normalises
+need no remapping — only `rewrite_tex_path`, which already normalizes
 separators and strips the stray `data\` prefix that FO3 LOD meshes carry.
 
 **The normal map is authored, not derived.** Oblivion rarely ships an `_n`
@@ -2228,11 +2236,11 @@ refs below 10 that seat rather than sleep.
 
 ## <a id="already-a-bsfadenode"></a>Roots that are already a BSFadeNode
 
-**Code:** `_normalise_fade_root` in `asset_convert/nif/nif_converter.py`
+**Code:** `_normalize_fade_root` in `asset_convert/nif/nif_converter.py`
 
 The furniture-marker carry, superseded-marker drop and PRN conversion ran
 inside the NiNode-to-BSFadeNode root swap, so a source whose root is already a
-BSFadeNode (every FO3/FNV mesh) skipped all three. `_normalise_fade_root`
+BSFadeNode (every FO3/FNV mesh) skipped all three. `_normalize_fade_root`
 applies the same passes to such a root.
 
 ## <a id="pyffi-log-capture"></a>PyFFI log capture: the toaster resets the level

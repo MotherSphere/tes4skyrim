@@ -1,4 +1,4 @@
-"""Texture path normalising, shared by the converter and the shader builder.
+"""Texture path normalizing, shared by the converter and the shader builder.
 
 Both are pure string/slot readers with no NIF state, so they sit below every
 module that needs them.
@@ -35,7 +35,7 @@ _IMAGE_EXTS = ('tga', 'bmp')
 def rewrite_tex_path(raw_bytes):
     """Prepend the game's namespace to a texture path that lacks it.
 
-    Separators are normalised FIRST; a leading 'data\\' and a 'lowres\\'
+    Separators are normalized FIRST; a leading 'data\\' and a 'lowres\\'
     segment are dropped, and a .tga/.bmp name becomes .dds. The idempotence
     check keys on the ACTIVE namespace, so a path already carrying ANOTHER
     game's prefix is still namespaced rather than passed through unchanged.

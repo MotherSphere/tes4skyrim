@@ -2040,12 +2040,12 @@ class TestShieldVsArmorClassification:
     def test_shield_orientation_corrected(self, tmp_path):
         """Converted shield must land in Skyrim SHIELD-bone space like vanilla.
 
-        The root transform comes from shield_attach_transform(): an exact
-        mapping from the Oblivion attach frame (Bip01 L ForearmTwist) to the
-        Skyrim SHIELD bone frame via anatomically corresponding hand frames.
-        Result contract (matches vanilla ironshield.nif: X ≈ ±21, Y ≈ ±22,
-        Z ∈ [-8.5, +2]): face in the XY plane (Z thin), dome toward -Z, grip
-        region near the origin.
+        shield_attach_transform() maps the Oblivion attach frame (Bip01 L
+        ForearmTwist) onto the Skyrim SHIELD bone frame.  Contract (vanilla
+        ironshield.nif: X ≈ ±21, Y ≈ ±22, Z ∈ [-8.5, +2]): face in XY (Z
+        thin), dome toward -Z, grip near the origin — the Oblivion strapped
+        placement sits a few units elbow-ward of Skyrim's grip-centered art,
+        so that tolerance is looser than exact centering.
         """
         import time
         if not hasattr(time, '_original_clock'):
@@ -2116,9 +2116,6 @@ class TestShieldVsArmorClassification:
         # Dome bulges outward (-Z, away from the arm) like vanilla shields
         cz = world[:, 2].mean()
         assert cz < 0.5, f"Shield centroid should sit at/behind the grip plane (dome -Z): cz={cz:.2f}"
-        # Grip region near the origin: the authentic Oblivion strapped placement
-        # is a few units toward the elbow vs Skyrim's grip-centred art, so the
-        # tolerance is looser than exact centring.
         cx = (world[:, 0].min() + world[:, 0].max()) * 0.5
         cy = (world[:, 1].min() + world[:, 1].max()) * 0.5
         assert abs(cx) < 10.0, f"Shield too far off the grip in X: cx={cx:.2f}"
@@ -2510,7 +2507,11 @@ class TestFurnitureMarkerConversion:
 
     @pytest.mark.skipif(not EXPORT_MESHES.exists(), reason='Export meshes not available')
     def test_throne_sit_marker(self, tmp_path):
-        """Throne gets BSFurnitureMarkerNode with Sit animation and behind entry."""
+        """Throne gets BSFurnitureMarkerNode with Sit animation and behind entry.
+
+        The seat offset is the entry point projected to the geometry center
+        line.
+        """
         import time
         if not hasattr(time, '_original_clock'):
             time.clock = time.perf_counter
@@ -2538,7 +2539,6 @@ class TestFurnitureMarkerConversion:
                 assert p.animation_type == 1  # Sit
                 assert p.entry_properties.front == 1
                 assert abs(p.heading - math.pi) < 0.01
-                # Seat = entry projected to the geometry centre line
                 assert abs(p.offset.x - 1.87) < 1.0
                 assert abs(p.offset.y - 0.0) < 2.0
                 # Model is re-origined so the floor (entry z) sits at 0;

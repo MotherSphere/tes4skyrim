@@ -84,7 +84,7 @@ def add_mods_menu(menu, ui: ModsUI) -> None:
 
 
 def _card(ui: ModsUI, title: str):
-    """A modal card centred on the window, with its title and separator."""
+    """A modal card centered on the window, with its title and separator."""
     card = tk.Frame(ui.outer, bg=ui.CLR["panel"],
                     highlightbackground=ui.CLR["border"], highlightthickness=1)
     tk.Label(card, text=title, bg=ui.CLR["panel"], fg=ui.CLR["text"],
@@ -145,9 +145,9 @@ def _fit_card(card) -> None:
 
 
 def _show(card) -> None:
-    """Centre a finished card and make it modal.
+    """Center a finished card and make it modal.
 
-    The re-fit follows the WINDOW, not the card: a card placed dead centre
+    The re-fit follows the WINDOW, not the card: a card placed dead center
     of a window the user then shrinks would otherwise keep its original
     height and hang off both ends.
     """

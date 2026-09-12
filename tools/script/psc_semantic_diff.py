@@ -8,7 +8,7 @@ comparison reports every one of the ~40,000 files as changed on day one and is
 useless as the safety net for this work.  (It stays the right tool for a change
 that is SUPPOSED to be byte-identical.)
 
-This tool extracts a normalised MODEL from each script and diffs the models:
+This tool extracts a normalized MODEL from each script and diffs the models:
 
     properties  name -> Papyrus type      the VMAD binding contract
     locals      name -> Papyrus type      script-scope declarations
@@ -132,7 +132,12 @@ def _arity(text: str, open_paren: int) -> int:
 
 
 def model(text: str) -> dict:
-    """Normalised behavioural model of one generated script."""
+    """Normalized behavioural model of one generated script.
+
+    Numeric literals key on `float(n):g`, so `5` and `5.0` collapse to one
+    entry: Papyrus promotes freely and the rewrite may spell a float either
+    way.
+    """
     props: dict = {}
     locals_: dict = {}
     events: list = []
@@ -212,8 +217,6 @@ def model(text: str) -> dict:
         for s in _STRING.findall(low):
             strings[s] = strings.get(s, 0) + 1
         for n in _NUMBER.findall(_STRING.sub('""', low)):
-            # Normalise `5` and `5.0` to one key: Papyrus promotes freely and
-            # the rewrite may spell a float either way.
             key = f'{float(n):g}'
             numbers[key] = numbers.get(key, 0) + 1
 

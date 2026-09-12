@@ -26,7 +26,7 @@
 - [THE HORIZON, solved (2026-08-24)](#horizon)
 - [Fog equation equivalence — the proof, and the vanilla context](#fog-equation-equivalence-proof-vanilla)
 - [IMPLEMENTED (2026-08-24) — what changed in the converter](#section)
-- [NAM0 colour: the per-plugin normalisation is GONE, replaced by a highlight knee (2026-08-24)](#nam0-colour-per-plugin-normalisation)
+- [NAM0 color: the per-plugin normalization is GONE, replaced by a highlight knee (2026-08-24)](#nam0-color-per-plugin-normalization)
 - [Cloud layers: the sheets go on 11 and 27, and the reason is UV (2026-08-24)](#cloud-layers-sheets-go-11)
 
 > **Status (2026-08-09): the FULL chain is live on this branch** (ported from
@@ -42,7 +42,7 @@
 > anchored IMGS + fog max), weather never changing (CELL XCLR + volatility
 > 50), the scripted-weather override lock (abOverride=False now), Sun Glare/
 > Trans Delta out of vanilla range, missing IMGS DNAM — and finally the REAL
-> bloom source: **Oblivion's colour palette itself runs 1.5-4x vanilla
+> bloom source: **Oblivion's color palette itself runs 1.5-4x vanilla
 > luminance**, now self-normalized per plugin (see below), plus weather winds
 > mixed as SFX instead of ambience, and moons shipped from Oblivion's own
 > textures at the engine's hardcoded paths. Fourth build awaits in-game
@@ -99,17 +99,17 @@ draws no stars. Falls back to `Sky\Stars.nif`.
 ## WTHR field semantics — where equivalence does NOT hold
 <a id="wthr-field-semantics-where-equivalence"></a>
 
-### NAM0 colour table (272 bytes = 17 slots x 4 times x RGBA)
+### NAM0 color table (272 bytes = 17 slots x 4 times x RGBA)
 
 TES4 has 10 slots, TES5 has 17; times-of-day match, so only the type axis is
 remapped. TES4's single `Fog` feeds both `Fog Near` and `Fog Far`. The TES4
 cloud tints do NOT go to the Cloud LOD slots — vanilla ships those BLACK
 (median and p90 are 0 in every slot); they feed the per-layer PNAM instead.
 
-### Colours are LUMINANCE-NORMALIZED, not copied (the real bloom source)
+### Colors are LUMINANCE-NORMALIZED, not copied (the real bloom source)
 
 **Oblivion authors its weather palette far hotter than Skyrim, and bloom
-triggers on rendered luminance — no imagespace calibration can fix colours
+triggers on rendered luminance — no imagespace calibration can fix colors
 that run 1.5-4x vanilla.** Census (real Skyrim.esm vs raw conversion, midday
 medians): Sun slot 193 vs vanilla **43** (Skyrim's sun brightness is HDR, not
 this slot — a 255-luminance disc blooms enormously, the "white toward the
@@ -119,7 +119,7 @@ black shadows ("lighting doesn't look right").
 
 `set_nam0_normalization()` (import Phase 2b pre-pass) is self-calibrating
 per plugin: it computes the plugin's median luminance per slot/time over all
-its weathers and scales every colour so the plugin median lands on the
+its weathers and scales every color so the plugin median lands on the
 vanilla median — hue preserved, hard cap at vanilla p90, authored
 between-weather variation intact. Applies to Sky-Upper, Fog Near/Far,
 Ambient (and therefore DALC), Sunlight, Sun, Stars, Sky-Lower, Horizon;
@@ -179,7 +179,7 @@ mechanism the create-path disassembly does not show — go dynamic
 
 The four TES5-only slots must NOT be guessed — and they must not be flat
 either. **Two successive censuses got this wrong** (2026-08-09): copying the
-TES4 Sun/Stars colours into 15/16 made the sky blinding, and the "vanilla
+TES4 Sun/Stars colors into 15/16 made the sky blinding, and the "vanilla
 mode is black" correction **hid the moons** — slot 13 Sky Statics tints the
 moon discs and is *never black* in vanilla outdoor weathers (SkyrimClear
 night is 45,137,208). The mode-black artifact came from collapsing the time
@@ -190,7 +190,7 @@ real Skyrim.esm (`temp`-style script over the binary, see
 
 The real vanilla shape is per-CLASSIFICATION and per-time (medians):
 
-* **13 Sky Statics** — pale sky-toned colours by day, blues/grays at night;
+* **13 Sky Statics** — pale sky-toned colors by day, blues/grays at night;
   never black. Black here = invisible moons (stars are slot 6 and keep
   rendering, which is what localises the symptom).
 * **14 Water Multiplier** — NOT flat white: every class ships dark teal
@@ -252,7 +252,7 @@ vanilla record.
 TES5 keeps TES4's field order but replaces TES4's two cloud-speed bytes
 (offsets 1-2) with padding — speed moved into RNAM/QNAM — and appends four
 fields TES4 has no source for. Offsets 6-14 (precipitation/thunder fades,
-frequency, classification, lightning colour) exist in both and were previously
+frequency, classification, lightning color) exist in both and were previously
 dropped on the floor.
 
 **Thunder frequency is inverted in BOTH games** (255 = never, 15 = constant),
@@ -360,7 +360,7 @@ sky exposure.
 
 `FNAM` fog power/max are also NOT xEdit's 1.0 defaults: vanilla ships
 medians 0.4/0.4 power and 0.9/0.925 max. Max 1.0 lets fog reach full opacity
-at the horizon and paints it with Oblivion's pale fog colour — a big part of
+at the horizon and paints it with Oblivion's pale fog color — a big part of
 the blown-white horizon.
 
 `BloomBlurRadius` is **7.0 in all 213** weather-used imagespaces — an engine
@@ -428,7 +428,7 @@ which looks like "vanilla never sets classification" and is wrong.
 | Oblivion WTHR | class / wind / thunder / fogFar | vanilla Skyrim WTHR | FormID | why it matches |
 |---|---|---|---|---|
 | `Clear` | Pleasant, 25, never, 170000 | `SkyrimClear` | `0x0000081A` | identical class, **identical wind 25**, no thunder; both the climate's fair-weather default |
-| `SEClear` / `SEClear01` / `SEClear03` / `SEClearBlue` / `TestBlissClear` | Pleasant, 25, never | `SkyrimClear` | `0x0000081A` | DATA identical to `Clear` (SI reskins the colours only) |
+| `SEClear` / `SEClear01` / `SEClear03` / `SEClearBlue` / `TestBlissClear` | Pleasant, 25, never | `SkyrimClear` | `0x0000081A` | DATA identical to `Clear` (SI reskins the colors only) |
 | `SEClearTrans` | Pleasant, 25, never | `SkyrimClear` | `0x0000081A` | identical to `Clear` except `TransDelta` 0 vs 255 — an instant-transition variant; TransDelta is remapped x125/255 anyway |
 | `Cloudy` | Cloudy, 37, never, 150000 | `SkyrimCloudy` | `0x00012F89` | **wind 37 vs 38**, no precipitation; note vanilla `SkyrimCloudy` is flagged *Pleasant*, not Cloudy — it is Skyrim's partly-cloudy fair weather, which is what Oblivion's `Cloudy` is |
 | `SECloudy` / `SEManiaFog` | Cloudy, 37, never | `SkyrimCloudy` | `0x00012F89` | same DATA as `Cloudy` |
@@ -440,7 +440,7 @@ which looks like "vanilla never sets classification" and is wrong.
 | `SERain` | Rainy, 14, never, 10000 | `SkyrimOvercastRain` | `0x000C821F` | same DATA as `Rain` |
 | `Thunderstorm` | Rainy, 81, **188**, 6000 | `SkyrimStormRain` | `0x000C8220` | both authored rain **with** thunder; vanilla freq 246 vs 188 (more frequent in Oblivion) |
 | `SEThunderstorm` | Rainy, 81, 188, 6000 | `SkyrimStormRain` | `0x000C8220` | DATA identical to `Thunderstorm` |
-| `ThunderstormKvatch` | Rainy, 81, 188, 6000 | `SkyrimStormRain` | `0x000C8220` | identical to `Thunderstorm` but for lightning colour (236,240,253 vs 245,248,254) — substituting loses that tint |
+| `ThunderstormKvatch` | Rainy, 81, 188, 6000 | `SkyrimStormRain` | `0x000C8220` | identical to `Thunderstorm` but for lightning color (236,240,253 vs 245,248,254) — substituting loses that tint |
 | `SE32GloomStorm` | Rainy, 81, **24**, 3000 | `SkyrimStormRain` | `0x000C8220` | near-constant thunder; closest vanilla storm, though gloomier than any |
 | `Snow` | Snow, 7, never, 12000 | `SkyrimOvercastSnow` | `0x0004D7FB` | calm snowfall, no thunder; vanilla wind 76 vs 7 is the gap (`SkyrimStormSnow` wind 178 + thunder is much further off) |
 | `SETestAsh` | Snow, 14, never, 10000 | `SkyrimOvercastSnow` | `0x0004D7FB` | uses the Snow bit for ashfall; vanilla snow is the nearest particle system |
@@ -710,9 +710,9 @@ all 37 converted weathers vs all 84 vanilla Skyrim weathers.
 | Thing | Evidence |
 |---|---|
 | Sky dome mesh + role | Both load `Meshes\Sky\Atmosphere.nif` and `Meshes\Sky\Clouds.nif` (hardcoded strings; Oblivion 0x655d88/0x655e64, Skyrim 0x169a348/0x169a538) |
-| Vertex-colour gradient convention | Both domes carry R=horizon, G=mid, B=upper as BLEND MASKS summing to ~1.0, low-z to high-z. Measured on both meshes. |
+| Vertex-color gradient convention | Both domes carry R=horizon, G=mid, B=upper as BLEND MASKS summing to ~1.0, low-z to high-z. Measured on both meshes. |
 | Times of day | Both are (Sunrise, Day, Sunset, Night) in that order — only the TYPE axis needs remapping |
-| Colour slot mapping | `_NAM0_TES5_FROM_TES4` matches the decompiled enums in both games. Verified, not inferred. |
+| Color slot mapping | `_NAM0_TES5_FROM_TES4` matches the decompiled enums in both games. Verified, not inferred. |
 
 The one structural difference in the meshes is the shader property: Oblivion's
 Atmosphere uses a fixed-function `NiMaterialProperty`; Skyrim's uses
@@ -747,7 +747,7 @@ Recorded so no future session burns a cycle re-deriving them.
 
 | Theory | Test | Result |
 |---|---|---|
-| Oblivion authors bright colours because `BrightScale` dims them; divide by it | median vs vanilla | Moves the median but **raises** per-weather scatter (Horizon Day cv 0.63 -> 0.74; vanilla is 0.69). A real engine term TIGHTENS the population. Rejected. |
+| Oblivion authors bright colors because `BrightScale` dims them; divide by it | median vs vanilla | Moves the median but **raises** per-weather scatter (Horizon Day cv 0.63 -> 0.74; vanilla is 0.69). A real engine term TIGHTENS the population. Rejected. |
 | `/sqrt(BrightScale)` (medians landed at 0.97-1.21) | scatter | Same scatter failure. The median match was coincidence. Rejected. |
 | `fSkyBrightness=0.5` is a straight multiplier on NAM0 | `x0.5` vs vanilla | **Worse than raw in every category** (log2 err: sky dome 0.396 -> 0.710; lighting 0.416 -> 1.083). It is a blur-shader input, not a NAM0 scale. Rejected. |
 | The cloud tint slots are misrouted | our OUTPUT vs vanilla | Both write ~0 in slots 10/11 (vanilla is 98-100% zero there). Cloud tint is `PNAM`, and ours is present and in range. Not a bug. |
@@ -757,7 +757,7 @@ above vanilla's max in slots 10/11, but `set_nam0_normalization()` already
 zeroes them. **Always compare `output/`, never the export, when judging what
 the engine sees.**
 
-### The actual defect: Sky Scale is DERIVED from sky colour (feedback loop)
+### The actual defect: Sky Scale is DERIVED from sky color (feedback loop)
 
 Our shipped NAM0 is fine. Measured `output/Oblivion.esm` vs `Skyrim.esm`,
 per slot and time — sky-dome ratios and the count over vanilla's max:
@@ -789,7 +789,7 @@ signal: bright sky -> bigger multiplier -> bloom. No per-field range check can
 see this, which is why every clamping pass missed it.
 
 This independently confirms the user's own A/B result: `CANDskyscale` carried
-the bloom and `FIXcolourtone` looked clean.
+the bloom and `FIXcolortone` looked clean.
 
 ### What vanilla actually keys Sky Scale off
 
@@ -821,7 +821,7 @@ AUTHORED TES4 data, so this generalises to plugins we have never seen.
   three). Ours writes a continuous ramp, median 222.7 vs vanilla 87.2 — we
   never hide the stars for overcast weather.
 * **SunGlare (slot 15) and MoonGlare (slot 16) are written BLACK** in all 37.
-  TES4 has no source slot, but 0 is a COLOUR the engine multiplies the glare
+  TES4 has no source slot, but 0 is a COLOR the engine multiplies the glare
   sprite by, not "off". Vanilla Pleasant authors SunGlare `(74,28,0)` at
   dawn/dusk and MoonGlare `(255,175,128)` at night; Cloudy/Rainy/Snow do use 0.
 * **Ambient.Day median 172.2 vs vanilla 100.1 (1.72x)** — the only sky-adjacent
@@ -829,7 +829,7 @@ AUTHORED TES4 data, so this generalises to plugins we have never seen.
 
 ### Rule for future work here
 
-Sky colour is NOT the bloom lever and has already been over-corrected. Before
+Sky color is NOT the bloom lever and has already been over-corrected. Before
 adding any further clamp to NAM0, measure `output/` against `Skyrim.esm` and
 check the JOINT relation against the tonemapper, not the marginal range.
 
@@ -881,12 +881,12 @@ pixel = (Σ_stop BlendColor[stop] * vertexMask[stop]) * VParams * texture + skyS
 
 Four facts follow, and every one of them is a MECHANISM, not a statistic:
 
-1. **The dome's vertex colours are BLEND MASKS, not colours.** R/G/B select
-   among three colour stops and sum to ~1.0. Measured on both games' shipped
+1. **The dome's vertex colors are BLEND MASKS, not colors.** R/G/B select
+   among three color stops and sum to ~1.0. Measured on both games' shipped
    `Atmosphere.nif`: R=1 at the bottom ring, G=1 mid, B=1 at the zenith. The
    sky gradient is a 3-stop interpolation evaluated per-vertex.
-2. **The texture MULTIPLIES the colour.** `input.Color * baseColor`. A white
-   cloud texel shows the weather colour unchanged; a black texel shows nothing.
+2. **The texture MULTIPLIES the color.** `input.Color * baseColor`. A white
+   cloud texel shows the weather color unchanged; a black texel shows nothing.
    Cloud sheets are therefore MASKS tinted by PNAM, not pictures.
 3. **`skyScale` is ADDITIVE, applied after the multiply.** From
    `BSSkyShader.cpp`, `PParams.y = fInvFrameBufferRange * [sky+0xE4]`, and it is
@@ -906,7 +906,7 @@ the camera's height above the star mesh, and the whole thing is multiplied by
 
 ### Times of day are BLENDED, never selected
 
-`ShaderManager.cpp:1169-1194`. Every NAM0 colour is resolved each frame as a
+`ShaderManager.cpp:1169-1194`. Every NAM0 color is resolved each frame as a
 weighted sum over ALL FOUR times of day:
 
 ```
@@ -923,7 +923,7 @@ the sky is a mix of two adjacent slots, and at dawn the Sunrise and NIGHT slots
 are cross-faded. Tuning one slot toward a vanilla median changes what is drawn
 at times that slot does not name. A second blend sits on top: weather
 transitions keep the previous weather (`Sky.secondWeather`,
-`Sky.weatherPercent`) and lerp the two resolved colours, at rate
+`Sky.weatherPercent`) and lerp the two resolved colors, at rate
 `DATA.TransDelta`.
 
 ### Field-by-field
@@ -934,16 +934,16 @@ Order is the WRITE ORDER from `wbDefinitionsTES5.pas:10623`.
 |---|---|---|
 | `EDID` | var | Editor ID. Not rendered. |
 | `DNAM/CNAM/ANAM/BNAM` | var | LEGACY 4-layer cloud textures (FO3 era). 1 of 177 vanilla weathers. Superseded by `0TX`. |
-| `<hex>0TX` | var | Cloud layer texture, layers 0-31. Sigs `\x30\x30TX`..`\x40\x30TX` for 0-16, then `A0TX`..`O0TX` for 17-31. Each binds to ONE named shape in `Meshes\Sky\Clouds.nif`. The texture MULTIPLIES the layer colour. |
+| `<hex>0TX` | var | Cloud layer texture, layers 0-31. Sigs `\x30\x30TX`..`\x40\x30TX` for 0-16, then `A0TX`..`O0TX` for 17-31. Each binds to ONE named shape in `Meshes\Sky\Clouds.nif`. The texture MULTIPLIES the layer color. |
 | `LNAM` | 4 | Max Cloud Layers. xEdit default 29; the dome has 29 layer shapes. Vanilla: 29 in 164 of 177, 4 in the 13 oldest (form ver <= 35). **A dome contract, not a per-weather style choice.** |
 | `MNAM` | 4 | Precipitation type -> `SPGD` particle geometry. 0 = none. This is what actually spawns rain/snow. |
 | `NNAM` | 4 | Visual effect -> `RFCT`. Nonzero in 2 of 177. |
 | `ONAM` | 4 | Old cloud speeds (unused legacy, 1 of 177). |
 | `RNAM` | 32 | Cloud **Y** speed per layer. Feeds `TexCoordOff` — it SCROLLS the layer's UVs. |
 | `QNAM` | 32 | Cloud **X** speed per layer. Same. |
-| `PNAM` | 512 | Cloud colour per layer x 4 times -> `BlendColor[0]`. **This is what tints cloud sheets** (NOT NAM0 slots 10/11). |
+| `PNAM` | 512 | Cloud color per layer x 4 times -> `BlendColor[0]`. **This is what tints cloud sheets** (NOT NAM0 slots 10/11). |
 | `JNAM` | 512 | Cloud ALPHA per layer x 4 times -> `BlendColor[0].w`, multiplied by texture alpha. Blended with the same `SunAmount` weights. |
-| `NAM0` | 272 | The 17 x 4 colour table (below). |
+| `NAM0` | 272 | The 17 x 4 color table (below). |
 | `FNAM` | 32 | DayNear, DayFar, NightNear, NightFar, DayPower, NightPower, DayMax, NightMax. Near/Far are the fog ramp in world units; Power is the falloff exponent; Max caps fog opacity. |
 | `DATA` | 19 | Packed bytes (below). |
 | `NAM1` | 4 | Disabled-layer BITFIELD; bit N disables layer N. |
@@ -1086,7 +1086,7 @@ Two conversion-critical consequences:
   changes every distance in the scene even when Near/Far are perfect.
 
 `FogNearColor`/`FogFarColor` come from NAM0 slots 1 and 12. TES4 has ONE fog
-colour, so Near and Far get the same value and the `lerp` degenerates to a
+color, so Near and Far get the same value and the `lerp` degenerates to a
 constant — Skyrim's distance-tinting is unavailable from TES4 data alone.
 
 ### The dome alpha ramp — measured on both meshes
@@ -1102,7 +1102,7 @@ horizon (where terrain and fog take over):
 
 Same mechanism, but **Skyrim's fade is ~4x sharper and starts at the horizon
 plane, while Oblivion's dome hangs below it with a long soft fade.** Oblivion
-therefore paints its own soft horizon band with sky colour; Skyrim hands that
+therefore paints its own soft horizon band with sky color; Skyrim hands that
 band to FOG almost immediately. This is the mechanism behind "the horizon is
 wrong": an Oblivion weather relies on dome geometry that Skyrim does not have,
 so the horizon transition must be carried by FNAM instead.
@@ -1175,7 +1175,7 @@ Judged against the shader math above, NOT against vanilla's medians.
 
 Since the sky pixel is `(Σ stops x mask) x VParams x texture + skyScale`, and
 `VParams` is a global while the stops come straight from NAM0, the ONLY
-per-weather multiplier we control is the colour itself and the additive
+per-weather multiplier we control is the color itself and the additive
 `skyScale` from the imagespace. That is why deriving Sky Scale from sky
 luminance produced bloom: it moves an ADDITIVE floor in proportion to the
 MULTIPLICATIVE term.
@@ -1230,7 +1230,7 @@ Address Library IDs -> 1.6.659 RVAs (via `tools/disasm/address_lib.py`):
 anywhere in the engine** — 29 is only how many layer shapes the shipped
 `Clouds.nif` happens to contain.
 
-### `Sky::SetColor` @ 0x3cddb0 — the exact NAM0 colour resolve
+### `Sky::SetColor` @ 0x3cddb0 — the exact NAM0 color resolve
 
 `COLOR_BLEND { Color RGBVal[4]; float blend[4]; }` (Sky.h). The disassembly
 does, per channel c in {r,g,b} (offsets +0/+1/+2 inside each `Color`, and the
@@ -1254,8 +1254,8 @@ else if (out.c < 0)                     out.c = 0
 ```
 
 `[rax+0x670/0x671/0x672]` = `0x664 + 0xC/0xD/0xE` = `data.lightningColor.red/
-green/blue`. **So DATA lightning colour is a per-channel CEILING on the
-lightning flash, not a tint that is added.** A lightning colour of (0,0,0)
+green/blue`. **So DATA lightning color is a per-channel CEILING on the
+lightning flash, not a tint that is added.** A lightning color of (0,0,0)
 clamps the flash to black, i.e. disables the visible flash on that channel.
 
 `Sky::FillColorBlendColors` (source, CommonLibSSE-NG `src/RE/S/Sky.cpp:78`)
@@ -1271,7 +1271,7 @@ RGBVal[3] = lastWeather   ->colorData[type][time2]
 **So the resolve is a 2x2 blend: two adjacent times-of-day x two weathers
 (current + outgoing), all four summed with independent weights and divided by
 255.** A given time-of-day slot is therefore never displayed alone, and during
-a weather transition FOUR authored colours are live simultaneously.
+a weather transition FOUR authored colors are live simultaneously.
 
 ### `Clouds::Update` @ 0x3c52e0 — LNAM, NAM1, RNAM/QNAM, PNAM/JNAM
 
@@ -1366,11 +1366,11 @@ where the RNAM/QNAM scroll offsets arrive.
 
 Consequences that follow from the code, not from any distribution:
 
-1. **Dome vertex colours are blend MASKS.** Measured on both games' shipped
+1. **Dome vertex colors are blend MASKS.** Measured on both games' shipped
    `Atmosphere.nif`: R/G/B sum to ~1.0 across 8 height buckets, R=1 at the
    bottom ring -> G mid -> B at zenith. So NAM0 Sky-Upper / Sky-Lower / Horizon
    are three gradient STOPS the dome interpolates per-vertex.
-2. **Texture MULTIPLIES colour** (`input.Color * baseColor`). Cloud sheets are
+2. **Texture MULTIPLIES color** (`input.Color * baseColor`). Cloud sheets are
    masks tinted by PNAM; a black texel renders nothing.
 3. **skyScale is ADDITIVE and applied after the multiply.** No texture value or
    alpha can remove it — it is a floor on sky brightness.
@@ -1436,8 +1436,8 @@ cache = currentClimate->timing.sunrise.begin * 0.16666667f;   // 1/6
 CLMT stores these as **10-minute increments past midnight** (u8), and the
 engine multiplies by 1/6 to get GAME HOURS. These four hours are what position
 the `blend[4]` weights that `SetColor` consumes, so **CLMT timing and WTHR
-colours are one system**: change the climate timings and every weather's
-rendered colour changes, because different time slots become dominant.
+colors are one system**: change the climate timings and every weather's
+rendered color changes, because different time slots become dominant.
 
 ---
 
@@ -1480,7 +1480,7 @@ cmovl eax, edx                  ; idx = (layer < LNAM) ? layer : 0
 movss xmm0, [rcx + rdx*4 + 0x460]   ; cloudAlpha[idx][time]   JNAM
 ```
 
-For contrast, the **PNAM cloud-colour getter @ 0x2c1e99** has NO LNAM clamp at
+For contrast, the **PNAM cloud-color getter @ 0x2c1e99** has NO LNAM clamp at
 all — it indexes `[r9 + rcx*4 + 0x260]` directly.
 
 ### What LNAM therefore IS
@@ -1548,7 +1548,7 @@ Tools written for this: `scratchpad/ob_rtti.py` (MSVC RTTI -> vtable),
 ### THE SKY GRADIENT IS THE SAME ALGORITHM IN BOTH ENGINES
 
 `Atmosphere::Update` @ `0x53b0e0` gates on `Sky+0xDC` being 2 or 3 (the same
-`kSkyDomeOnly` / `kFull` mode gate Skyrim uses), then writes THREE RGBA colour
+`kSkyDomeOnly` / `kFull` mode gate Skyrim uses), then writes THREE RGBA color
 stops into the render globals `0xB431A8`, `0xB431B8`, `0xB431C8`. A staging
 copy at `0x7BD739` moves `0xB431A8..0xB431D4` (16 floats = 4 float4s) into the
 shader-constant block at `0xB43178`.
@@ -1573,13 +1573,13 @@ vsout.Color.w   = BlendColor[0].w * input.Color.w;
 
 **These are the same instruction sequence.** `c4/c5/c6` are Oblivion's
 `BlendColor[0..2]`. Both engines resolve the dome as a 3-stop blend weighted by
-the mesh's vertex colours, and both take alpha from `stop0.a * vertexAlpha`.
+the mesh's vertex colors, and both take alpha from `stop0.a * vertexAlpha`.
 
 Oblivion's sky PIXEL shaders (same package):
 
 | Offset | Shader | Body |
 |---|---|---|
-| `0x0288c0` | SKY (dome) | `mov r0, v0` — output IS the interpolated vertex colour |
+| `0x0288c0` | SKY (dome) | `mov r0, v0` — output IS the interpolated vertex color |
 | `0x028ee0` | SKYHORIZFADE (stars) | `r0.xyz = t0 * v0`, `r0.w = t0.w * v0.w * dp3(c0,t2)` |
 | `0x028a38` | SKYCLOUDSFADE | two-texture lerp by `c4`, then `r0.xyz *= v0`, `r0.w *= v0.w` |
 
@@ -1590,7 +1590,7 @@ Oblivion's dome shader has no additive term at all — it ends at the `mad`.
 
 That single term is exactly what the earlier measurement fingered: our
 converter DERIVES Sky Scale from sky luminance, so it moves an additive floor
-in proportion to a multiplicative colour. Oblivion has no such term to inherit,
+in proportion to a multiplicative color. Oblivion has no such term to inherit,
 so **there is nothing in the TES4 record that should ever drive it.**
 
 Other constants recovered from the sky shaders: `c12.x` is the cloud UV scroll
@@ -1629,10 +1629,10 @@ value = old + (new - old) * ((Sky.weatherPercent - a) / b)
 ```
 
 with `Sky+0xD8` = `weatherPercent`. So **every HDR parameter is cross-faded
-between the outgoing and incoming weather**, exactly as the colours are.
+between the outgoing and incoming weather**, exactly as the colors are.
 
 `0xB43208` (SunlightDimmer) is then consumed at `0x848CA0` where it MULTIPLIES a
-three-component colour (`esp`, `esp+4`, `esp+8`) after the `0xB43074`
+three-component color (`esp`, `esp+4`, `esp+8`) after the `0xB43074`
 HDR/non-HDR bank select — i.e. it scales the directional light RGB, not the sky.
 
 ### What this settles about the conversion
@@ -1640,13 +1640,13 @@ HDR/non-HDR bank select — i.e. it scales the directional light RGB, not the sk
 1. **Sky-Upper / Sky-Lower / Horizon transfer 1:1.** Both engines run the same
    3-stop vertex blend over domes measured to carry the same R/G/B partition of
    unity. No scaling is justified by the algorithms.
-2. **Cloud tint transfers 1:1.** Both do `texture * vertexColour`.
+2. **Cloud tint transfers 1:1.** Both do `texture * vertexColor`.
 3. **Skyrim's `skyScale` has NO Oblivion counterpart.** It must come from
-   vanilla-authored imagespace values, never derived from TES4 colour.
+   vanilla-authored imagespace values, never derived from TES4 color.
 4. **Oblivion's HDR block does not map onto NAM0 at all.** `BrightScale`/
    `BrightClamp` drive the separate `HDR%03i.pso` post-process pass; the sky
    shader never sees them. They belong in the IMGS bloom fields, and treating
-   them as a reason to scale sky COLOUR was wrong.
+   them as a reason to scale sky COLOR was wrong.
 5. **Both cross-fade weather the same way** (Oblivion `Sky+0xD8`, Skyrim
    `Sky::currentWeatherPct` +0x1B8), so `DATA.TransDelta` is directly
    comparable.
@@ -1666,7 +1666,7 @@ Evidence, all from the shipped shaders and the exe:
 * The sky vertex shaders write only `oPos` (RASTOUT#0), `oD0` (ATTROUT) and
   `oT0/oT1` (TEXCRDOUT).
 * `Atmosphere::Update` @ `0x53b0e0` writes the weather's fog values into a
-  `BSFogProperty`: near -> `+0x2C`, far -> `+0x30`, colour -> `+0x20`
+  `BSFogProperty`: near -> `+0x2C`, far -> `+0x30`, color -> `+0x20`
   (`0x53b318`-`0x53b34c`), and toggles a flag bit at `[ecx+0x18]` from a
   `near >= far` comparison (`0x53b2e6`-`0x53b30c`).
 * Exactly ONE site in `.text` reads both `+0x2C` and `+0x30` as floats
@@ -1676,7 +1676,7 @@ With no shader-side fog and near/far handed to a fog property, Oblivion is
 using the D3D9 fixed-function pipeline. Per the D3D spec, `D3DFOG_LINEAR` is:
 
 ```
-f = (End - d) / (End - Start)          then colour = lerp(fogColour, pixel, f)
+f = (End - d) / (End - Start)          then color = lerp(fogColor, pixel, f)
 ```
 
 A pure linear ramp. **No exponent. No maximum-density clamp.** That matches the
@@ -1722,7 +1722,7 @@ density. Both are visible, systematic departures from what Oblivion draws, and
 neither is derivable from any TES4 field.
 
 One caveat worth stating: Oblivion's linear fog means distant terrain reaches
-FULL fog colour, whereas Max=0.9 always lets 10% of the scene show through.
+FULL fog color, whereas Max=0.9 always lets 10% of the scene show through.
 Which looks "better" is a judgement call, but only Power=1.0 / Max=1.0
 reproduces Oblivion.
 
@@ -1764,7 +1764,7 @@ this doc only had the FIELD NAMES for them. The compiled shaders live in
 
 ```asm
 def   c0, 0, 1, 0, 0
-texld r0, t0, in0          ; scene colour
+texld r0, t0, in0          ; scene color
 add   r1.xyz, r0, -c1.x    ; scene - c1.x
 max   r0.xyz, r1, c0.x     ; max(..., 0)
 mul   r0.xyz, r0, c1.y     ; * c1.y
@@ -1811,11 +1811,11 @@ An auto-exposure tone map with an additive bloom term — `TargetLUM` /
 
 ### What this proves about the conversion
 
-**The HDR pass NEVER touches the sky's authored colour.** It is a full-screen
+**The HDR pass NEVER touches the sky's authored color.** It is a full-screen
 POST-PROCESS applied to the composed frame:
 
 * The sky vertex shader emits `oD0 = Σ stop_i * vertexMask_i` (measured above).
-* The sky pixel shader emits `colour = texture * oD0` with **no additive term**.
+* The sky pixel shader emits `color = texture * oD0` with **no additive term**.
 * Only afterwards does the HDR chain read the rendered frame and apply
   `max(scene - BrightClamp, 0) * BrightScale` for bloom, plus auto exposure.
 
@@ -1825,7 +1825,7 @@ Therefore:
    MUST NOT scale NAM0.** Skyrim's IMGS has `Bloom Threshold` and `Bloom Scale`
    which occupy exactly these two roles (threshold subtracted, then gain), so
    the mapping is one-to-one and needs no fitting.
-2. Every earlier theory that Oblivion's colours are "pre-compensated" for a
+2. Every earlier theory that Oblivion's colors are "pre-compensated" for a
    scene-brightness term was chasing a post-process that operates on the final
    frame, not on the record. The measurements that refuted those theories
    (`/BrightScale` raising scatter, `x0.5` being worse than raw) were correct,
@@ -1841,12 +1841,12 @@ conversion cannot be a pure value copy:
 
 | # | Difference | Consequence |
 |---|---|---|
-| 1 | Skyrim's sky pixel shader adds `skyScale`; Oblivion has no additive term | must come from vanilla imagespace values, never derived from colour |
+| 1 | Skyrim's sky pixel shader adds `skyScale`; Oblivion has no additive term | must come from vanilla imagespace values, never derived from color |
 | 2 | Oblivion fog is fixed-function LINEAR; Skyrim is `min(Max, pow(t, Power))` | write `Power = 1.0`, `Max = 1.0` to reproduce Oblivion |
 | 3 | Oblivion dome fades alpha over ~85 units from z=-32; Skyrim over ~18 from z=0 | the horizon band Oblivion paints with geometry must be carried by fog in Skyrim |
 | 4 | Oblivion `Clouds` has 4 layer pointers; Skyrim has 32 bands with fixed per-band UVs | 2 authored sheets must be distributed across bands; no authored source for which |
 | 5 | Oblivion HDR is a per-weather post-process; Skyrim's is a referenced IMGS | map BrightClamp->Bloom Threshold, BrightScale->Bloom Scale |
-| 6 | TES4 has one fog colour; TES5 lerps Near->Far colour | Near and Far get the same value; distance tinting unavailable |
+| 6 | TES4 has one fog color; TES5 lerps Near->Far color | Near and Far get the same value; distance tinting unavailable |
 
 Everything else in the record — the 3-stop sky gradient, cloud tint, cloud
 alpha, cloud scroll, the 2x2 time/weather blend, precipitation gating, CLMT
@@ -1894,7 +1894,7 @@ intensity (IMGS "Receive Bloom Threshold").
 |---|---|---|
 | exposure | `1 / max(lum, clamp)` | `avg.y / avg.x` |
 | curve | **linear** (no compression) | **Reinhard** `x(xp+1)/(x+1)` |
-| bloom weight | `exposure * LumClamp` — a CONSTANT per frame | `saturate(Intensity - colour)` — **per-pixel, decreasing with brightness** |
+| bloom weight | `exposure * LumClamp` — a CONSTANT per frame | `saturate(Intensity - color)` — **per-pixel, decreasing with brightness** |
 | bloom source | `max(scene - BrightClamp, 0) * BrightScale` | separate bright-pass with its own Threshold/Scale |
 
 The important one is the bloom weight. Oblivion adds bloom **uniformly**;
@@ -1928,7 +1928,7 @@ two independent causes, both measured, and only one of them was suspected.
 ### Cause 1: the two domes fade over very different ANGULAR extents
 
 Both `Atmosphere.nif` meshes were resampled ring-by-ring and converted from
-mesh-space z to **elevation angle from the camera** (the dome is drawn centred
+mesh-space z to **elevation angle from the camera** (the dome is drawn centered
 on the eye, so mesh elevation IS view elevation). Tool:
 `scratchpad/dome_alpha_curve.py`.
 
@@ -1958,8 +1958,8 @@ Oblivion's sky pixel shader passes straight through (`mov r0, v0`, measured).
 ### What that means physically
 
 Oblivion's dome is a **sky-to-fog cross-fade in geometry**. Below ~+10° the
-authored Horizon colour is never shown at full strength; it is always diluted
-toward whatever is behind (fog). Skyrim reaches full Horizon colour by +2.09°.
+authored Horizon color is never shown at full strength; it is always diluted
+toward whatever is behind (fog). Skyrim reaches full Horizon color by +2.09°.
 
 Composited as `sky*a + fog*(1-a)` over all 148 converted weather/time pairs:
 
@@ -2007,7 +2007,7 @@ terrain, not just a corner case. And 25 of 37 weathers have `Far < 60000`, so
 their ramp completes well before the horizon and the whole skyline renders at
 the leaky 0.9.
 
-### The correct normalisation
+### The correct normalization
 
 **Fog (the real fix, and it is exact):**
 ```
@@ -2020,7 +2020,7 @@ unchanged (with the existing negative-Near clamp, which is still correct
 because `saturate` degenerates otherwise).
 
 **Dome fade (a genuine but smaller correction):** Skyrim shows the authored
-Horizon colour undiluted from +2.09° up, where Oblivion is still only 0.847
+Horizon color undiluted from +2.09° up, where Oblivion is still only 0.847
 opaque and mixing in fog. To match what Oblivion DISPLAYS, the Horizon slot
 should be written as Oblivion's own composite at that angle:
 
@@ -2103,7 +2103,7 @@ shipped `output/Oblivion.esm/Oblivion.esm`.
 | Change | Mechanism | Verified in output |
 |---|---|---|
 | `FNAM` Power/Max 0.4/0.9 -> **1.0/1.0** | Skyrim's `min(Max, pow(t,Power))` equals Oblivion's fixed-function linear ramp exactly at 1/1. Oblivion's fog is linear because **none** of its 123 vertex shaders writes `oFog`. | Power and Max are 1.0 on all 37 |
-| Sky Scale: luminance ramp -> **classification x time lookup** | Sky Scale is ADDITIVE in Skyrim's sky shader (`colour*tex + skyScale`); Oblivion's dome shader has no additive term. Deriving it from colour is a feedback loop. Vanilla keys it on class x time (R2 0.434) not luminance (R2 0.166). | corr(SkyUpper, SkyScale) **0.885 -> 0.188** (vanilla 0.407); FogNear 0.714 -> 0.180 |
+| Sky Scale: luminance ramp -> **classification x time lookup** | Sky Scale is ADDITIVE in Skyrim's sky shader (`color*tex + skyScale`); Oblivion's dome shader has no additive term. Deriving it from color is a feedback loop. Vanilla keys it on class x time (R2 0.434) not luminance (R2 0.166). | corr(SkyUpper, SkyScale) **0.885 -> 0.188** (vanilla 0.407); FogNear 0.714 -> 0.180 |
 | `LNAM` fixed 2 -> **max(authored layer)+1** | LNAM is an INDEX CLAMP into RNAM/QNAM/JNAM (`cmovl`, three readers), not a draw count. Layers >= LNAM still draw but reuse layer 0's speed and alpha. | 36 weathers LNAM=2, 1 weather LNAM=1 (SigilWhiteOut, no sheets) |
 | `QNAM` all-0x7F -> **signed X drift** | Speed decodes as `byte*0.2/254 - 0.1`; 0x7F is stationary. Vanilla authors X drift on 557 of 2656 entries, negative on 77. | 36/37 have X drift, all negative |
 | Stars: continuous -> **blanked for rain/snow** | Vanilla treats Stars as a visibility switch: Rainy 95.7% black, Snow 77.8% black, Pleasant 91.4% white. Cloudy left alone (vanilla is 60/18 split). | 9/9 rain+snow weathers blanked |
@@ -2119,8 +2119,8 @@ Tests: 4 new cases in `tests/test_import.py` pinning the mechanisms
 `test_cloud_drift_is_two_dimensional_and_signed`,
 `test_stars_are_blanked_under_rain_and_snow`,
 `test_fog_curve_reproduces_oblivions_linear_ramp`), plus
-`test_sky_scale_never_derives_from_sky_colour` which doubles every authored
-sky colour and asserts Sky Scale does not move. 335 pass.
+`test_sky_scale_never_derives_from_sky_color` which doubles every authored
+sky color and asserts Sky Scale does not move. 335 pass.
 
 ### Deliberately NOT changed
 
@@ -2134,7 +2134,7 @@ sky colour and asserts Sky Scale does not move. 335 pass.
 * **Bloom Threshold / Bloom Scale from BrightClamp / BrightScale.** The
   bright-pass roles match exactly (`max(scene-Clamp,0)*Scale` in Oblivion's
   `HDR005.pso`), but Skyrim then applies Reinhard and masks bloom by
-  `saturate(Intensity - colour)` while Oblivion adds it flat. Copying the
+  `saturate(Intensity - color)` while Oblivion adds it flat. Copying the
   numbers across two different composite operators needs in-game fitting.
 * **`NAM1` layer disabling, `TNAM` sky statics, cloud-band distribution,
   HNAM volumetric lighting.** All are things vanilla does that we do not, but
@@ -2142,13 +2142,13 @@ sky colour and asserts Sky Scale does not move. 335 pass.
 
 ---
 
-## NAM0 colour: the per-plugin normalisation is GONE, replaced by a highlight knee (2026-08-24)
-<a id="nam0-colour-per-plugin-normalisation"></a>
+## NAM0 color: the per-plugin normalization is GONE, replaced by a highlight knee (2026-08-24)
+<a id="nam0-color-per-plugin-normalization"></a>
 
 ### What was wrong
 
 The converter used to compute the PLUGIN's median luminance per slot AND per
-time, scale every colour so that median landed on vanilla's, then cap at
+time, scale every color so that median landed on vanilla's, then cap at
 vanilla's p90. It did suppress the bloom, but in game it produced two clearly
 wrong results, both confirmed by the user:
 
@@ -2174,7 +2174,7 @@ vanilla       83.8  125.8  168.0  193.5  220.3
 ```
 
 **The palettes AGREE at the bottom and diverge only at the top.** Oblivion's
-colours are not broadly hot; only the top ~20% is — which is exactly the part
+colors are not broadly hot; only the top ~20% is — which is exactly the part
 that crosses the bright-pass threshold
 (`max(scene - BloomThreshold, 0) * BloomScale`, verified in Oblivion's
 `HDR005.pso` and Skyrim's `ISHDR.hlsl`). A uniform scale therefore darkens
@@ -2183,7 +2183,7 @@ different problems.**
 
 ### What replaced it
 
-A soft knee, per colour:
+A soft knee, per color:
 
 ```
 lum <= knee            -> returned EXACTLY as authored
@@ -2195,13 +2195,13 @@ with `knee = 160, ceiling = 200`, and the **Sun slot on its own much harder
 knee (30 -> 60)**. Sun is the one genuine outlier: TES4 day median 193.4 vs
 vanilla 42.5 (4.55x, where no other slot exceeds 1.7x), and in Skyrim the
 sun's apparent brightness comes from the glare pass and the imagespace, not
-from this colour — so a near-white disc here is a pure bloom source.
+from this color — so a near-white disc here is a pure bloom source.
 
 Chosen in game via `tools/make_sky_unjustified_esp.py` (removed 2026-08-25; variant `UJkneeSun`)
 against `UJbase` / `UJraw` / `UJknee` / `UJkneeSoft` / `UJkneeHard` /
 `UJsunonly`.
 
-Because the curve is a pure function of one colour's luminance it has **no
+Because the curve is a pure function of one color's luminance it has **no
 time axis and no plugin-population term**, so the authored day/night curve
 survives and a weather converts identically regardless of its neighbours.
 
@@ -2228,7 +2228,9 @@ now tracks vanilla at the top without touching the midtones.
 The one place the ratio does shift is a slot whose DAY value is above the knee
 (Sunlight 0.452 -> 0.520). That is inherent to compressing a highlight — night
 is under the knee so it cannot move, therefore its relative share rises. It is
-+15% against the old code's +246%.
++15% against the old code's +246%. `test_the_knee_has_no_time_axis` measures the
+same effect on a synthetic slot: authored 0.073 becomes 0.085 (+16%), against
+the +246% the per-time normalization produced.
 
 `PNAM` cloud tints use the same knee for the same reason (the sheet is
 MULTIPLIED by the tint in both engines' pixel shaders, so a near-white tint
@@ -2238,7 +2240,7 @@ had the identical time-axis flaw.
 ### Rule
 
 `set_nam0_normalization()` and `_NAM0_K` are deleted. **Do not reintroduce a
-per-plugin or per-time colour scale.** If a colour problem appears, first ask
+per-plugin or per-time color scale.** If a color problem appears, first ask
 whether it is a PALETTE problem or a HIGHLIGHT problem — they need different
 fixes, and conflating them is what cost several in-game rounds here.
 
@@ -2362,8 +2364,8 @@ Measured over `export/FalloutNV.esm/WTHR.txt` (63 records): **55 are 240 bytes,
 
 `_wthr_nam0`, `_wthr_cloud_colors` and `_wthr_dalc` all index
 `raw[(slot * 4 + time) * 4]`. Against a six-time blob every slot after the
-first reads from the wrong colour, and the daytime index lands in the zeroed
-High Noon / Midnight padding. For `DefaultWeather`, day colours read as:
+first reads from the wrong color, and the daytime index lands in the zeroed
+High Noon / Midnight padding. For `DefaultWeather`, day colors read as:
 
 | slot | shipped (stride 4) | authored (stride 6) |
 |---|---|---|

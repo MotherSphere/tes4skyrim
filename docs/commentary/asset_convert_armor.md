@@ -587,6 +587,26 @@ OB headhuman.nif vs SK malehead.nif (see docs/commentary/asset_convert_nif.md):
   Y span      OB [-3.75, +11.31]  SK [-5.97, +11.58] -> the SK skull
 
 
+### <a id="prn-multi-shape-bone-frame"></a>Every shape of a PRN piece gets the SAME bone frame
+
+A PRN piece's own node translation is an offset WITHIN the piece, not a second
+attachment point, so the bone position belongs on every shape equally and the
+shape's own offset has to survive it. Two wrong ways, each measured:
+
+- **Overwriting the node outright** drops the piece's own offset. Armun-An
+  Bonemold (node y=+2.8567) landed 3.33 units behind the skull once the PRN
+  sy=1.165 scale amplified it.
+- **ADDING the bone position to the node** is right only for a single-shape
+  piece. With two shapes it offsets them against each other, which split the
+  Imperial Legion helm (`Helmet:0` at origin, `default` at x=-1.6) into a
+  centered half and a shifted half.
+
+Correct: bake each shape's own transform into its verts (`bake_block_transform`),
+then give every shape the identical bone frame. Rigid skinning ignores node
+transforms at render time anyway, and the identity bind `_add_prn_skin` writes
+needs the verts to carry the offset.
+
+
 ## Closing the last ~10% cuirass-edge gap — 17 ideas, 11 measured failures
 <a id="cuirass-edge-gap-ideas"></a>
 

@@ -295,8 +295,8 @@ def cmd_restpose(args):
             if not mask.any():
                 continue
             P = pos[mask]
-            centre = np.median(P, axis=0)
-            dist = np.linalg.norm(P - centre, axis=1)
+            center = np.median(P, axis=0)
+            dist = np.linalg.norm(P - center, axis=1)
             med, mx = float(np.median(dist)), float(dist.max())
             spike = mx > 6 * max(med, 1.0)
             if spike:

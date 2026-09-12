@@ -1547,13 +1547,13 @@ int main(int argc, char** argv)
     //     +0x7c  float     = 84.0     tree height (stored 0x788310)
     //     +0x84  uint32    = 470      LEAF COUNT
     //     +0x90  float*    -> count*3 ALL finite, bbox z 70.3..224.4, i.e.
-    //                                 one XYZ CENTRE per leaf, in the same
+    //                                 one XYZ CENTER per leaf, in the same
     //                                 world space as the branch coords
-    //     +0x8c  float*    -> count*N in [0, 0.863] (normalised; size/wind)
+    //     +0x8c  float*    -> count*N in [0, 0.863] (normalized; size/wind)
     //
     // Written as a second chunk after the branch data so existing readers
     // that stop at the strips keep working:
-    //     'SPTL'  uint32 leafCount  float32[count*3] centres
+    //     'SPTL'  uint32 leafCount  float32[count*3] centers
     {
         unsigned groups = leaf_group_count(self);
         logf("[spt_engine] leaf groups (tree+0xc0) = %u\n", groups);
@@ -1576,7 +1576,7 @@ int main(int argc, char** argv)
             unsigned lcount = *(const uint16_t*)((const uint8_t*)&lg + 0x84);
             const float* lp = (const float*)(uintptr_t)
                 *(const uint32_t*)((const uint8_t*)&lg + 0x90);
-            logf("[spt_engine] leaf count=%u centres=0x%08x\n",
+            logf("[spt_engine] leaf count=%u centers=0x%08x\n",
                  lcount, (unsigned)(uintptr_t)lp);
             if (lcount && lcount < 500000 && lp &&
                 !IsBadReadPtr(lp, lcount * 3 * sizeof(float))) {
@@ -1592,7 +1592,7 @@ int main(int argc, char** argv)
                         if (c[a] > mx[a]) mx[a] = c[a];
                     }
                 }
-                logf("    centres finite %u/%u  bbox min %g %g %g  max %g %g %g\n",
+                logf("    centers finite %u/%u  bbox min %g %g %g  max %g %g %g\n",
                      finite, lcount, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
                 fwrite("SPTL", 1, 4, o);
                 fwrite(&lcount, 4, 1, o);
@@ -1610,7 +1610,7 @@ int main(int argc, char** argv)
                 // so M[eax], M[eax+4] are the card's X and Y half-extents --
                 // the base dimension the 0x79a25b scalar multiplies.  eax
                 // comes from the leaf-system's [edi+0x20] indexed per leaf
-                // (0x798aed); [edi+0x24] holds the 3-float centres.
+                // (0x798aed); [edi+0x24] holds the 3-float centers.
                 //
                 // The leaf system is [self+8] (0x788126 sets esi = ecx, then
                 // 0x7881b5 loads ecx = [esi+8]); reading [tree+8] instead is
@@ -1629,7 +1629,7 @@ int main(int argc, char** argv)
                 // NaNs on ginkgo and pure garbage on dbush03, so that is the
                 // wrong slot or the wrong stride.  A full stride survey
                 // (1/2/3/4/6/8/12/16 across +0x88..+0xa4) found only `+0x88`
-                // fully finite, and its values are NORMALISED (dbush03
+                // fully finite, and its values are NORMALIZED (dbush03
                 // 0..0.022) rather than world-unit sizes.  Card size
                 // therefore still uses the section 6t formula; see
                 // docs/speedtree_engine_decomp.md section 6y.
@@ -1649,7 +1649,7 @@ int main(int argc, char** argv)
             fwrite("SPTL", 1, 4, o);
             fwrite(&zero, 4, 1, o);
         }
-        logf("[spt_engine] wrote %u leaf centres\n", written);
+        logf("[spt_engine] wrote %u leaf centers\n", written);
     }
 
     fclose(o);

@@ -2,7 +2,7 @@
 
 Skyrim's water shader has no diffuse texture and no emissive term (see
 `asset_convert/lava_surface.py` for the disassembly that establishes this), so
-a WATR record alone cannot render as lava however its colours are set.  Vanilla
+a WATR record alone cannot render as lava however its colors are set.  Vanilla
 Dawnguard solves it by layering a mesh with a BSEffectShaderProperty over the
 water; this module builds the record side of that layer:
 
@@ -182,14 +182,16 @@ class LavaPlanner:
         return self._world_water.get(world) in self.lava_fids
 
     def refr_for(self, cell_rec: dict):
-        """The lava REFR bytes for this cell, or None when it has no lava."""
+        """The lava REFR bytes for this cell, or None when it has no lava.
+
+        An exterior plane goes at the cell's grid center; an interior one at
+        the cell's own origin, where Oblivion's interior water plane sits.
+        """
         if not self.cell_has_lava(cell_rec):
             return None
         cell_fid = get_formid(cell_rec, 'FormID')
         x = get_int(cell_rec, 'XCLC.X', None)
         if x is None:
-            # Interior: the plane is centred on the cell's own origin, which is
-            # where Oblivion's interior water plane sits too.
             wx = wy = 0.0
         else:
             y = get_int(cell_rec, 'XCLC.Y', 0)

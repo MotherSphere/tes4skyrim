@@ -13,6 +13,7 @@ owns it, and what it is linked to. Region decoration (REGN, LSCR, WATR) lives in
 - [Exclusive LCEC cell ownership](#exclusive-lcec-cell-ownership)
 - [Teleport doors bucketed by worldspace](#teleport-doors-by-worldspace)
 - [Nested interiors inherit a location](#nested-interiors-inherit-location)
+- [LAND DATA flags pass through VERBATIM](#land-data-flags-verbatim)
 
 ## <a id="xlkr-enable-parent-becomes-linked-ref"></a>XLKR — the enable parent becomes the linked ref
 
@@ -97,3 +98,17 @@ fixed point. Iteration is over `sorted(interior_links)` and each
 `sorted(interior_links[src])`, and the first writer wins, so the marker links
 established earlier are never overwritten and the output stays
 byte-reproducible.
+
+## <a id="land-data-flags-verbatim"></a>LAND DATA flags pass through VERBATIM
+
+🛑 **Verified vanilla-legal — do NOT "normalize" these.** Bit 0 (`0x01`) is
+"Has Vertex Normals/Height Map" and bit 4 (`0x10`) is "Auto-Calc Normals".
+
+A LAND with no VNML/VHGT is the author DELETING that cell's terrain — the
+"water only, no landscape" case — and it is legal with or without the
+auto-calc bit. Skyrim.esm's records that CLEAR bit 0: **149 at flags 28, 3 at
+flags 30** (these carry VCLR), **and 2 at flags 12** — which is exactly the
+value `TWMP_ValenwoodImproved` uses.
+
+Rewriting the flags-12 pair to 28 looked like a fix only because a PARTIAL
+census missed it. `convert_LAND` writes `DATA.Flags` through unchanged.

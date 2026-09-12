@@ -654,7 +654,7 @@ def _paint_on(app, saved) -> None:
 
 
 def _paint_off(app, saved) -> None:
-    """Restore the normal sidebar colours and cursor."""
+    """Restore the normal sidebar colors and cursor."""
     app.sidebar.configure(style="Panel.TFrame")
     app.sb_body.configure(style="Panel.TFrame")
     app.sb_canvas.configure(bg=CLR["panel"])

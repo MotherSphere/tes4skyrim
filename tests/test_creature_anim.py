@@ -935,9 +935,9 @@ class TestDeathPileExtraction:
         assert not os.path.exists(dst)
 
 
-class TestParticleColour:
-    """A converted particle system must keep its AUTHORED colour, and its
-    shader tint must stay neutral when the particles carry their own colour
+class TestParticleColor:
+    """A converted particle system must keep its AUTHORED color, and its
+    shader tint must stay neutral when the particles carry their own color
     (docs/commentary/asset_convert_creature.md -- the ghost's smoke rendered black)."""
 
     GHOST_SKEL = os.path.join(REPO, 'export', 'Oblivion.esm', 'meshes',
@@ -955,9 +955,11 @@ class TestParticleColour:
             d.read(f)
         return d
 
-    def test_authored_colour_survives(self, tmp_path):
-        # source NiColorData starts at a pale green (0.70, 0.83, 0.75); the
-        # converter used to overwrite every system with a fire palette
+    def test_authored_color_survives(self, tmp_path):
+        """The source NiColorData pale green (0.70, 0.83, 0.75) must survive.
+
+        The converter used to overwrite every system with a fire palette.
+        """
         d = self._convert(tmp_path)
         checked = 0
         for b in d.roots[0].tree():
@@ -973,12 +975,15 @@ class TestParticleColour:
                 checked += 1
             if checked:
                 break
-        assert checked, 'no colour modifier found'
+        assert checked, 'no color modifier found'
 
-    def test_shader_tint_is_neutral_when_particles_are_coloured(self,
+    def test_shader_tint_is_neutral_when_particles_are_colored(self,
                                                                 tmp_path):
-        # BSEffectShaderProperty.emissive_color MULTIPLIES the texture, so the
-        # source's near-black (0.04) NiMaterialProperty made the smoke black
+        """Emissive color must stay bright when the particles carry the color.
+
+        BSEffectShaderProperty.emissive_color MULTIPLIES the texture, so the
+        source's near-black (0.04) NiMaterialProperty made the smoke black.
+        """
         d = self._convert(tmp_path)
         checked = 0
         for b in d.roots[0].tree():
@@ -1037,6 +1042,8 @@ class TestPileCollision:
         assert any(n.startswith('bhk') for n in names), sorted(names)
 
     def test_pile_collision_is_the_vanilla_phantom(self, tmp_path):
+        """Pile collision is a phantom whose transform centers the box on the
+        geometry (z ~10 game units)."""
         d = self._pile('ghost', tmp_path)
         assert d is not None
         names = [b.__class__.__name__ for b in d.blocks]
@@ -1057,7 +1064,6 @@ class TestPileCollision:
         assert 0.10 < float(box.dimensions.x) < 0.25, box.dimensions.x
         assert 0.10 < float(box.dimensions.y) < 0.25, box.dimensions.y
         assert 0.08 < float(box.dimensions.z) < 0.25, box.dimensions.z
-        # ...and the transform shape centres it on the geometry (z ~10 gu)
         assert 0.05 < float(xf.transform.m_34) < 0.30, xf.transform.m_34
         spco = [b for b in d.blocks
                 if b.__class__.__name__ == 'bhkSPCollisionObject']

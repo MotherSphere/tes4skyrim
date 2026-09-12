@@ -263,12 +263,12 @@ class TestHeightMapEncoding:
         """
         good = bytearray(60 + (v * 145) // 255 for v in range(256))
         assert max(good) - min(good) <= 150
-        out = parallax.normalise_height(good)
+        out = parallax.normalize_height(good)
         assert bytes(out) == bytes(good), 'a well-made map was modified'
 
     def test_amplitude_cap_compresses_an_over_deep_map(self):
         deep = bytearray(range(256))                     # amplitude 255
-        out = parallax.normalise_height(deep)
+        out = parallax.normalize_height(deep)
         assert max(out) - min(out) == parallax.DEFAULT_MAX_RANGE
 
     def test_a_corrected_map_is_moved_onto_the_target_median(self):
@@ -278,16 +278,16 @@ class TestHeightMapEncoding:
         deep = bytearray([v % 61 for v in range(200)]
                          + [195 + v % 61 for v in range(56)])
         assert max(deep) - min(deep) > 150 and sorted(deep)[128] < 60
-        out = parallax.normalise_height(deep)
+        out = parallax.normalize_height(deep)
         assert abs(sorted(out)[len(out) // 2] - parallax.TARGET_MEDIAN) <= 1
 
-    def test_centring_never_clips(self):
+    def test_centering_never_clips(self):
         """A shift that would push texels past 0 or 255 is limited instead —
         clipping would flatten real relief into a plateau."""
         high = bytearray([195 + v % 61 for v in range(200)]
                          + [v % 61 for v in range(56)])
         assert max(high) - min(high) > 150 and sorted(high)[128] > 195
-        out = parallax.normalise_height(high)
+        out = parallax.normalize_height(high)
         assert min(out) >= 0 and max(out) <= 255
         # nothing piled up on a boundary
         assert list(out).count(0) <= list(high).count(0)
@@ -297,11 +297,11 @@ class TestHeightMapEncoding:
         assert len(set(out)) > 1
 
     def test_a_good_map_keeps_its_median_too(self):
-        """Centring is a CORRECTION, not a detector — it must never reach a
+        """Centering is a CORRECTION, not a detector — it must never reach a
         map the amplitude cap let through."""
         good = bytearray(20 + (v * 140) // 255 for v in range(256))
         assert max(good) - min(good) <= 150
-        out = parallax.normalise_height(good)
+        out = parallax.normalize_height(good)
         assert bytes(out) == bytes(good)
         assert sorted(out)[len(out) // 2] != parallax.TARGET_MEDIAN
 
@@ -321,9 +321,9 @@ class TestHeightMapEncoding:
         good = bytearray(20 + (v * 156) // 255 for v in range(256))
         deep = bytearray([v % 61 for v in range(200)]
                          + [195 + v % 61 for v in range(56)])
-        g = parallax.normalise_height(good, target_range=target)
+        g = parallax.normalize_height(good, target_range=target)
         assert bytes(g) == bytes(good), 'a hand-tuned map was damaged'
-        d = parallax.normalise_height(deep, target_range=target)
+        d = parallax.normalize_height(deep, target_range=target)
         assert max(d) - min(d) == (target or cap)
 
     def test_the_measure_ignores_outliers(self):
@@ -390,27 +390,26 @@ class TestHeightMapEncoding:
             restless += bytes([v]) * (4 if 60 <= v <= 190 else 1)
         before = _flat_share(restless)
         assert before < 0.35, before
-        out = parallax.normalise_height(restless, target_range=140)
+        out = parallax.normalize_height(restless, target_range=140)
         after = _flat_share(out)
         assert after > before * 1.5, f'{before:.2f} -> {after:.2f}'
 
-    def test_a_field_parked_at_the_bottom_is_recentred(self):
-        """`durchgangD`, and the reason the band measure does not cover it.
+    def test_a_field_parked_at_the_bottom_is_recentered(self):
+        """`durchgangD`, and why the band measure does not cover it.
 
-        A practically black wall — median 17, amplitude 158 — reads as 89.2%
-        FLAT on the band measure, and correctly so: it is flat, just parked at
-        the bottom of the channel. A parallax shader offsets along the view
-        vector, so a surface sitting near 0 renders not as depth but as a
-        constant view-dependent UV shift, i.e. the texture slides as the camera
-        moves. Amplitude misses it (158 < 163) and the curve has nothing to fix.
+        A black wall — median 17, amplitude 158 — reads 89.2% FLAT on the band
+        measure, correctly: it is flat, just parked at the channel bottom. A
+        parallax shader offsets along the view vector, so a surface near 0
+        renders not as depth but as a constant view-dependent UV shift: the
+        texture slides as the camera moves. Amplitude misses it (158 < 163).
         """
         wall = bytearray([(v % 40) for v in range(4000)] + [158])
         assert max(wall) - min(wall) < parallax.DEFAULT_MAX_RANGE
         assert sorted(wall)[len(wall) // 2] < parallax.MIN_MEDIAN
-        out = parallax.normalise_height(wall)
+        out = parallax.normalize_height(wall)
         assert sorted(out)[len(out) // 2] > parallax.MIN_MEDIAN, 'not lifted'
 
-    def test_recentring_alone_cannot_damage_relief(self):
+    def test_recentering_alone_cannot_damage_relief(self):
         """What a map caught ONLY by the median floor is allowed to receive.
 
         A pure translation, and nothing else: no compression, no tone curve.
@@ -418,14 +417,14 @@ class TestHeightMapEncoding:
         gradient and every gap survives a shift unchanged.
         """
         wall = bytearray([(v % 40) for v in range(4000)] + [158])
-        out = parallax.normalise_height(wall)
+        out = parallax.normalize_height(wall)
         assert max(out) - min(out) == max(wall) - min(wall), 'amplitude moved'
         assert len(set(out)) == len(set(wall)), 'levels lost'
         offs = {o - i for i, o in zip(wall, out)}
         assert len(offs) == 1, f'not a pure translation: {sorted(offs)[:5]}'
 
     def test_the_median_floor_never_reaches_the_reference_population(self):
-        """Centring was rejected once and needed new evidence to come back.
+        """Centering was rejected once and needed new evidence to come back.
 
         The old refutation tested a TOLERANCE AROUND MID-GREY on 56 pairs,
         where the medians overlap hopelessly. This is a one-sided FLOOR, and
@@ -439,7 +438,7 @@ class TestHeightMapEncoding:
         # a reference-like map: amplitude inside the cap, median well above
         good = bytearray(52 + (v * 140) // 255 for v in range(256))
         assert sorted(good)[128] >= 52
-        assert bytes(parallax.normalise_height(good)) == bytes(good)
+        assert bytes(parallax.normalize_height(good)) == bytes(good)
 
     def test_the_curve_leaves_relief_inside_the_body(self):
         """The ceiling on the exponent, and why it is derived rather than set.
@@ -453,7 +452,7 @@ class TestHeightMapEncoding:
         restless = bytearray()
         for v in range(256):
             restless += bytes([v]) * (4 if 60 <= v <= 190 else 1)
-        out = parallax.normalise_height(restless, target_range=140)
+        out = parallax.normalize_height(restless, target_range=140)
         med = sorted(out)[len(out) // 2]
         body = {v for v in out if abs(v - med) <= parallax.FLAT_BAND}
         assert len(body) >= parallax._MIN_BODY_LEVELS, \
@@ -473,7 +472,7 @@ class TestHeightMapEncoding:
         src = sorted(set(dark))
         assert min(dark) == 0
         assert max(src[i + 1] - src[i] for i in range(len(src) - 1)) == 1
-        out = parallax.normalise_height(dark, target_range=140)
+        out = parallax.normalize_height(dark, target_range=140)
         used = sorted(set(out))
         gap = max(used[i + 1] - used[i] for i in range(len(used) - 1))
         assert gap <= 12, f'curve opened a {gap}-level hole'
@@ -481,17 +480,17 @@ class TestHeightMapEncoding:
 
     def test_the_tone_curve_never_reaches_a_good_map(self):
         good = bytearray(20 + (v * 156) // 255 for v in range(256))
-        assert bytes(parallax.normalise_height(good)) == bytes(good)
+        assert bytes(parallax.normalize_height(good)) == bytes(good)
 
     def test_cap_can_be_disabled(self):
         deep = bytearray(range(256))
-        assert bytes(parallax.normalise_height(deep, max_range=0)) == \
+        assert bytes(parallax.normalize_height(deep, max_range=0)) == \
             bytes(deep)
 
     def test_strength_is_an_extra_factor_on_top(self):
         mild = bytearray(60 + (v * 100) // 255 for v in range(256))
-        assert bytes(parallax.normalise_height(mild)) == bytes(mild)
-        out = parallax.normalise_height(mild, strength=0.5)
+        assert bytes(parallax.normalize_height(mild)) == bytes(mild)
+        out = parallax.normalize_height(mild, strength=0.5)
         assert abs((max(out) - min(out)) - 50) <= 1
 
     def test_build_height_map_writes_the_file(self, tmp_path):
@@ -907,15 +906,15 @@ class TestGlobalDepthScale:
 
 class TestDiffuseAlphaStrip:
 
-    # c0 > c1 already, so DXT1 reads the block exactly as DXT5 did
-    FOUR_COLOUR = struct.pack('<HHI', 0xF800, 0x001F, 0x1B1B1B1B)
+    #: c0 > c1 already, so DXT1 reads the block exactly as DXT5 did
+    FOUR_COLOR = struct.pack('<HHI', 0xF800, 0x001F, 0x1B1B1B1B)
 
     def test_four_color_blocks_survive_texel_for_texel(self):
-        dds = _dxt5_with_color_blocks(4, 4, [self.FOUR_COLOUR])
+        dds = _dxt5_with_color_blocks(4, 4, [self.FOUR_COLOR])
         out = parallax.strip_alpha_to_bc1(dds)
         assert out[84:88] == b'DXT1'
         assert (_decode_color_block(out[128:136], False)
-                == _decode_color_block(self.FOUR_COLOUR, True))
+                == _decode_color_block(self.FOUR_COLOR, True))
 
     def test_a_swapped_block_decodes_to_the_same_texels(self):
         # c0 < c1 would mean 3-color + TRANSPARENT in DXT1; the repair swaps
@@ -939,7 +938,7 @@ class TestDiffuseAlphaStrip:
                 == _decode_color_block(blk, True))
 
     def test_the_payload_halves(self):
-        dds = _dxt5_with_color_blocks(16, 16, [self.FOUR_COLOUR])
+        dds = _dxt5_with_color_blocks(16, 16, [self.FOUR_COLOR])
         out = parallax.strip_alpha_to_bc1(dds)
         assert len(out) - 128 == (len(dds) - 128) // 2
 
@@ -947,7 +946,7 @@ class TestDiffuseAlphaStrip:
         # 8x8 -> 4x4 -> 2x2 -> 1x1 is one block each below the top's four
         dds = bytearray(_dds_header(8, 8, b'DXT5', mips=4))
         for _ in range(4 + 1 + 1 + 1):
-            dds += b'\x00' * 8 + self.FOUR_COLOUR
+            dds += b'\x00' * 8 + self.FOUR_COLOR
         out = parallax.strip_alpha_to_bc1(bytes(dds))
         assert struct.unpack_from('<I', out, 28)[0] == 4
         assert len(out) == 128 + (4 + 1 + 1 + 1) * 8
@@ -957,7 +956,7 @@ class TestDiffuseAlphaStrip:
         assert parallax.strip_alpha_to_bc1(dds) is None
 
     def test_only_diffuses_with_a_height_map_are_stripped(self, tmp_path):
-        dxt5 = _dxt5_with_color_blocks(4, 4, [self.FOUR_COLOUR])
+        dxt5 = _dxt5_with_color_blocks(4, 4, [self.FOUR_COLOR])
         (tmp_path / 'carried.dds').write_bytes(dxt5)
         (tmp_path / 'carried_p.dds').write_bytes(b'placeholder')
         (tmp_path / 'plain.dds').write_bytes(dxt5)
@@ -973,7 +972,7 @@ class TestDiffuseAlphaStrip:
 
     def test_running_it_twice_changes_nothing(self, tmp_path):
         (tmp_path / 'x.dds').write_bytes(
-            _dxt5_with_color_blocks(4, 4, [self.FOUR_COLOUR]))
+            _dxt5_with_color_blocks(4, 4, [self.FOUR_COLOR]))
         (tmp_path / 'x_p.dds').write_bytes(b'p')
         parallax.strip_diffuse_alpha(str(tmp_path))
         once = (tmp_path / 'x.dds').read_bytes()

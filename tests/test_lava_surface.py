@@ -95,7 +95,7 @@ def test_shader_is_emissive_and_tiling():
 
 
 def test_no_greyscale_palette_without_a_palette():
-    """Oblivion's lava texture is full colour, so the greyscale-to-palette bit
+    """Oblivion's lava texture is full color, so the greyscale-to-palette bit
     must stay OFF — setting it would sample a gradient texture we never bind.
     """
     shader = _blocks(_load(), NifFormat.BSEffectShaderProperty)[0]

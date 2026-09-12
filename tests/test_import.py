@@ -4241,8 +4241,8 @@ class TestWeatherConversion:
         o = (slot * 4 + time) * 4
         return tuple(nam0[o:o + 3])
 
-    def test_colours_below_the_knee_pass_through_untouched(self):
-        """Authored colour is the deliverable; only HIGHLIGHTS are compressed.
+    def test_colors_below_the_knee_pass_through_untouched(self):
+        """Authored color is the deliverable; only HIGHLIGHTS are compressed.
 
         The two populations agree at the bottom (TES4 p50 76.9 vs vanilla
         83.8) and diverge only at the top (p90 204.6 vs 168.0), so a uniform
@@ -4287,8 +4287,9 @@ class TestWeatherConversion:
 
         Oblivion authors night at 7-12% of day.  The old per-time scale
         pushed that to 22-55%, which is what made nights read as a saturated
-        blue instead of dark.  The same colour must convert the same way at
-        every time of day.
+        blue instead of dark.  The same color must convert the same way at
+        every time of day.  The ratio moves only where DAY is above the knee.
+        See: docs/commentary/tes5_import_weather.md#nam0-color-per-plugin-normalization
         """
         raw = bytearray(160)
         day, night = (200, 210, 230), (14, 15, 20)
@@ -4307,11 +4308,6 @@ class TestWeatherConversion:
             # the property the old per-time scale destroyed (it multiplied
             # night by 1.9-3.1x).
             assert self._slot(nam0, slot, 3) == night, 'night was rescaled'
-            # The ratio does move a little when DAY is above the knee, because
-            # compressing a highlight necessarily raises night's share.  That
-            # is inherent to highlight compression and is small: here the
-            # authored 0.073 becomes 0.085 (+16%), against the +246% the
-            # per-time normalisation produced.
             ratio = self._lum(self._slot(nam0, slot, 3)) / \
                 self._lum(self._slot(nam0, slot, 1))
             assert ratio >= authored, 'night must never get DARKER relatively'
@@ -4323,7 +4319,7 @@ class TestWeatherConversion:
         """Sun is the one genuine outlier: TES4 day median 193.4 vs vanilla
         42.5 (4.55x, where no other slot exceeds 1.7x).  Skyrim's sun
         brightness comes from the glare pass and the imagespace, not this
-        colour, so a near-white disc here is a pure bloom source."""
+        color, so a near-white disc here is a pure bloom source."""
         from tes5_import.record_types.weather import _NAM0_SUN_CEILING
         raw = bytearray(160)
         for time in range(4):
@@ -4335,9 +4331,9 @@ class TestWeatherConversion:
         assert self._lum(self._slot(nam0, 5)) <= _NAM0_SUN_CEILING + 1
 
     def test_conversion_does_not_depend_on_the_rest_of_the_plugin(self):
-        """The old normalisation was a PLUGIN-population statistic, so the
+        """The old normalization was a PLUGIN-population statistic, so the
         same weather converted differently depending on what shipped
-        alongside it.  The knee is a pure function of one colour."""
+        alongside it.  The knee is a pure function of one color."""
         raw = bytearray(160)
         for time in range(4):
             o = (0 * 4 + time) * 4
@@ -5047,14 +5043,14 @@ class TestWeatherImageSpace:
         assert abs(h[4] - 0.625) < 1e-6     # Receive Bloom Threshold
         assert abs(h[5] - 1.0) < 1e-6       # White — NOT 0.88
 
-    def test_sky_scale_never_derives_from_sky_colour(self):
+    def test_sky_scale_never_derives_from_sky_color(self):
         """Sky Scale lands as an ADDITIVE term in Skyrim's sky pixel shader
         (`input.Color * baseColor + skyScale`), so deriving it from the
         weather's own sky luminance scales an additive floor in proportion to
-        the multiplicative colour — a feedback loop that reads as bloom.
+        the multiplicative color — a feedback loop that reads as bloom.
 
         It must depend only on authored classification + time.  Doubling every
-        sky colour must therefore not move it at all.
+        sky color must therefore not move it at all.
         """
         import copy
         from tes5_import.record_types.weather import _wthr_imgs
@@ -5074,7 +5070,7 @@ class TestWeatherImageSpace:
             b = struct.unpack_from(
                 '<9f', _find_subrecord(_wthr_imgs(bright, 1, time),
                                        b'HNAM'))[7]
-            assert a == b, f'sky scale moved with sky colour at time {time}'
+            assert a == b, f'sky scale moved with sky color at time {time}'
 
     def test_sky_scale_comes_from_classification(self):
         """Vanilla keys Sky Scale off classification x time (R2 = 0.434)
@@ -6658,7 +6654,7 @@ class TestObjectiveText:
         novel = 'a journal entry that is certainly not in the curated table'
         assert short_objective(novel) == novel
 
-    def test_key_is_whitespace_normalised(self):
+    def test_key_is_whitespace_normalized(self):
         """Keys collapse runs of whitespace, so a source string that differs
         only in spacing still resolves."""
         import json

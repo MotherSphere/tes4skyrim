@@ -1119,6 +1119,22 @@ def _collect_skin_targets(data):
     return skel_root, bone_nodes, skinned_geoms
 
 
+def _bake_shape_into_bone_frame(block, W_sk):
+    """Move one shape of a PRN piece onto the Skyrim bone frame.
+
+    Bakes the shape's own transform into its verts, then sets its translation
+    to the bone position, so every shape of a multi-shape piece shares one
+    frame and keeps its own authored offset.
+
+    See: docs/commentary/asset_convert_armor.md#prn-multi-shape-bone-frame
+    """
+    bake_block_transform(block)
+    bone_pos = W_sk[3, :3]
+    block.translation.x = float(bone_pos[0])
+    block.translation.y = float(bone_pos[1])
+    block.translation.z = float(bone_pos[2])
+
+
 def retarget_skin_to_skyrim(data, src_path: str = '', prn_out: set | None = None,
                             allow_wrap: bool = True, weight: int = 0,
                             authored_body_part: int | None = None,
@@ -1238,28 +1254,7 @@ def retarget_skin_to_skyrim(data, src_path: str = '', prn_out: set | None = None
             if prn_bone_name:
                 sk_name, W_sk = _resolve_sk_target(prn_bone_name, sk_skel, src_map)
                 if sk_name is not None:
-                    # is an offset WITHIN the piece, not a second attachment
-                    # point.  So the bone position belongs on every shape
-                    # equally, and the shape's own offset has to survive it.
-                    #
-                    # Overwriting the node outright dropped that offset --
-                    # Armun-An Bonemold (node y=+2.8567) landed 3.33 units
-                    # behind the skull once the PRN sy=1.165 scale amplified
-                    # it.  ADDING the bone position instead is only right for a
-                    # single-shape piece: with two shapes it offsets them
-                    # against each other, which split the Imperial Legion helm
-                    # (Helmet:0 at origin, 'default' at x=-1.6) into a centred
-                    # half and a shifted half.
-                    #
-                    # Bake the shape's own transform into its verts, then give
-                    # every shape the same bone frame.  Rigid skinning ignores
-                    # node transforms at render time anyway; the identity bind
-                    # written by _add_prn_skin needs the verts to carry it.
-                    bake_block_transform(block)
-                    bone_pos = W_sk[3, :3]
-                    block.translation.x = float(bone_pos[0])
-                    block.translation.y = float(bone_pos[1])
-                    block.translation.z = float(bone_pos[2])
+                    _bake_shape_into_bone_frame(block, W_sk)
             manual_update_bind_position(block, skin, skel_root)
             regen_skin_partition(block, skin, geom_name,
                                   bone_name=prn_bone_name,

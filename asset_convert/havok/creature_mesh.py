@@ -83,7 +83,7 @@ def _pile_bounds(root):
     return lo, hi
 
 
-def _centre_pile_xy(root):
+def _center_pile_xy(root):
     """Shift every shape so the pile straddles the origin in X and Y.
 
     Z is preserved: that is the authored ground drop, not drift.
@@ -103,8 +103,8 @@ def _centre_pile_xy(root):
     return True
 
 
-def _pile_box(half, centre):
-    """The bhkTransformShape carrying a box of `half` extents at `centre`."""
+def _pile_box(half, center):
+    """The bhkTransformShape carrying a box of `half` extents at `center`."""
     box = NifFormat.bhkBoxShape()
     box.material.material = 0
     box.radius = 1.0
@@ -117,9 +117,9 @@ def _pile_box(half, centre):
     xf.unknown_float_1 = 0.1
     xf.shape = box
     xf.transform.set_identity()
-    xf.transform.m_14 = centre[0] / _PILE_HAVOK_SCALE
-    xf.transform.m_24 = centre[1] / _PILE_HAVOK_SCALE
-    xf.transform.m_34 = centre[2] / _PILE_HAVOK_SCALE
+    xf.transform.m_14 = center[0] / _PILE_HAVOK_SCALE
+    xf.transform.m_24 = center[1] / _PILE_HAVOK_SCALE
+    xf.transform.m_34 = center[2] / _PILE_HAVOK_SCALE
     return xf
 
 
@@ -136,10 +136,10 @@ def _fit_pile_collision(root):
     lo, hi = b
     half = [(hi[i] - lo[i]) / 2.0 for i in range(3)]
     half[2] = max(half[2], _PILE_MIN_HALF_Z)
-    centre = [(hi[i] + lo[i]) / 2.0 for i in range(3)]
+    center = [(hi[i] + lo[i]) / 2.0 for i in range(3)]
 
     phantom = NifFormat.bhkSimpleShapePhantom()
-    phantom.shape = _pile_box(half, centre)
+    phantom.shape = _pile_box(half, center)
     phantom.havok_col_filter.layer = _PILE_COLL_LAYER
     for i in range(3):
         phantom.unknown_floats_2[i][0] = 1.0
@@ -298,7 +298,7 @@ def extract_death_pile(src_skeleton_path, dst_path, reveal_holders=None,
         _bake_pile_shape(shape, tm, shift)
         _append_child(out_root, shape)
 
-    _centre_pile_xy(out_root)
+    _center_pile_xy(out_root)
     if _fit_pile_collision(out_root):
         _add_pile_bsx(out_root)
 
@@ -311,7 +311,7 @@ def source_hidden_attachment_nodes(src_skeleton_path):
     """Attachment nodes the SOURCE skeleton hides at rest.
 
     Oblivion authors rest visibility on the attachment NODE and conversion
-    normalises node flags, so the bit must be carried onto the shape or a
+    normalizes node flags, so the bit must be carried onto the shape or a
     LIVING ghost wears its own ectoplasm.  Read from the SKELETON, not the
     parts, which set the same bit on ordinary bones where it means nothing.
     """

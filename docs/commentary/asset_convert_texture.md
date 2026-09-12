@@ -22,7 +22,7 @@ exclusive in Oblivion.
 
 Skyrim's side: shader type **3** (Heightmap), `SLSF1_Parallax` in Shader Flags
 1, the height map in **texture slot 3** as `<name>_p.dds`, height read from the
-RED channel, **vertex colours required** (all-white is fine), incompatible with
+RED channel, **vertex colors required** (all-white is fine), incompatible with
 glow map and env map, compatible with specular and shadow. Type 3 adds **no
 conditional fields** to the record (`references/nif 0.10.0.0.xml`: only types
 1/5/6/7/11/14/16 do), so setting it changes the enum and nothing else.
@@ -119,7 +119,8 @@ starts at the base conversion. Architecture is where the DXT1 no-data cases
 cluster; a 6,000-mesh sample that happened to exclude it put DXT1 at 12%
 instead of 37%.
 
-### 🔴 Amplitude: cap at 150, and NEVER touch a map that is already good
+### 🔴 Amplitude: the cap, and NEVER touch a map that is already good
+<a id="amplitude-cap"></a>
 The raw Oblivion/Nehrim alpha renders far too deep in Skyrim. Both engines
 read the channel identically (white out, black in, mid-grey neutral) — what
 differs is the depth the shader gives it: Community Shaders computes
@@ -139,8 +140,40 @@ original (`temp/parallax_pairs.csv`):
 
 ```
 cap 148 -> 100% of the hand-tuned set untouched, 83% of Nehrim's corrected
-cap 150 -> same, with margin        <- DEFAULT_MAX_RANGE
 ```
+
+Then TWO whole reference folders were measured, not just the paired subset,
+and they disagree: folder A (1738 fields) median 145 max 148, folder B (1893)
+median **153** max **156**. The same author normalizes to ~145 in one set and
+~153 in the other, so "amplitude below X" is a CONVENTION test, not a law. A
+cap of 150 — which folder A alone appeared to justify — would have compressed
+all 1893 maps in folder B. That is exactly the damage this constant exists to
+prevent, and it was caught only because a second folder got checked.
+
+Nehrim's over-deep textures start at 159 and the ones that drew the complaint
+are 169 and up (`wandb` 171). No texture on either side falls between 156 and
+169, so the threshold goes in the middle of that empty gap:
+**`DEFAULT_MAX_RANGE = 163`** clears folder B's ceiling by seven and still
+catches everything from 169 up. The exact value inside that window changes no
+behaviour — it only buys margin.
+
+🔴 Treat this as FRAGILE: it separates two populations ~15 steps apart, and a
+mod that normalizes to 170 WOULD be compressed. It is still the BEST
+AVAILABLE, and that was measured. As a DETECTOR the tone-curve figure is
+worse — over 3631 good fields vs Nehrim's 56:
+
+```
+amplitude   > 163      keeps 100% of good, catches 73% of bad
+deep share  >  20%     keeps  88%,          catches 80%
+deep share  >  40%     keeps  98%,          catches 48%
+amp>163 OR deep> 25%   keeps  93%,          catches 92%
+amp>163 OR deep> 50%   keeps  98%,          catches 80%
+```
+
+Amplitude is the only rule that keeps ALL of them: the hand-tuned deep share
+ran 0..94% (median 6.3) so some good maps look legitimately almost black, while
+their amplitude stops dead at 156. Do not swap the detector for the curve's
+figure; it has been tried twice.
 
 A field already inside the cap is returned **bit for bit unchanged**; only the
 over-deep ones are compressed, and around their own MEDIAN so the body of the
@@ -148,6 +181,7 @@ distribution stays where the author put it. On Nehrim's 38 shipped maps: 33
 compressed, 5 untouched.
 
 ### 🔴 The thing that actually mattered: how FLAT the face is (rebuilt 2026-08-16)
+<a id="how-flat-the-face-is"></a>
 A hand-made height map is a flat face with narrow grooves; Nehrim's raw alpha
 undulates everywhere. Stated so no outlier can distort it — the share of the
 surface within ±20 levels of its own median:
@@ -222,7 +256,7 @@ The target is the median of the whole corpus, not of the 56 pairs:
 | folder A (1738) | 49.9 | 69.6 | 85.7 |
 | folder B (1893) | 29.3 | 51.3 | 83.1 |
 
-🔴 The same author normalises to 69.6% in one set and 51.3% in the other — the
+🔴 The same author normalizes to 69.6% in one set and 51.3% in the other — the
 **same split that made the amplitude cap dangerous** (medians 145 and 153).
 The pooled median 63.3 is the natural target and sits between them;
 calibrating on either folder alone lands 6–12 points off. The spread is wide on
@@ -294,17 +328,18 @@ correction rests on (Community Shaders renders the same field deeper than
 Oblivion does), and `--max-range 0` turns it off for anyone who disagrees.
 
 ### 🔴 `durchgangD`: a SECOND defect, and the band measure does not cover it
+<a id="durchgangd-second-defect"></a>
 `lazeon\static\durchgangD` — a practically black wall, median 17, amplitude 158
 — reads as **89.2% flat** on the band measure, and correctly so: it *is* flat,
 just parked entirely at the bottom of the channel. Restlessness and
-off-centredness are two different defects and the curve only fixes the first.
+off-centeredness are two different defects and the curve only fixes the first.
 
 The mechanism is why it matters: a parallax shader offsets along the view
 vector by `(height − neutral)`, so a surface sitting near 0 renders not as depth
 but as a **constant view-dependent UV shift** — the texture slides across the
 wall as the camera moves. Same swimming artefact an empty height map produces.
 
-**Centring was rejected once and came back only on new evidence.** The old
+**Centering was rejected once and came back only on new evidence.** The old
 refutation stands for what it tested: a *tolerance around mid-grey*, measured on
 56 pairs, where the medians overlap so badly that sparing 96% of the good maps
 also spares 53% of Nehrim's. `MIN_MEDIAN` is a different rule — a **one-sided
@@ -326,7 +361,7 @@ the set sitting just under the amplitude threshold at 153–159 that used to shi
 untouched. 45 sits in the middle of the empty gap between 36 and 52, the same
 way `DEFAULT_MAX_RANGE` sits in the gap between 156 and 169.
 
-A map caught by this rule ALONE gets the re-centring shift and nothing else —
+A map caught by this rule ALONE gets the re-centering shift and nothing else —
 no compression, no tone curve. A pure translation cannot damage relief: every
 level, gradient and gap survives. Verified on `durchgangD`: median 17 → 113,
 amplitude 158 → 158, levels 149 → 149, gap 5 → 5, and the render goes from a
@@ -359,20 +394,28 @@ corrected map is a dial set by eye. Keeping it separate from the detector
 means turning that dial can never cost a mod anything it authored well —
 pinned by `test_lowering_the_target_never_reaches_a_good_map`.
 
-**The refuted theory, so it is not retried:** re-centring on mid-grey. It is
+**The refuted theory, so it is not retried:** re-centering on mid-grey. It is
 the obvious idea — Nehrim's `wandb` sits at median 63 with 92% below mid-grey
 while the hand-tuned version sits at 126 — but the same 56 pairs kill it. The
 hand-tuned medians scatter 86..132 and overlap Nehrim's, so any tolerance that
 spares the good maps also spares half the bad ones (tolerance 40: 96% of the
 good set kept, only 53% of Nehrim's corrected). Amplitude separates cleanly;
-centring does not.
+centering does not.
 
 Tuning does NOT need a mesh rebuild — the meshes never change, only the
 `_p.dds`. Use `python tools/audit/parallax_check.py regen [--max-range N]
 [--strength F] [--only SUBSTRING]`, which rewrites the maps in seconds and
 reports per texture whether the cap bit or the map was left alone.
 
+#### Rejected by measurement: clamping the tails
+The theory was that Nehrim's amplitude comes from a few extreme texels a
+p1..p99 clamp could shave. It does not — `core(p5..p95)/full` is **0.68 for
+Nehrim and 0.54 for the hand-tuned set**, i.e. Nehrim's depth sits in the BODY
+of the surface and the hand-tuned maps have relatively MORE tail. A p1..p99
+clamp alone leaves Nehrim's amplitude at 83% and brings only 39% under the cap.
+
 ### Output conditioning: halve → blur → curve → BC4 (added 2026-08-19)
+<a id="output-conditioning"></a>
 
 **Skyrim's parallax sampling is coarser than Oblivion's.** Verified in game by
 the author: an unsmoothed Oblivion height field reads as "comic" under Skyrim's
@@ -390,12 +433,12 @@ The chain in `build_height_map` is, in order:
    pixel radius would hit a 512 map about eight times harder than a 4096 one
    and this content ships both. Below ~100 px output width the radius falls
    under 0.5 and the blur is skipped — small maps are left alone by design.
-3. **`normalise_height`** — the tone curve, **last**.
+3. **`normalize_height`** — the tone curve, **last**.
 4. **`encode_bc4_dds`**.
 
 #### 🔴 The order is why nothing needed recalibrating
 
-`normalise_height` is not a fixed curve, it is a **fit onto a measured property
+`normalize_height` is not a fixed curve, it is a **fit onto a measured property
 of its input** (share of area within ±`FLAT_BAND` of the median, target
 `TARGET_FLAT_SHARE`). Run it LAST, on the texels that actually ship, and it
 still lands on the calibrated target whatever the halving and the blur did to
@@ -415,7 +458,7 @@ Measured on `anvilcastledoor01.dds` (4096×8192, 42 MB), `temp/bench_chain.py`:
 | `decode_alpha_plane` | 8.45 |
 | `mitchell_halve` | 1.78 |
 | `gaussian_blur` (r = 10.2) | 0.47 |
-| `normalise_height` | 0.38 |
+| `normalize_height` | 0.38 |
 | `encode_bc4_dds` at half | 4.60 |
 | **new chain** | **15.68** |
 | `encode_bc4_dds` at full — what the old chain paid | 18.00 |
@@ -432,21 +475,21 @@ Once the height is out in a `_p` map the diffuse has no use for its alpha, and
 DXT1 is half the size. **This is not a re-encode.** Every height-carrying
 diffuse is DXT5 — `classify_alpha` rejects DXT1 and uncompressed outright, and
 `_MIN_LEVELS` rejects every DXT3 source — and a DXT5 block is 8 bytes of alpha
-followed by 8 bytes of colour **in exactly BC1's colour-block layout**. So the
-colour half is copied verbatim, keeping the endpoints the original encoder
+followed by 8 bytes of color **in exactly BC1's color-block layout**. So the
+color half is copied verbatim, keeping the endpoints the original encoder
 chose.
 
 **Dithering and perceptual error metrics therefore have nothing to act on**:
 nothing is being quantised. Decoding to RGB to re-compress with dithering would
 *lose* quality, not gain it.
 
-The one real difference is DXT1's 3-colour mode. Two exact repairs, neither
-changing a texel's colour (`_bc1_repair_modes`):
+The one real difference is DXT1's 3-color mode. Two exact repairs, neither
+changing a texel's color (`_bc1_repair_modes`):
 
 | source block | repair |
 |---|---|
-| `c0 > c1` | copy verbatim — already a legal 4-colour DXT1 block |
-| `c0 < c1` | swap the endpoints, XOR the index word with `0x55555555` (0↔1, 2↔3) — the swapped palette names the same four colours |
+| `c0 > c1` | copy verbatim — already a legal 4-color DXT1 block |
+| `c0 < c1` | swap the endpoints, XOR the index word with `0x55555555` (0↔1, 2↔3) — the swapped palette names the same four colors |
 | `c0 == c1` | zero the indices. Every palette entry already equals `c0`, and DXT1 index 3 would be **transparent black** |
 
 Verified on real Nehrim textures: first 64 blocks decode identically, file
@@ -486,9 +529,9 @@ displacement in both directions and a groove never flips into a bump.
 
 #### 🔴 GLOBAL, not per-map — the trap that was nearly built
 
-The first cut normalised every map to a fixed target amplitude. That is wrong:
+The first cut normalized every map to a fixed target amplitude. That is wrong:
 it makes a plaster wall exactly as deep as a cave wall and throws away the
-relief the author actually authored — the same trap `normalise_height` already
+relief the author actually authored — the same trap `normalize_height` already
 warns about under `strength`. One factor for every texture keeps every
 relationship between two surfaces intact and only bounds the excursion.
 
@@ -581,6 +624,23 @@ being mesh products.
 - Skyrim's landscape shader reads the normal map ALPHA channel as the specular mask. Oblivion's terrain shader never used it, so most Oblivion landscape `*_n.dds` are DXT1 (no alpha) → sampled alpha = 1.0 → full-strength specular over the whole terrain (user-visible "very shiny ground"). Oblivion normals that are already DXT5 carry a real mask (avg ~77/255) and are correct as-is.
 - Fix: `asset_convert/texture/landscape_normals.py` (pipeline step after the texture copy, so re-copies can't resurrect DXT1) re-containers DXT1 → DXT5 with constant dark alpha 32/255. DXT1 and DXT5 share the 8-byte color block format, so RGB is preserved losslessly; DXT1 3-color blocks (c0<=c1, ~0.05%) get endpoints swapped + indices 0↔1 remapped since DXT5 color blocks are always 4-color mode.
 - Related: LTEX SNAM is a Phong exponent (never write 0 — see convert_LTEX comment); the alpha mask is what actually controls specular *amount*.
+
+### <a id="default-normal-is-dxt5"></a>The shared `default_n.dds` is DXT5, not the uncompressed form
+
+`write_default_normal` emits the stand-in normal a mesh names when its own
+normal map does not exist: flat (128,128,255) with a constant specular mask.
+
+It is written DXT5, NOT the uncompressed form `lod_gen` uses for atlases,
+because the alpha has to be a REAL specular mask -- `spec_mask` classifies an
+uncompressed DDS as `no_alpha` whatever its content, so an uncompressed
+stand-in reads as "no mask" and lands back at full-strength specular.
+
+Each 16-byte block is hand-packed: an 8-byte constant-alpha block followed by a
+4-byte color block whose c0 == c1 (RGB565 for (128,128,255) is R=16, G=32,
+B=31) and whose 32-bit index word is 0, so every texel resolves to c0.
+
+It must run AFTER `normalize_specular_alpha`, which would otherwise count this
+constant-alpha stand-in as one more file it fixed.
 
 ## Dependents borrow a master's textures
 <a id="dependents-borrow-a-masters-textures"></a>

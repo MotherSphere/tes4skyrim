@@ -358,7 +358,7 @@ def door_axis_cache_is_current(axis_cache: str) -> bool:
     """True if the door axis cache exists AND was written at this schema.
 
     Entries are plain lists, so one written before a field existed loads
-    cleanly and silently contributes no centre and no floor drop.
+    cleanly and silently contributes no center and no floor drop.
     See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
     """
     try:
@@ -600,13 +600,13 @@ def _close_pose_overrides(data):
 
 
 def door_closed_geometry(data):
-    """Doorway as ('X'|'Y', width, centre_x, centre_y, z_min) — WORLD units.
+    """Doorway as ('X'|'Y', width, center_x, center_y, z_min) — WORLD units.
 
     Reads the ORIGINAL Oblivion NIF's render graph at the CLOSED pose: the
     'Close' controller sequence's final key values override each animated
     node's local transform, then the union bbox of the shapes under the KEYED
     nodes — the door leaf/leaves themselves — gives the doorway span, its
-    centre relative to the REFR pivot, and the slab's base height.
+    center relative to the REFR pivot, and the slab's base height.
 
     This is the AUTHORED closed door, which no static measurement recovers:
     idgate01's two leaves are STORED mid-open (bbox nowhere near the doorway)
@@ -711,7 +711,7 @@ def _worker_both(args: tuple):
     of analysis on top of a ~174 ms parse, so parsing once and running both
     nearly halves the combined phase.
 
-    NOTE: the door axis/centre cache is NOT produced here — the scan reads
+    NOTE: the door axis/center cache is NOT produced here — the scan reads
     CONVERTED meshes, and door geometry must come from the ORIGINAL NIF's
     Close-sequence pose (see door_closed_geometry).  scan_door_axes builds it
     from the export meshes.
@@ -943,7 +943,7 @@ def _write_mesh_caches(col_results, bnd_results, collision_cache,
 
 
 def _door_model_paths(door_txt: str) -> set:
-    """Normalised model paths of every DOOR base in an export's DOOR.txt."""
+    """Normalized model paths of every DOOR base in an export's DOOR.txt."""
     models = set()
     try:
         with open(door_txt, encoding='utf-8', errors='replace') as fh:

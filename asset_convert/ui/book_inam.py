@@ -385,6 +385,12 @@ def calibrate(shapes):
     return Calibration('sheet', cover=fit, cover_tex=tex)
 
 
+def _tex_basename(path: str) -> str:
+    """Leaf filename of a NIF texture path, normalized to '/' first."""
+    forward = path.replace('\\', '/')
+    return os.path.basename(forward)
+
+
 def calibrate_book_template(shapes):
     """Calibrate the Skyrim book template.  Same geometric front/spine rules
     as the Oblivion side, plus the page-edge strips of the cover shape (the
@@ -394,11 +400,7 @@ def calibrate_book_template(shapes):
         raise ValueError('book template did not calibrate as a book')
     cover_shape = None
     for s in shapes:
-        # NIF texture paths are always backslash-separated, even on Linux
-        # where os.path.basename only splits on '/' -- normalise first, or
-        # the comparison never matches off Windows.
-        if s['texs'] and os.path.basename(
-                s['texs'][0].replace('\\', '/')) == BOOK_COVER_TEXES[0]:
+        if s['texs'] and _tex_basename(s['texs'][0]) == BOOK_COVER_TEXES[0]:
             if cover_shape is None or len(s['tris']) > len(cover_shape['tris']):
                 cover_shape = s
     if cover_shape is None:
@@ -590,11 +592,8 @@ def emit_inam_nif(template_bytes, out_path, retarget_texes, diffuse_path, normal
                 continue
             if block.num_textures < 2 or not block.textures[0]:
                 continue
-            # os.path.basename only splits on '/' on Linux, so normalise TO
-            # forward slashes before it, not backslashes -- os.path.basename
-            # accepts '/' on Windows too, so this direction works everywhere.
-            base = os.path.basename(
-                block.textures[0].decode('ascii', 'replace').lower().replace('\\', '/'))
+            base = _tex_basename(
+                block.textures[0].decode('ascii', 'replace').lower())
             if base in retarget_texes:
                 block.textures[0] = diffuse_path.encode('ascii')
                 block.textures[1] = normal_path.encode('ascii')

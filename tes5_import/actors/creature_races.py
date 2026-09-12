@@ -307,14 +307,16 @@ def build_creature_death_piles(writer) -> int:
     wraps that mesh in a record `Actor.AttachAshPile` can place -- Oblivion's
     own ectoplasm rather than Skyrim's DefaultAshPileGhost.
 
-    ACTI, NOT STAT.  A static cannot be activated, so a STAT pile is visible
-    and solid but gives the player no prompt (in-game 2026-08-26: "I still
-    can't activate the ectoplasm on the ground").  Vanilla agrees without
-    exception: all six `DefaultAshPile*` records in Skyrim.esm are ACTI and
-    none is a STAT.  Layout copied from DefaultAshPileGhost (0x00101048):
-    EDID OBND FULL MODL PNAM FNAM, where PNAM is the required marker colour.
+    ACTI, NOT STAT: a static cannot be activated.  All six `DefaultAshPile*`
+    records in Skyrim.esm are ACTI.  Layout copied from DefaultAshPileGhost
+    (0x00101048): EDID OBND FULL MODL PNAM FNAM.  OBND is read from the
+    shipped mesh (`_pile_mesh_bounds`) because the ghost's pile is ~21 units
+    across and the wraith's ~92; FULL is the crosshair prompt, PNAM the
+    marker color (xEdit: SetRequired) and FNAM a zero U16 flag word.
 
     Creatures whose skeleton carries no pile keep the vanilla fallback.
+
+    See: docs/commentary/asset_convert_creature.md#pile-acti-record-fields
     """
     _CREA_PILE_ACTI.clear()
     for folder in sorted(_PROJECTS):
@@ -327,32 +329,16 @@ def build_creature_death_piles(writer) -> int:
         fid = writer.derive_formid('CREA_PILE', folder)
         subs = pack_string_subrecord(
             'EDID', f'TES4Cr{folder.capitalize()}DeathPile')
-        # OBND is what the engine builds the activation target from, so it
-        # must match the MESH -- a guessed symmetric box put the click
-        # target beside the visible pile (in-game 2026-08-26), and one
-        # fixed size cannot serve both piles anyway (the ghost's is ~21
-        # units across, the wraith's ~92).  The mesh is centred on its own
-        # origin in X/Y by extract_death_pile, so these bounds are
-        # symmetric there and carry the real Z range.
         bounds = _pile_mesh_bounds(proj, pile)
         if bounds is None:
             subs += pack_obnd(-24, -24, -4, 24, 24, 16)
         else:
             (x1, y1, z1), (x2, y2, z2) = bounds
             subs += pack_obnd(x1, y1, z1, x2, y2, z2)
-        # FULL — the crosshair prompt.  An ACTI with no name gets NO
-        # rollover and cannot be activated by the player at all: with the
-        # name missing, both a rigid-body and a phantom collision shipped
-        # "hitbox nonexistent" in game (2026-08-26) while the mesh, OBND and
-        # collision all measured correct.  Vanilla DefaultAshPileGhost is
-        # named; ours is named for what the player sees.
         subs += pack_string_subrecord('FULL', 'Ectoplasm')
         subs += pack_string_subrecord(
             'MODL', f"{proj['body_dir']}\\{pile}")
-        # PNAM — marker colour, required by the engine (xEdit: SetRequired).
         subs += pack_subrecord('PNAM', b'\x00\x00\x00\x00')
-        # FNAM — U16 flags; 0 = neither "No Displacement" nor "Ignored by
-        # Sandbox", matching DefaultAshPileGhost.
         subs += pack_subrecord('FNAM', struct.pack('<H', 0))
         writer.add_record('ACTI', pack_record('ACTI', fid, 0, subs))
         _CREA_PILE_ACTI[folder] = fid

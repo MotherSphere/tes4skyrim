@@ -147,7 +147,7 @@ class TestNormalForVariantDiffuse:
     """Which normal map a diffuse gets, and in which order.
 
     Oblivion stores no normal path -- it appends `_n` to the diffuse -- and
-    artists ship ONE normal for a family of colour variants:
+    artists ship ONE normal for a family of color variants:
     `BrumaWoodPost_Dark.dds` and `_Grey.dds` both rely on
     `BrumaWoodPost_n.dds`.  Deriving from the full name alone invents a path
     that does not exist.
@@ -369,7 +369,7 @@ class TestGlowIsDerivedNotOnlyNamed:
         assert int(shader.shader_flags_1.slsf_1_own_emit) == 1
         assert stats['glow_emissive_defaulted'] == 1
 
-    def test_an_authored_emissive_colour_survives(self, tmp_path):
+    def test_an_authored_emissive_color_survives(self, tmp_path):
         """The rune stone's orange must not be overwritten with white.
 
         It stops flooding the whole surface and starts modulating the glyph --

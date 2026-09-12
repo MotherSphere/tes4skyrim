@@ -112,7 +112,7 @@ def emit_str(lines: list, key: str, rec: Tes3Record, sig: str) -> None:
 
 
 def emit_model(lines: list, rec: Tes3Record, key: str = 'Model.MODL') -> None:
-    """Emit the mesh path, normalised the way the asset stages expect."""
+    """Emit the mesh path, normalized the way the asset stages expect."""
     sub = get_subrecord(rec, 'MODL')
     if sub:
         path = get_string(sub).replace('/', chr(92))
@@ -240,7 +240,7 @@ def export_CONT(rec: Tes3Record, ctx) -> list:
 
 
 def export_LIGH(rec: Tes3Record, ctx) -> list:
-    """A light: LHDT carries weight, value, time, radius, colour and flags.
+    """A light: LHDT carries weight, value, time, radius, color and flags.
 
     The flag bits agree with TES4's; Morrowind's 0x10 (Fire) is the bit the
     importer masks as unused.

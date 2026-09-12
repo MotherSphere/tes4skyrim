@@ -15,7 +15,7 @@ tree models (58,997 placements, 19% of all tree placements) have no billboard.
 This renders the missing ones the way Oblivion's own tool did: an orthographic
 front projection of the tree, sampling each shape's own diffuse texture with
 its alpha, over a transparent background.  Output matches what
-`generate_tree_billboard_far` expects — v=0 at the top of the tree, centred on
+`generate_tree_billboard_far` expects — v=0 at the top of the tree, centered on
 the canopy in X and standing on the trunk base in Z.
 
 Usage:

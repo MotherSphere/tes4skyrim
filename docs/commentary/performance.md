@@ -200,7 +200,7 @@ cumulative of ~11 s across 12 meshes, in only **57 calls**) because it runs a
 per-**triangle** Python loop allocating several `Vector3` objects each, then a
 per-**vertex** Gram-Schmidt loop. The numpy version reproduces the algorithm
 exactly — the same quantised `(vertex, normal)` merge hash (so uv seams still
-share a frame), degenerate-triangle skipping, per-triangle normalisation
+share a frame), degenerate-triangle skipping, per-triangle normalization
 *before* accumulation, the `r_sign` factor, the Gram-Schmidt order, and the
 `x cross n` / `y cross n` fallback basis. Anything it cannot handle (no uvs, no
 normals, no triangles, length mismatch) falls through to the original.
@@ -225,7 +225,7 @@ shapedata = NiTriShapeData().deepcopy(NiTriBasedGeomData().deepcopy(self.data))
 
 The intermediate exists only because `NiTriShapeData` and `NiTriStripsData` are
 **siblings** — `deepcopy` refuses unrelated classes, so a strips→shape copy has
-no legal direct form. But it copies every vertex, normal, uv and colour TWICE,
+no legal direct form. But it copies every vertex, normal, uv and color TWICE,
 and both hops select the *same* attribute list (measured: 19 names for the data
 blocks, 29 for the shape blocks — the base-class attributes). The triangle /
 strip fields are never among them; `set_triangles`/`set_strips` supplies those
@@ -237,7 +237,7 @@ Two changes, both in `pyffi_monkey_patch.py`:
    attribute list is taken from the **SOURCE**, never the freshly-constructed
    target — `_get_filtered_attribute_list` is condition-dependent, and
    `has_normals` / `has_vertex_colors` / the uv flags are all False on a new
-   object, so filtering on the target silently drops every normal and colour.
+   object, so filtering on the target silently drops every normal and color.
 2. **Bulk element copy** for flat scalar element types (`Vector3`, `Color4`,
    `TexCoord`). `update_size()` builds each element through
    `StructBase.__init__` — a `set()`, an `_items` list and one holder per

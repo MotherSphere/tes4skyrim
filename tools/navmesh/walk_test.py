@@ -29,7 +29,8 @@ from tes5_import.navmesh import build, params
 from tools.navmesh.probe import load_cell
 
 
-def _tri_centre(v, t):
+def _tri_center(v, t):
+    """Centroid (x, y, z) of triangle `t` over the vertex list `v`."""
     return (sum(v[i][0] for i in t) / 3.0,
             sum(v[i][1] for i in t) / 3.0,
             sum(v[i][2] for i in t) / 3.0)
@@ -44,6 +45,12 @@ def build_graph(v, tris, climb=None):
     """Adjacency over SHARED EDGES, rejecting steps that are not climbable.
 
     Returns (adj, rejected) where adj[ti] = [(tj, cost), ...].
+
+    The step is taken ACROSS the shared edge, so each triangle's own height AT
+    that edge is what counts: a fold shows up as a large jump even though the
+    two triangles share the edge's vertices.  A legitimate ramp triangle's
+    center sits within half its own rise of the edge; a folded one is offset
+    by the whole fold height.
     """
     if climb is None:
         climb = params.MAX_CLIMB
@@ -59,16 +66,11 @@ def build_graph(v, tris, climb=None):
         if len(ts) != 2:
             continue
         t0, t1 = ts
-        c0 = _tri_centre(v, tris[t0])
-        c1 = _tri_centre(v, tris[t1])
-        # The step is taken ACROSS the shared edge, so compare each triangle's
-        # own height AT that edge — a fold shows up here as a large jump even
-        # though the two triangles share the edge's vertices.
+        c0 = _tri_center(v, tris[t0])
+        c1 = _tri_center(v, tris[t1])
         ez = _edge_z(v, a, b, None)
         d0 = abs(c0[2] - ez)
         d1 = abs(c1[2] - ez)
-        # A legitimate ramp triangle's centre sits within half its own rise of
-        # the edge; a folded one is offset by the whole fold height.
         if max(d0, d1) > max(climb, 0.5 * abs(c0[2] - c1[2]) + climb):
             rejected.append(((a, b), t0, t1, round(max(d0, d1), 1)))
             continue
@@ -81,10 +83,10 @@ def build_graph(v, tris, climb=None):
 def astar(adj, v, tris, start, goal):
     if start == goal:
         return [start]
-    gc = _tri_centre(v, tris[goal])
+    gc = _tri_center(v, tris[goal])
 
     def h(ti):
-        c = _tri_centre(v, tris[ti])
+        c = _tri_center(v, tris[ti])
         return math.dist(c, gc)
 
     openq = [(h(start), 0.0, start, None)]
@@ -111,7 +113,7 @@ def astar(adj, v, tris, start, goal):
 def nearest_tri(v, tris, pt, zw=1.0):
     best = None
     for ti, t in enumerate(tris):
-        c = _tri_centre(v, tris[ti])
+        c = _tri_center(v, tris[ti])
         d = ((c[0] - pt[0]) ** 2 + (c[1] - pt[1]) ** 2 +
              (zw * (c[2] - pt[2])) ** 2)
         if best is None or d < best[0]:
@@ -120,6 +122,11 @@ def nearest_tri(v, tris, pt, zw=1.0):
 
 
 def run(export_dir, cell_arg, climb=None):
+    """Walk from the highest triangle to every teleport door in one cell.
+
+    START is the highest triangle (the top floor); each GOAL is a teleport
+    door.  Returns True when every door is reachable.
+    """
     ctx = load_cell(export_dir, cell_arg)
     land = ctx['land'] if ctx['is_exterior'] else None
     v, tris = build.build_navmesh(
@@ -133,9 +140,8 @@ def run(export_dir, cell_arg, climb=None):
 
     adj, rejected = build_graph(v, tris, climb=climb)
 
-    # START: the highest triangle (top floor).  GOAL: each teleport door.
-    highest = max(range(len(tris)), key=lambda ti: _tri_centre(v, tris[ti])[2])
-    hz = _tri_centre(v, tris[highest])[2]
+    highest = max(range(len(tris)), key=lambda ti: _tri_center(v, tris[ti])[2])
+    hz = _tri_center(v, tris[highest])[2]
     doors = [d for d in (ctx.get('doors') or ()) if len(d) < 5 or d[4]]
     if not doors:
         doors = list(ctx.get('doors') or ())
@@ -152,7 +158,7 @@ def run(export_dir, cell_arg, climb=None):
         if goal is None:
             continue
         path = astar(adj, v, tris, highest, goal)
-        gz = _tri_centre(v, tris[goal])[2]
+        gz = _tri_center(v, tris[goal])[2]
         if path:
             print('     REACHABLE  top(z=%.0f) -> door(%.0f,%.0f,z=%.0f)  '
                   '%d triangles' % (hz, dx, dy, gz, len(path)))

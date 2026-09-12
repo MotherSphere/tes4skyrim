@@ -55,6 +55,19 @@ Summary of patches
    different output bytes on every run — identical blocks and geometry, but a
    reordered string table and therefore different NiStringRef indices.  Made
    insertion-ordered.  Verify with `python tools/nif/nif_determinism.py`.
+
+11. Vectorised NiTriBasedGeom.update_tangent_space  (PERFORMANCE ONLY)
+   Replaces pyffi's per-vertex Python loop with a numpy formulation that
+   accumulates per-triangle s/t directions onto merged vertices, then
+   orthogonalizes each pair against its normalized normal by per-vertex
+   Gram-Schmidt.  pyffi's fallbacks are reproduced exactly: a zero or
+   non-finite normal becomes the yvec (0,1,0); a degenerate (binormal,
+   tangent) pair becomes bin = x cross n (y cross n if that is zero) and
+   tan = n cross bin.  Any geometry it cannot handle -- no UVs, no normals,
+   no triangles, or a vertex array whose length disagrees with num_vertices
+   -- falls through to the original implementation.
+   Set TESCONV_PYFFI_NO_FAST_TANGENTS=1 (or TESCONV_PYFFI_NO_PERF_PATCH=1)
+   to disable.
 """
 
 import os
@@ -1023,12 +1036,11 @@ def _install_vectorised_tangent_space():
         np.add.at(bins, hh, np.repeat(sdir, 3, axis=0))
         np.add.at(tans, hh, np.repeat(tdir, 3, axis=0))
 
-        # Per-vertex Gram-Schmidt against the (normalised) normal.
         nrm = norms.copy()
         with np.errstate(invalid='ignore', divide='ignore'):
             n_len = np.linalg.norm(nrm, axis=1)
         bad_n = ~np.isfinite(n_len) | (n_len == 0)
-        nrm[bad_n] = (0.0, 1.0, 0.0)          # pyffi's yvec fallback
+        nrm[bad_n] = (0.0, 1.0, 0.0)
         n_len = np.where(bad_n, 1.0, n_len)
         nrm /= n_len[:, None]
 
@@ -1053,7 +1065,6 @@ def _install_vectorised_tangent_space():
                                t_len2, 1.0)[:, None]
 
         if degenerate.any():
-            # pyffi: bin = x cross n (fall back to y cross n), tan = n cross bin
             idx = np.nonzero(degenerate)[0]
             n_d = nrm[idx]
             b_d = np.cross(np.array((1.0, 0.0, 0.0)), n_d)
@@ -1210,11 +1221,12 @@ def _install_single_hop_interchangeable():
 
         Returns False (having touched nothing) if the source does not carry
         every attribute the base declares, so the caller can fall back.
+
+        The attribute list comes from the SOURCE instance -- its flags decide
+        which conditional attributes (normals, vertex colors, uvs) actually
+        exist -- restricted to base_cls's names, which keeps the copy to
+        exactly what the two-hop path transferred.
         """
-        # The attribute list must come from the SOURCE instance -- its flags
-        # decide which conditional attributes (normals, vertex colours, uvs)
-        # actually exist.  Restricting to base_cls's names keeps the copy to
-        # exactly what the two-hop path transferred.
         base_names = frozenset(a.name for a in base_cls._get_attribute_list())
         attrlist = [a for a in src._get_filtered_attribute_list()
                     if a.name in base_names]

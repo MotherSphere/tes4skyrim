@@ -422,7 +422,7 @@ def parse_cache_release_tag(name: str) -> tuple | None:
 
 
 def _version_key(tag: str) -> tuple | None:
-    """Comparable key for a MAJOR.MINOR tag, NORMALISED TO THOUSANDTHS.
+    """Comparable key for a MAJOR.MINOR tag, NORMALIZED TO THOUSANDTHS.
 
     The minor field's WIDTH sets its scale -- the same trap previous_tag() and
     the hook's next_tag() each document.  Tags through 0.58 are MAJOR.MM
@@ -471,6 +471,15 @@ def _version_key(tag: str) -> tuple | None:
 _SCHEME_SWITCH_MILS = 580
 
 
+def _raw_minor_field(tag: str) -> tuple:
+    """(major, minor, minor_width) from *tag*'s RAW digits, not _version_key.
+
+    See: docs/commentary/tes5_import_navmesh.md#cache-tag-steps-in-its-own-scheme
+    """
+    parts = tag.split('.')
+    return int(parts[0]), int(parts[1]), len(parts[1])
+
+
 def previous_tag(tag: str) -> str:
     """The code tag one step below *tag* ('0.582' -> '0.581', '0.73' -> '0.72').
 
@@ -494,15 +503,7 @@ def previous_tag(tag: str) -> str:
     """
     if _version_key(tag) is None:
         return tag
-    # Use the RAW digits, not _version_key: that key is normalised to
-    # thousandths for comparison, whereas the arithmetic below steps in the
-    # tag's own scheme and must see the field exactly as it was written.  The
-    # WIDTH is the scheme here, not the value -- '0.73' is a hundredths name
-    # even though 730 sits above the switch, so it must step to '0.72', never
-    # to '0.729'.
-    parts = tag.split('.')
-    major, minor = int(parts[0]), int(parts[1])
-    minor_width = len(parts[1])
+    major, minor, minor_width = _raw_minor_field(tag)
     # A 1-digit field is a legacy name too ('0.9'), and it decrements in tenths
     # in its own spelling.  Widths beyond 3 have never been published, but must
     # still step rather than return the input unchanged -- see the docstring:

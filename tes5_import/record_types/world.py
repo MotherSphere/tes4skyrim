@@ -141,7 +141,7 @@ def set_world_land_extents(extents: dict):
     Feeds the world-map cloud bank and MNAM's map-camera rectangle.  Both must
     cover the terrain the player actually sees, and an authored MNAM can
     simply be wrong about it: NehrimWorldspace's sits 26,624 units south of
-    its land's centre and clips 16,384 units off the north edge.  The exterior
+    its land's center and clips 16,384 units off the north edge.  The exterior
     cell grid is the authored ground truth.
 
     UNIONS into whatever is already registered rather than replacing it.  This
@@ -468,14 +468,15 @@ def restamp_wrld_mnam(rec: bytes, out_fid: int) -> bytes:
 
 
 def build_wrld_cloud_modl(rec: dict, edid: str = None):
-    """Generate this worldspace's world-map cloud bank; return its MODL value.
+    """This worldspace's world-map cloud-bank MODL value, or None.
 
-    Returns None when banks are disabled (set_cloud_bank_output never called),
-    when the record has no usable bounds, or when the vanilla source mesh is
-    unavailable -- in which case no MODL is written and the engine falls back
-    to its own hardcoded bank, i.e. exactly the pre-existing behaviour.
-
-    Shared by convert_WRLD and the override path so both emit the same mesh.
+    None when banks are disabled, bounds are unusable, or the vanilla source
+    mesh is missing; the engine then falls back to its hardcoded bank.  Rect =
+    the REAL LAND (set_world_land_extents), MNAM then NAM0/NAM9 as fallbacks,
+    recentered onto it.  write=False: NAME only, since merge_cloud_bank writes
+    the one mesh sized to every sibling's union.  Shared by convert_WRLD and
+    the override path.
+    See: docs/commentary/tes5_import_navmesh.md#cloud-bank-rect-precedence
     """
     if not _CLOUD_BANK_ROOT:
         return None
@@ -488,16 +489,6 @@ def build_wrld_cloud_modl(rec: dict, edid: str = None):
     from asset_convert.lod.worldmap_clouds import (generate_cloud_bank,
                                                compute_center, framed_rect)
 
-    # Size and place against the worldspace's REAL LAND -- the exterior cell
-    # grid, registered by set_world_land_extents.  That is the terrain the map
-    # draws and the only rectangle that cannot disagree with itself.
-    #
-    # MNAM (the authored map-camera framing) is the fallback, not the primary,
-    # because a converted plugin's MNAM can be plain wrong about its own
-    # terrain: NehrimWorldspace's MNAM rectangle is centred 26,624 units south
-    # of its land and its north edge cuts 16,384 units of real land off.  Both
-    # of those show up in game exactly as reported -- a deck offset away from
-    # the landmass, and too small for it.  NAM0/NAM9 is the last resort.
     rect = _WORLD_LAND_EXTENT.get(get_formid(rec, 'FormID'))
     if rect is None and get_str(rec, 'MNAM.NWCellX'):
         rect = framed_rect(get_int(rec, 'MNAM.NWCellX'),
@@ -513,17 +504,7 @@ def build_wrld_cloud_modl(rec: dict, edid: str = None):
     height = abs(max_y - min_y)
     if width <= 0.0 or height <= 0.0:
         return None
-    # The rectangle is not centred on the worldspace origin, and the stock
-    # bank is -- so the sheet has to be moved onto the terrain or the far
-    # side of the origin runs out from under the clouds.
     center = compute_center(min_x, min_y, max_x, max_y)
-    # NAME only, no file. The bank is ONE mesh at a fixed path shared by every
-    # plugin in the worldspace, so a per-plugin copy is a rival version of it:
-    # each was sized to its own bounds and the install order picked a winner.
-    # sibling_lod.merge_cloud_bank writes the single authoritative copy, sized
-    # to the UNION of every sibling's land, into the LOD mod that installs
-    # last. MODL is the same string either way, and every validity check still
-    # runs -- a worldspace whose bank cannot be built still returns None here.
     return generate_cloud_bank(edid, width, height, _CLOUD_BANK_ROOT,
                                center=center, land_rect=rect, write=False)
 
@@ -1102,19 +1083,14 @@ def convert_ACRE(rec: dict) -> bytes:
 
 
 def convert_LAND(rec: dict) -> bytes:
-    """LAND record — landscape vertex data."""
+    """LAND record — landscape vertex data.
+
+    DATA flags pass through VERBATIM: a LAND clearing bit 0 is the author
+    deleting that cell's terrain, and is vanilla-legal.  Do NOT normalize.
+    See: docs/commentary/tes5_import_world.md#land-data-flags-verbatim
+    """
     subs = b''
 
-    # DATA flags pass through VERBATIM. Bit 0 (0x01) = "Has Vertex
-    # Normals/Height Map", bit 4 (0x10) = "Auto-Calc Normals".
-    #
-    # A LAND with no VNML/VHGT is the author DELETING that cell's terrain --
-    # the "water only, no landscape" case -- and it is legal with or without
-    # the auto-calc bit. Skyrim.esm's records that clear bit 0: 149 at
-    # flags 28, 3 at flags 30 (these carry VCLR), and 2 at flags 12, which is
-    # exactly the value TWMP_ValenwoodImproved uses. Do NOT "normalise" these
-    # to 28: a partial census that missed the flags-12 pair made that look
-    # like a defect when it is vanilla-legal.
     data_flags = get_int(rec, 'DATA.Flags')
     subs += pack_subrecord('DATA', struct.pack('<I', data_flags))
 

@@ -188,7 +188,8 @@ def _bake_worldspace(job, ctx) -> bool:
     return bool(ok and ok_terrain)
 
 
-def main() -> int:
+def _parse_args():
+    """Parse the command line for a create-LOD run."""
     ap = argparse.ArgumentParser(
         description="Generate every plugin's distant LOD once, into a "
                     "standalone AutoConvertLOD mod.")
@@ -204,7 +205,83 @@ def main() -> int:
                          "worldspace the source shipped LOD for)")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the plan and generate nothing")
-    args = ap.parse_args()
+    return ap.parse_args()
+
+
+def _select_plugins(args, available, export_root, create_lod_order) -> list:
+    """Return the selected plugins for this run, lowest priority first.
+
+    An explicit `--plugins` order is honoured verbatim: it IS the conflict
+    resolution, and the GUI dialog lets the user arrange it by hand. Names with
+    no converted output are dropped rather than failing the run, so a stale
+    saved selection never blocks the plugins that ARE built.
+    """
+    if not args.plugins:
+        return create_lod_order(available, export_root)
+    plugins = [p for p in args.plugins if p in available]
+    missing = [p for p in args.plugins if p not in available]
+    if missing:
+        print(f"  Not converted, skipping: {', '.join(missing)}")
+    return plugins
+
+
+def _touched_worldspaces(plugins, out_root, export_root, _out_root,
+                         touched_worldspace_fids) -> dict:
+    """Map each plugin to the worldspace FormIDs it places records in.
+
+    None means "unreadable, so never filter this plugin out". Owning a
+    worldspace is not the same as editing it, and an overlay contributing
+    nothing still costs a full ESM parse per worldspace in BOTH generators, so
+    this is scanned once per plugin and reused for every job.
+    """
+    touched = {}
+    for name in plugins:
+        esm = _out_root(out_root, name, export_root) / name
+        touched[name] = None
+        if esm.is_file():
+            try:
+                touched[name] = touched_worldspace_fids(esm)
+            except OSError:
+                pass
+    return touched
+
+
+def _worldspace_fid_resolver(wanted, find_worldspace_fid, formid_remap_table):
+    """Return a memoised (esm, edid) -> NORMALIZED WRLD FormID lookup.
+
+    One owner's read resolves every worldspace in `wanted` while its bytes are
+    in hand. See: docs/commentary/asset_convert_terrain.md#create-lod-run-planning
+    """
+    cache: dict = {}
+
+    def _worldspace_fid(esm: Path, edid: str):
+        key = (str(esm).lower(), edid.lower())
+        if key in cache:
+            return cache[key]
+        gmap = formid_remap_table(esm)
+        raw = esm.read_bytes()
+        try:
+            for w in wanted:
+                k = (str(esm).lower(), w.lower())
+                if k not in cache:
+                    f = find_worldspace_fid(raw, len(raw), w)
+                    cache[k] = (None if f is None
+                                else gmap[f >> 24] | (f & 0x00FFFFFF))
+        finally:
+            del raw
+        return cache.get(key)
+
+    return _worldspace_fid
+
+
+def main() -> int:
+    """Bake every selected worldspace's LOD into the AutoConvertLOD mod.
+
+    Returns 0 when every job succeeded or there was nothing to do, 1 when any
+    bake reported an error.
+    See: docs/commentary/asset_convert_terrain.md#create-lod-run-planning
+    """
+    args = _parse_args()
 
     from asset_convert.lod.lod_gen import (generate_lod,
                                        textures_root as _lod_textures_root)
@@ -230,28 +307,12 @@ def main() -> int:
     print(f"  Output dir: {out_root}")
     print(f"  LOD mod:    {lod_dir}")
 
-    # The LOD mod ships tiles; any mesh here is scratch a previous bake staged
-    # for LODGen and failed to remove. Sweeping up front rather than trusting
-    # the post-bake cleanup keeps a killed run from pinning meshes forever --
-    # and since this mod installs LAST to win the tile overwrite, a stale mesh
-    # here silently overrides every plugin's current copy.
     swept = drop_staged_meshes(lod_dir)
     if swept:
         print(f"  Swept {swept} stale staged mesh file(s) from the LOD mod")
 
-    available = converted_plugins(out_root)
-    if args.plugins:
-        # Honour the caller's order verbatim — it IS the conflict resolution
-        # and the GUI dialog let the user arrange it by hand. Names with no
-        # converted output are dropped rather than failing the run, so a stale
-        # saved selection never blocks the plugins that ARE built.
-        plugins = [p for p in args.plugins if p in available]
-        missing = [p for p in args.plugins if p not in available]
-        if missing:
-            print(f"  Not converted, skipping: {', '.join(missing)}")
-    else:
-        plugins = create_lod_order(available, export_root)
-
+    plugins = _select_plugins(args, converted_plugins(out_root), export_root,
+                              create_lod_order)
     if not plugins:
         print("  No converted plugin to generate LOD for.")
         return 0
@@ -266,59 +327,14 @@ def main() -> int:
     print(f"  Worldspaces ({len(wanted)}): {', '.join(wanted) or '(none)'}")
     print()
 
-    # Resolve every worldspace to its owner and overlay stack before generating
-    # anything, so a bad selection is reported as a plan rather than discovered
-    # halfway through an hour of baking.
-    # WRLD-FormID lookups, memoised per (owner, edid). Several worldspaces share
-    # an owner — Oblivion.esm owns 18 — and resolving each one independently
-    # meant re-reading its 613 MB. The jobs below are built in worldspace order,
-    # not owner order, so the file's bytes are held only for the duration of one
-    # owner's lookups and the resolved FormIDs are what persist.
-    _fid_cache: dict = {}
-
-    def _worldspace_fid(esm: Path, edid: str):
-        key = (str(esm).lower(), edid.lower())
-        if key in _fid_cache:
-            return _fid_cache[key]
-        # NORMALISED, because it is compared against ids from OTHER plugins
-        # (`touched_worldspace_fids`), and a raw id is only meaningful inside
-        # the file it came from.
-        gmap = formid_remap_table(esm)
-        raw = esm.read_bytes()
-        try:
-            # Resolve every worldspace this owner is responsible for while its
-            # bytes are in hand, so one read serves all of them.
-            for w in wanted:
-                k = (str(esm).lower(), w.lower())
-                if k not in _fid_cache:
-                    f = find_worldspace_fid(raw, len(raw), w)
-                    _fid_cache[k] = (None if f is None
-                                     else gmap[f >> 24] | (f & 0x00FFFFFF))
-        finally:
-            del raw
-        return _fid_cache.get(key)
-
-    # Which worldspaces does each plugin actually put records in? Depending on a
-    # worldspace's owner is not the same as editing that worldspace, and an
-    # overlay contributing nothing still costs a full ESM parse per worldspace
-    # in BOTH generators. Scanned once per plugin here, then reused below.
-    touched = {}
-    for name in plugins:
-        esm = _out_root(out_root, name, export_root) / name
-        if esm.is_file():
-            try:
-                touched[name] = touched_worldspace_fids(esm)
-            except OSError:
-                touched[name] = None      # unreadable -> never filter it out
-        else:
-            touched[name] = None
-
-    # Every worldspace's owner in ONE pass over the load order, rather than
-    # `worldspace_owner` per worldspace re-listing every plugin each time.
+    touched = _touched_worldspaces(plugins, out_root, export_root, _out_root,
+                                   touched_worldspace_fids)
     owners = owner_map(wanted, plugins, export_root, out_root)
 
     jobs = _plan_jobs(wanted, owners, plugins, touched, out_root, export_root,
-                      _out_root, master_chain, _worldspace_fid)
+                      _out_root, master_chain,
+                      _worldspace_fid_resolver(wanted, find_worldspace_fid,
+                                               formid_remap_table))
 
     if not jobs:
         print("Nothing to generate.")

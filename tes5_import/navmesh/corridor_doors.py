@@ -5,7 +5,7 @@ door line.  We reproduce that: for each door we find the base line (BL-BR, on th
 door line) and the FOOTPRINT quad bridging it to the nearest corridor edge:
 
     BL ----------- BR      BL,BR = the door base, on the door line,
-     |             |       DOOR_LINE_HALF either side of the (panel-centred)
+     |             |       DOOR_LINE_HALF either side of the (panel-centered)
      |             |       threshold.  BL-BR is the LONG SIDE handed to the
      |             |       triangulation as a forced edge.
      E0 ----------- E1     E0,E1 = the two ends of the nearest corridor edge,

@@ -39,50 +39,16 @@ LODGEN_EXE = paths.LODGEN
 # 1. LODSettings file
 # ---------------------------------------------------------------------------
 
-def write_lod_settings(worldspace_edid: str, sw_x: int, sw_y: int,
-                       ne_x: int, ne_y: int, output_dir: Path) -> tuple:
-    """Write LODSettings/<worldspace_edid>.lod.
+def _cover_grid(sw_x: int, sw_y: int, ne_x: int, ne_y: int) -> tuple:
+    """Smallest anchored quadtree square covering [sw, ne): (sw_x, sw_y, size, max_lod).
 
-    16-byte format (TES5):
-      int16  SW cell X
-      int16  SW cell Y
-      uint32 grid width  (NE_X - SW_X, rounded up to power of 2)
-      uint32 min LOD level  (always 4)
-      uint32 max LOD level  (always 32)
-
-    Returns (path, effective_sw_x, effective_sw_y) so callers can use the
-    same SW coordinates in the LODGen CellSW= header line.
+    SW is anchored at a multiple of `max_lod` (the coarsest level emitted,
+    capped at 32) because LODGen snaps each tile's origin DOWN to a multiple of
+    its own level, so tiles start below the literal terrain corner.  `max_lod`
+    is chosen first since it sets the anchor granularity, then both grow
+    together until the aligned square covers the terrain.
+    See: docs/commentary/asset_convert_terrain.md#lodsettings-must-cover-the-terrain
     """
-    lod_dir = output_dir / "LODSettings"
-    lod_dir.mkdir(parents=True, exist_ok=True)
-    out = lod_dir / f"{worldspace_edid}.lod"
-
-    # The grid must COVER the terrain.  The engine builds its terrain-LOD
-    # quadtree from this header (root at SW, `size` cells across, subdivided to
-    # `min_lod`); a tile outside that square has no node, and the per-frame
-    # walk indexes the node array without a bounds check —
-    # SkyrimSE.exe+050E6AD `mov rbx,[rax+rcx*8]` with rax=0, a hard CTD the
-    # moment the worldspace streams.
-    #
-    # 57 of 84 TES4 worldspaces author no usable MNAM map dimensions, so
-    # sw==ne==0 arrives here and the old maths produced size=1 — a 1x1 grid —
-    # while LODGen still emitted .btr tiles out to (-32,-32).  Every converted
-    # worldspace got `SWx=0 SWy=1`; Kvatch crashed on entry.  Callers now pass
-    # the extents measured from the CELLS, which always exist.
-    #
-    # Vanilla (extracted from Skyrim - Meshes0.bsa) confirms both the layout
-    # and that SW is REAL, not centred: japhetsfollyworld (-9,-6) size 16
-    # maxLOD 16; dlc01falmervalley (-16,-13) size 32; skuldafnworld (0,-21)
-    # size 64.  maxLOD tracks size — it is not always 32.
-    # The root must contain every TILE, and LODGen snaps each tile's origin
-    # DOWN to a multiple of its own level (a level-16 tile covering cell -9
-    # is named ...16.-16.y), so tiles start below the literal terrain corner.
-    # Anchor SW at a multiple of max_lod and size the square from there.
-    #
-    # max_lod is the coarsest level emitted, capped at 32; it is chosen first
-    # because it sets the anchor granularity.  Grow both together until the
-    # aligned square covers [sw, ne) — growing is always safe, and the pair is
-    # recomputed each round so the anchor tracks the level.
     max_lod = 4
     while True:
         anchor = min(max_lod, 32)
@@ -91,13 +57,27 @@ def write_lod_settings(worldspace_edid: str, sw_x: int, sw_y: int,
         size = anchor
         while (eff_sw_x + size < ne_x or eff_sw_y + size < ne_y) and size < 4096:
             size <<= 1
-        # The square is anchored and covers the terrain; accept unless a
-        # coarser level would still be emitted inside it (max_lod < size).
         if max_lod >= min(size, 32) or max_lod >= 32:
             break
         max_lod <<= 1
-    max_lod = min(max_lod, 32)
+    return eff_sw_x, eff_sw_y, size, min(max_lod, 32)
 
+
+def write_lod_settings(worldspace_edid: str, sw_x: int, sw_y: int,
+                       ne_x: int, ne_y: int, output_dir: Path) -> tuple:
+    """Write LODSettings/<worldspace_edid>.lod; `<hhIII` = SWx i16, SWy i16,
+    size u32, minLOD u32 (always 4), maxLOD u32.
+
+    `sw`/`ne` must be the CELL extents: the grid must COVER the terrain or the
+    worldspace CTDs on entry.  Returns (path, effective_sw_x, effective_sw_y)
+    for the LODGen CellSW= header line.
+    See: docs/commentary/asset_convert_terrain.md#lodsettings-must-cover-the-terrain
+    """
+    lod_dir = output_dir / "LODSettings"
+    lod_dir.mkdir(parents=True, exist_ok=True)
+    out = lod_dir / f"{worldspace_edid}.lod"
+
+    eff_sw_x, eff_sw_y, size, max_lod = _cover_grid(sw_x, sw_y, ne_x, ne_y)
     out.write_bytes(struct.pack("<hhIII", eff_sw_x, eff_sw_y, size, 4, max_lod))
     print(f"  Wrote {out}")
     return out, eff_sw_x, eff_sw_y

@@ -22,7 +22,7 @@ see the `oblivion-to-skyrim-dialog` skill.
 
 6. **Localized Strings** — When the TES4 header has the Localized flag (0x80), FULL/DESC/etc. become LString indices. Non-localized plugins use inline strings.
 
-### Record Type Mapping
+### <a id="record-type-mapping"></a>Record Type Mapping
 
 | TES4 Type | TES5 Type | Notes |
 |-----------|-----------|-------|
@@ -89,6 +89,28 @@ see the `oblivion-to-skyrim-dialog` skill.
 | WEAP | WEAP | **DATA restructured**: 32B→10B. Type moves to DNAM. Massive DNAM struct (~100B). CRDT (critical data) new. Add OBND, keywords. |
 | WRLD | WRLD | New fields: XLCN, fixed dimensions, various flags. |
 | WTHR | WTHR | Cloud system redesigned (layer-based). HDR/lighting data restructured. |
+
+#### <a id="proj-data-layout"></a>PROJ DATA (92 bytes) offset map
+
+Per `wbDefinitionsTES5.pas`; built by `equipment._build_arrow_proj`, values
+matched to vanilla `ArrowIronProjectile` (0x0003BE11). Subrecord order is
+`EDID OBND FULL MODL DATA NAM1 VNAM`.
+
+```
+{00} Flags(U16)  {02} Type(U16)  {04} Gravity(f)  {08} Speed(f)  {12} Range(f)
+{16} Light  {20} MuzzleFlashLight  {24} TracerChance(f)
+{28} ExplAltTrigProximity(f)  {32} ExplAltTrigTimer(f)  {36} Explosion
+{40} Sound  {44} MuzzleFlashDuration(f)  {48} FadeDuration(f)
+{52} ImpactForce(f)  {56} SoundCountdown  {60} SoundDisable
+{64} DefaultWeaponSource  {68} ConeSpread(f)  {72} CollisionRadius(f)
+{76} Lifetime(f)  {80} RelaunchInterval(f)  {84} DecalData  {88} CollisionLayer
+```
+
+`Type` is a BIT value: Arrow = `0x40`, **not** the ordinal 7 (which reads as
+Missile|Lobber|Beam and spawns no usable projectile). `Flags 0x00C0` = Can Be
+Picked Up + Supersonic, as `ArrowIronProjectile`. Speed scales the TES4
+normalized 0-1 value proportionally into TES5 units/sec (1.0 -> 3600, the iron
+arrow's), floored at 500.
 
 ### New TES5 Record Types (May Need Creation)
 

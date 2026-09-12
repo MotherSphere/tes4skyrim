@@ -10,7 +10,7 @@ This reports, per cell:
                      actor cannot cross even though the ground is continuous.
   * RAMP ERROR     — for every steep (stair/ramp) pathgrid edge, how far the mesh
                      surface departs from the pathgrid line's own straight slope,
-                     sampled along the centreline.  Principle 2 says the line IS
+                     sampled along the centerline.  Principle 2 says the line IS
                      the ramp, so this should be ~0.  A sawtooth or a dropout
                      shows up here as a large max error / missing samples.
   * STEP JUMPS     — adjacent (edge-sharing) triangles whose surfaces differ by
@@ -35,7 +35,7 @@ from tools.navmesh.probe import load_cell
 
 # Two surfaces this close in Z at one XY are the same walkable surface.
 SAME_SURFACE = 40.0
-# Sample spacing along a pathgrid centreline when measuring ramp error.
+#: Sample spacing along a pathgrid centerline when measuring ramp error.
 RAMP_STEP = 16.0
 
 

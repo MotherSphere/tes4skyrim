@@ -68,13 +68,13 @@ def _repair_vertices(block) -> int:
     finite = [(v.x, v.y, v.z) for v in block.vertices if _finite_vec(v)]
     if finite:
         n = len(finite)
-        centre = (sum(p[0] for p in finite) / n,
+        center = (sum(p[0] for p in finite) / n,
                   sum(p[1] for p in finite) / n,
                   sum(p[2] for p in finite) / n)
     else:
-        centre = (0.0, 0.0, 0.0)
+        center = (0.0, 0.0, 0.0)
     for v in bad:
-        v.x, v.y, v.z = centre
+        v.x, v.y, v.z = center
     try:
         block.update_center_radius()
     except Exception:
@@ -108,7 +108,7 @@ def _repair_uvs(block) -> int:
 
 
 def _repair_colors(block) -> int:
-    """Drive every non-finite vertex-colour channel to opaque white."""
+    """Drive every non-finite vertex-color channel to opaque white."""
     fixed = 0
     for c in getattr(block, 'vertex_colors', []):
         for ch in ('r', 'g', 'b', 'a'):

@@ -775,7 +775,10 @@ def resolve_target(rec: dict, ctx: PackContext, pack_fid: int) -> bytes:
 
     This is what makes escort/follow work: Skyrim resolves a package's actor
     target through a quest reference alias (PTDA type 4), which is also how the
-    package outranks the actor's standing schedule.
+    package outranks the actor's standing schedule.  A player target is
+    normalized to PlayerRef before the alias lookup, never left as the base
+    NPC_.
+    See: docs/commentary/tes5_import_package.md#player-target-is-the-reference
     """
     t_type = get_int(rec, 'PTDT.Type', -1)
     if t_type < 0:
@@ -787,19 +790,6 @@ def resolve_target(rec: dict, ctx: PackContext, pack_fid: int) -> bytes:
         return build_target(2, get_int(rec, 'PTDT.Target', 0))
     target = get_formid(rec, 'PTDT.Target')
 
-    # "The player", however TES4 spelled it, is the SPECIFIC REFERENCE
-    # PlayerRef.  Oblivion routinely says it as Object-ID + the player's base
-    # NPC_ (0x07); Skyrim's escort/follow procedures need a reference to act
-    # on, and vanilla is emphatic about which one — Skyrim.esm names the player
-    # as a package target 543x as (type 0, 0x14) against just 6x as
-    # (type 1, 0x07).  Left as Object-ID the engine has a base form rather than
-    # an actor to follow, so the package is SELECTED but its procedure never
-    # engages: Morroblivion's chargen guard said "follow me" and stood still.
-    #
-    # Normalised to the reference FIRST so the alias lookup below sees 0x14 and
-    # a quest package still routes the player through its reference alias
-    # (PTDA type 4) — that aliasing is what lets it outrank the standing
-    # schedule, so it must not be short-circuited.
     if t_type == 1 and target == PLAYER_BASE_FID:
         t_type, target = 0, PLAYER_REF_FID
 

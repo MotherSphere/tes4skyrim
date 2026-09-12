@@ -32,7 +32,7 @@ from core.gui.config import CLR, EXPORT_DIR, REPO_ROOT, scan_mesh_subdirs, scan_
 # ---------------------------------------------------------------------------
 
 def _card(app):
-    """An empty modal card centred over the window; returns (card, close)."""
+    """An empty modal card centered over the window; returns (card, close)."""
     card = tk.Frame(app.outer, bg=CLR["panel"],
                     highlightbackground=CLR["border"], highlightthickness=1)
     bound = []
@@ -90,7 +90,7 @@ def _checkbox_list(card, pairs, bound, padx: int) -> None:
 
 
 def _show(app, card) -> None:
-    """Centre the finished card over the window and raise it."""
+    """Center the finished card over the window and raise it."""
     card.update_idletasks()
     card.place(in_=app.outer, anchor="center", relx=0.5, rely=0.5)
     card.lift()

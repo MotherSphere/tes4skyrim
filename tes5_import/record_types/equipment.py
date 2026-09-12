@@ -672,27 +672,15 @@ def convert_CLOT(rec: dict, writer=None) -> bytes:
 def _build_arrow_proj(edid: str, model_path: str, speed: float, proj_fid: int) -> bytes:
     """Build a minimal PROJ record for a converted arrow.
 
-    TES5 PROJ order: EDID OBND FULL MODL DATA NAM1 VNAM
-    DATA (92 bytes) layout per wbDefinitionsTES5.pas, values matched to
-    vanilla ArrowIronProjectile (0003BE11):
-      {00} Flags(U16) {02} Type(U16) {04} Gravity(f) {08} Speed(f) {12} Range(f)
-      {16} Light {20} MuzzleFlashLight {24} TracerChance(f)
-      {28} ExplAltTrigProximity(f) {32} ExplAltTrigTimer(f) {36} Explosion
-      {40} Sound {44} MuzzleFlashDuration(f) {48} FadeDuration(f)
-      {52} ImpactForce(f) {56} SoundCountdown {60} SoundDisable
-      {64} DefaultWeaponSource {68} ConeSpread(f) {72} CollisionRadius(f)
-      {76} Lifetime(f) {80} RelaunchInterval(f) {84} DecalData {88} CollisionLayer
-    Type is a bit value: Arrow = 0x40 (NOT an ordinal — 7 would be
-    Missile|Lobber|Beam and the engine spawns no usable projectile).
-    Flags 0x00C0 = Can Be Picked Up + Supersonic (as ArrowIronProjectile).
+    Order EDID OBND FULL MODL DATA NAM1 VNAM; DATA is 92 bytes whose offsets,
+    Arrow's BIT type 0x40 and the speed scaling are all in the offset map.
+    See: docs/reference/record_mapping.md#proj-data-layout
     """
     subs = b''
     subs += pack_string_subrecord('EDID', edid + 'Projectile')
     subs += pack_obnd()
     subs += pack_string_subrecord('MODL', model_path)
 
-    # Scale TES4 normalised speed (0-1) to TES5 units/sec (~3600 for iron arrow)
-    # TES4 speed 1.0 → TES5 3600; apply proportionally with a minimum of 500
     tes5_speed = max(500.0, speed * 3600.0)
 
     data = bytearray(92)

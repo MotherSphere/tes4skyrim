@@ -239,7 +239,7 @@ def _triangulate(poly, target_edge, fixed_edges=None, steep_seeds=None):
     Returns (verts2d, tris) in ONE shared vertex space.
 
     fixed_edges: [(p0, p1, apex), ...] door triangles, cut out and re-added as
-    ordinary mesh.  steep_seeds: [(x, y, is_steep), ...] on stair centrelines.
+    ordinary mesh.  steep_seeds: [(x, y, is_steep), ...] on stair centerlines.
 
     See: docs/commentary/tes5_import_navmesh.md#cdt-is-a-true-constrained-delaunay
     """
@@ -554,7 +554,7 @@ def _carries_seed(verts, t, grid, cell):
 
 
 def _refine_steep(verts, tris, steep_pts, protected=()):
-    """Bisect triangles carrying steep centreline seeds until they are fine.
+    """Bisect triangles carrying steep centerline seeds until they are fine.
 
     Longest-edge bisection with the neighbour split at the same midpoint, so
     every split keeps the triangulation conforming.  Edges in `protected`
@@ -667,13 +667,13 @@ def _earcut_fallback(poly):
     return verts, tris
 
 def _ribbon_seeds(strips, target_edge):
-    """Interior seed points down every ribbon centreline (stairs get more).
+    """Interior seed points down every ribbon centerline (stairs get more).
 
     Returns [(x, y, is_steep), ...].  Steep ribbons are sampled finely along
-    the centreline and both rails; flat ones get a coarse centreline row that
+    the centerline and both rails; flat ones get a coarse centerline row that
     the Poisson guard mostly rejects.
 
-    See: docs/commentary/tes5_import_navmesh.md#ribbon-centreline-seeds
+    See: docs/commentary/tes5_import_navmesh.md#ribbon-centerline-seeds
     """
     seeds = []
     for s in strips:

@@ -430,7 +430,7 @@ def _signed_clearance(P, V, T, tree, k=None, want_normals=False):
 
 
 def _unit_out(V, origin):
-    """Outward radial unit vectors of V about `origin` (head centre)."""
+    """Outward radial unit vectors of V about `origin` (head center)."""
     d = V - origin
     return d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
 

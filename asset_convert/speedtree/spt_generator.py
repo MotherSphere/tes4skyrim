@@ -143,9 +143,10 @@ def _ortho_frame(d: np.ndarray):
 
 def _cull_isolated_groups(leaf_positions, radius):
     """Drop whole attachment GROUPS (cards sharing an attach id) that have
-    no other group's centre within `radius` — those render as clumps
+    no other group's center within `radius` — those render as clumps
     floating detached from the crown.  Per-card counting misses them: a
     3-card clump (or two adjacent tip caps) is its own neighbourhood.
+    Callers exempt draped strands: a hanging curtain is legitimately sparse.
     """
     from collections import defaultdict
     groups = defaultdict(list)
@@ -154,16 +155,16 @@ def _cull_isolated_groups(leaf_positions, radius):
     ids = list(groups)
     if len(ids) <= 2:
         return leaf_positions
-    centres = np.array([np.mean(groups[g], axis=0) for g in ids])
+    centers = np.array([np.mean(groups[g], axis=0) for g in ids])
     try:
         from scipy.spatial import cKDTree
-        t = cKDTree(centres)
-        counts = t.query_ball_point(centres, radius, return_length=True)
+        t = cKDTree(centers)
+        counts = t.query_ball_point(centers, radius, return_length=True)
         keep_ids = {g for g, c in zip(ids, counts) if c > 1}  # self + 1 other
     except Exception:
         keep_ids = set()
         for i in range(len(ids)):
-            d = np.linalg.norm(centres - centres[i], axis=1)
+            d = np.linalg.norm(centers - centers[i], axis=1)
             if int((d < radius).sum()) > 1:
                 keep_ids.add(ids[i])
     if len(keep_ids) == len(ids):
@@ -955,18 +956,11 @@ def build_tree(tree: SptTree, seed: int | None = None,
                 leaf_positions = [lp for lp in leaf_positions
                                   if lp[0][2] >= lim or lp[3] in keep_aidx]
 
-        # cull FLOATING GROUPS: an attachment group (clump or tip cap)
-        # with no OTHER group's centre within ~2.4 leaf widths renders as
-        # a detached clump floating off the crown.  Per-card counting
-        # missed these — a 3-card clump (or two adjacent tip caps) is its
-        # own neighbourhood.  (Draped strands are exempt — a hanging
-        # curtain is legitimately sparse.)
         if leaf_positions and not drape:
             leaf_positions = _cull_isolated_groups(leaf_positions, leaf_w * 2.4)
 
-        # canopy centre for outward normals
         if leaf_positions:
-            centre = np.mean([lp[0] for lp in leaf_positions], axis=0)
+            canopy_center = np.mean([lp[0] for lp in leaf_positions], axis=0)
 
         # UV source: composite-map quads (section 10002) when present — the
         # actual shipped leaf DDS is the composite; per-map quads crop it.
@@ -1032,7 +1026,7 @@ def build_tree(tree: SptTree, seed: int | None = None,
             w = crop_ar * h
             if not (w > 0 and h > 0):
                 w = h = 0.08 * K
-            leaf_card(g, pos, w, h, m, quad, centre, rng, drape)
+            leaf_card(g, pos, w, h, m, quad, canopy_center, rng, drape)
         for tex_key, g in groups.items():
             if not g['v']:
                 continue
@@ -1076,7 +1070,7 @@ def _bark_colors(verts, trunk_len, wind=0.0, t_axis=None):
     return c
 
 
-def leaf_card(g, pos, w, h, leaf_map, uv_quad, centre, rng, drape=False):
+def leaf_card(g, pos, w, h, leaf_map, uv_quad, center, rng, drape=False):
     """Two crossed quads forming one leaf cluster card.
 
     uv_quad: 8 floats, texture corners TC0..TC3 = TR, TL, BL, BR in TGA
@@ -1095,7 +1089,7 @@ def leaf_card(g, pos, w, h, leaf_map, uv_quad, centre, rng, drape=False):
     rot = math.radians(leaf_map.rotate or 0.0) + rng.uniform(-0.3, 0.3)
     hang = float(np.clip(leaf_map.hang or 0.0, 0.0, 1.0)) if not drape else 0.0
 
-    out = pos - centre
+    out = pos - center
     out[2] *= 0.5
     nlen = np.linalg.norm(out)
     outward = out / nlen if nlen > 1e-3 else np.array([0.0, 0.0, 1.0])
@@ -1116,12 +1110,12 @@ def leaf_card(g, pos, w, h, leaf_map, uv_quad, centre, rng, drape=False):
             upv = _rotate_toward(upv, np.array([0.0, 0.0, -1.0]), hang * math.pi / 3)
         upv = _perturb(upv, abs(tilt) * 0.5, rng)
         upv /= np.linalg.norm(upv) + 1e-12
-        centre_pos = pos + right * (ou * w) + upv * (ovv * h)
+        center_pos = pos + right * (ou * w) + upv * (ovv * h)
         hw, hh = w * 0.5, h * 0.5
-        corners = [centre_pos - right * hw - upv * hh,
-                   centre_pos + right * hw - upv * hh,
-                   centre_pos + right * hw + upv * hh,
-                   centre_pos - right * hw + upv * hh]
+        corners = [center_pos - right * hw - upv * hh,
+                   center_pos + right * hw - upv * hh,
+                   center_pos + right * hw + upv * hh,
+                   center_pos - right * hw + upv * hh]
         vs = np.asarray(corners, np.float32)
         nrm = np.cross(right, upv)
         nrm /= np.linalg.norm(nrm) + 1e-12

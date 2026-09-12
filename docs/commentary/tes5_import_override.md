@@ -185,7 +185,7 @@ from comparing two conversion runs.
     there — `000000` is merely the most common of many values (`3e9e23`,
     `b57086`, `ea5b25` … each in the hundreds-to-thousands). Comparing them
     reported phantom VHGT changes on 6 of the 16 whose real terrain was
-    identical, emitting override records with zero authored content. Normalised
+    identical, emitting override records with zero authored content. Normalized
     in `export_diff._SCALAR_NORMALIZERS`, and `_Rebuild(keep_tail=3)` preserves
     the MASTER's pad when the terrain genuinely did change, so an override
     diverges only where the author sculpted.
@@ -253,7 +253,7 @@ from comparing two conversion runs.
   so an overlay's own worldspaces keep their own FormID and are excluded.
   Guarded by `tests/test_terrain_lod_scoping.py`, which builds synthetic ESMs so
   both branches stay distinguishable.
-- <a id="lod-formid-normalisation"></a>**🔴 THE LOD MERGE RESOLVES FORMIDS
+- <a id="lod-formid-normalization"></a>**🔴 THE LOD MERGE RESOLVES FORMIDS
   THROUGH EACH FILE'S OWN MASTER LIST — RAW IDS ARE NOT COMPARABLE.**
   (found 2026-08-12)
 
@@ -285,7 +285,7 @@ from comparing two conversion runs.
   process-wide byte that names the same FILE in every plugin, so
   `(global_byte << 24) | local_id` is comparable across the load order and
   still fits an int (a local id is only 24 bits). Every id crossing a file
-  boundary is normalised: record ids, GRUP labels, `REFR.NAME` base pointers,
+  boundary is normalized: record ids, GRUP labels, `REFR.NAME` base pointers,
   `known_wrld_fid`, and `_scan_cell_coords` keys. **A blanket +N shift is
   wrong** for the same reason it was wrong in the importer — files share their
   low masters, so only bytes that actually move may be rewritten, matched BY
@@ -372,7 +372,7 @@ from comparing two conversion runs.
   GRUP REPLACES the master's rather than merging, so overriding a single REFR
   in an otherwise-untouched cell DELETES the terrain under it. The land is
   dropped precisely *because* it is unchanged — `diff_records` correctly
-  reports no authored difference once the VHGT pad is normalised — so nothing
+  reports no authored difference once the VHGT pad is normalized — so nothing
   upstream knows the cell still needs it. Measured on ElsweyrAnequina.esp: 8
   cells emitted a type-9 group holding one REFR or ACHR and no LAND.
   `emit_nested_overrides` now pulls the master's LAND in via

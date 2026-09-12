@@ -88,7 +88,7 @@ def read_manifest(export_dir, name: str = MANIFEST_NAME) -> set:
 
 
 def _norm(raw) -> str:
-    """Normalise a texture reference to a key relative to the textures root."""
+    """Normalize a texture reference to a key relative to the textures root."""
     if isinstance(raw, bytes):
         raw = raw.decode('latin-1', errors='replace')
     p = raw.strip().lower().replace('\\', '/')

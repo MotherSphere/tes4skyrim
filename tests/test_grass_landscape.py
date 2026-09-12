@@ -359,7 +359,7 @@ class TestConstantSpecularAlpha:
     RED, BLUE = 0xF800, 0x001F
 
     def _dxt3(self, alpha_nibbles=0xFF):
-        """One DXT3 block: 8 bytes of 4-bit alpha, then the colour block."""
+        """One DXT3 block: 8 bytes of 4-bit alpha, then the color block."""
         return bytes([alpha_nibbles] * 8) + _opaque_block(
             self.RED, self.BLUE, 0x1B1B1B1B)
 
@@ -376,25 +376,26 @@ class TestConstantSpecularAlpha:
         """
         path = tmp_path / 'poster_n.dds'
         path.write_bytes(_make_dds(b'DXT3', 4, 4, 1, [[self._dxt3(0xFF)]]))
-        colour_before = path.read_bytes()[128 + 8:128 + 16]
+        color_before = path.read_bytes()[128 + 8:128 + 16]
 
         assert landscape_normals.set_constant_alpha(path, 64) is True
         data = path.read_bytes()
         assert data[84:88] == b'DXT5'
         assert data[128] == 64 and data[129] == 64
         assert data[130:136] == b'\x00' * 6, 'alpha indices must select alpha0'
-        assert data[128 + 8:128 + 16] == colour_before, 'RGB was modified'
+        assert data[128 + 8:128 + 16] == color_before, 'RGB was modified'
         assert len(data) == 128 + 16, 'DXT3 and DXT5 are both 16 bytes/block'
 
-    def test_dxt5_alpha_replaced_colour_kept(self, tmp_path):
+    def test_dxt5_alpha_replaced_color_kept(self, tmp_path):
+        """A DXT5 block gets the constant alpha while its RGB is untouched."""
         path = tmp_path / 'flat_n.dds'
         path.write_bytes(_make_dds(b'DXT5', 4, 4, 1, [[self._dxt5(25, 25)]]))
-        colour_before = path.read_bytes()[128 + 8:128 + 16]
+        color_before = path.read_bytes()[128 + 8:128 + 16]
 
         assert landscape_normals.set_constant_alpha(path, 64) is True
         data = path.read_bytes()
         assert data[128] == 64 and data[129] == 64
-        assert data[128 + 8:128 + 16] == colour_before
+        assert data[128 + 8:128 + 16] == color_before
 
     def test_mip_chain_is_walked(self, tmp_path):
         """Every mip must be rewritten, not just the top one.

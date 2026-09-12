@@ -99,10 +99,10 @@ def _imgs_sky_scale(rec: dict, time: int) -> float:
     """The IMGS Sky Scale for this weather and time slot.
 
     A LOOKUP on the authored TES4 classification bit, not a rescale of any
-    TES4 field: Sky Scale feeds back into sky colour, so deriving it from the
-    colour is a loop.
+    TES4 field: Sky Scale feeds back into sky color, so deriving it from the
+    color is a loop.
 
-    See: docs/commentary/tes5_import_weather.md#the-actual-defect-sky-scale-is-derived-from-sky-colour-feedback-loop
+    See: docs/commentary/tes5_import_weather.md#the-actual-defect-sky-scale-is-derived-from-sky-color-feedback-loop
     """
     cls = get_int(rec, 'DATA.Classification') & _WTHR_CLASSIFICATION_MASK
     for bit in (0x01, 0x02, 0x04, 0x08):
@@ -237,7 +237,7 @@ _NAM0_SLOT_NAMES = (
     'Sun Glare', 'Moon Glare',
 )
 
-#: TES4 colour index feeding each _NAM0_SLOT_NAMES slot; None means no TES4 source.
+#: TES4 color index feeding each _NAM0_SLOT_NAMES slot; None means no TES4 source.
 _NAM0_TES5_FROM_TES4 = [
     _T4_SKY_UPPER, _T4_FOG, None, _T4_AMBIENT, _T4_SUNLIGHT, _T4_SUN,
     _T4_STARS, _T4_SKY_LOWER, _T4_HORIZON, None, _T4_CLOUDS_UPPER,
@@ -284,7 +284,7 @@ def _nam0_class_defaults(rec: dict) -> dict:
 
 _TES5_NAM0_SLOTS = 17
 
-#: A source NAM0 shorter than this carries no usable colour table.
+#: A source NAM0 shorter than this carries no usable color table.
 _SRC_NAM0_SIZE = NAM0_SLOTS * TES4_TIMES * 4
 
 
@@ -302,7 +302,7 @@ def _src_rgb(raw: bytes, slot: int, time: int) -> tuple:
 _T5_STARS = 6
 _TES5_CLOUD_LAYERS = 32
 
-#: Below _NAM0_KNEE an authored colour passes through; 255 maps to the ceiling.
+#: Below _NAM0_KNEE an authored color passes through; 255 maps to the ceiling.
 _NAM0_KNEE = 160.0
 _NAM0_KNEE_CEILING = 200.0
 _NAM0_SUN_KNEE = 30.0
@@ -380,11 +380,11 @@ def _lum(r, g, b):
 def _knee_rgb(r, g, b, knee: float, ceiling: float) -> tuple:
     """Compress luminance above `knee` into `knee..ceiling`, hue preserved.
 
-    Below the knee the colour is returned EXACTLY as authored — no scaling,
+    Below the knee the color is returned EXACTLY as authored — no scaling,
     no rounding drift.  Above it, all three channels are scaled by the same
     factor, so only brightness changes.
 
-    This is a pure function of one colour: no time-of-day term and no
+    This is a pure function of one color: no time-of-day term and no
     dependence on the rest of the plugin, which is what keeps the authored
     day/night curve intact.
     """
@@ -400,7 +400,7 @@ def _knee_rgb(r, g, b, knee: float, ceiling: float) -> tuple:
 def _normalize_rgb(t5_slot: int, time: int, r: int, g: int, b: int) -> tuple:
     """Scale an RGB triple so its luminance matches `target`, preserving hue.
 
-    See: docs/commentary/tes5_import_weather.md#colours-are-luminance-normalized-not-copied-the-real-bloom-source
+    See: docs/commentary/tes5_import_weather.md#colors-are-luminance-normalized-not-copied-the-real-bloom-source
     """
     if t5_slot == _T5_SUN:
         return _knee_rgb(r, g, b, _NAM0_SUN_KNEE, _NAM0_SUN_CEILING)
@@ -554,7 +554,7 @@ def _wthr_cloud_layer_plan(lower_cloud: str, upper_cloud: str) -> list:
 def _wthr_cloud_arrays(rec: dict, layer_plan) -> bytes:
     """The RNAM/QNAM/PNAM/JNAM cloud arrays, one byte per TES5 layer.
 
-    RNAM/QNAM are X/Y drift speeds, PNAM the per-layer colour index and JNAM
+    RNAM/QNAM are X/Y drift speeds, PNAM the per-layer color index and JNAM
     the alpha. Layers not in `layer_plan` keep 0x7F (no drift).
 
     See: docs/commentary/tes5_import_weather.md#cloudsupdate--0x3c52e0--lnam-nam1-rnamqnam-pnamjnam

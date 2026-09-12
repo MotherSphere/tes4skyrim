@@ -1,7 +1,7 @@
 """Extract shaders from Oblivion .sdp shader packages and disassemble the
 D3D9 (SM 2.0/3.0) bytecode.
 
-Why: the sky colour and the HDR tone map are done ON THE GPU.  The exe only
+Why: the sky color and the HDR tone map are done ON THE GPU.  The exe only
 stages constants; the arithmetic is in the compiled shaders shipped in
 Data/Shaders/shaderpackageNNN.sdp.  Reading that bytecode is the only way to
 know exactly what Oblivion computes.

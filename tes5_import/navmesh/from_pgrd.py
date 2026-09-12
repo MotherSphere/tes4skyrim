@@ -127,10 +127,9 @@ GRID_TARGET_CELL = 600.0
 GRID_DIVISOR_MIN = 2
 GRID_DIVISOR_MAX = 12
 
-# Door-triangle linking: a triangle links to a door if within this distance, and
-# triangles centred on the threshold LINE (small offset along facing) are
-# preferred by weighting the along-facing offset up.
+#: Max distance, world units, at which a triangle may link to a door.
 DOOR_LINK_MAX_DIST = 220.0
+#: Weight on the along-facing offset, preferring triangles on the threshold line.
 DOOR_LINK_ALONG_WEIGHT = 2.0
 
 
@@ -153,7 +152,7 @@ def _collect_intercell(rec, points, origin_x, origin_y):
     Each PGRI entry names a LOCAL point in this cell and the world-space EXIT
     point it connects to in a NEIGHBOURING cell.  Oblivion's PGRI is padded with
     uninitialised CS memory: entries whose LocalPoint is out of range, or whose
-    exit coordinates are denormalised / absurdly far from this cell, are garbage
+    exit coordinates are denormalized / absurdly far from this cell, are garbage
     and dropped (InterCell[1] in AnvilExterior: LocalPoint=17292, X=0,
     Y~2.5e-41).  Only a plausible exit — finite, non-denormal, and within
     _INTERCELL_MAX_REACH of the cell origin — survives.
@@ -243,36 +242,17 @@ def build_navmesh_grid(verts, tris, min_x, min_y, max_x, max_y, divisor):
 # ---------------------------------------------------------------------------
 
 
-# model_key -> (cx, cy) local-space XY midpoint of the door PANEL (largest mesh
-# shape), relative to the model origin (the REFR pivot).  Loaded from the
-# door-centres cache built in the SAME pass as collision + mesh bounds
-# (asset_convert.collision.collision_extract.scan_mesh_data).  The REFR pivot sits on the
-# HINGE, not the opening; the panel midpoint is the point an actor walks
-# through, and where the Door Triangle belongs.
+#: model key -> mesh-bbox local (cx, cy) of the door panel; fallback center.
 _DOOR_CENTROIDS = {}
-# model key -> local z of the door mesh's BASE (its bbox z-min).  Added to the
-# REFR PosZ this gives the threshold's floor height; see load_door_centroids.
+#: model key -> local z of the door mesh's BASE (bbox z-min), added to REFR PosZ.
 _DOOR_FLOOR_DZ = {}
-# model key -> True when the door's threshold runs along the mesh's LOCAL +Y
-# (the wider horizontal extent), False when it runs along local +X.  Read per
-# model in load_door_centroids; door meshes do not share one convention.
+#: model key -> True when the threshold runs along the mesh's LOCAL +Y, else +X.
 _DOOR_THRESH_LOCAL_Y = {}
-# Models whose collision panel is thin in Z: trapdoors, hatches and display
-# cases.  They swing about a HORIZONTAL axis, so no vertical-axis threshold
-# line exists and they must not receive a door quad.
+#: Model keys whose panel is thin in Z (trapdoors, hatches): no door quad.
 _DOOR_NO_THRESHOLD = set()
-# model key -> real doorway WIDTH in world units, measured off the collision
-# panel.  Door panels range from 16u to 764u wide (median 121), so a single
-# hardcoded half-width cannot span them: at 90u it left the first 30u of
-# impdundoor01's 115u threshold with no mesh, shrinking the Door Triangle to a
-# 571-unit scrap that actors could not stand on.
+#: model key -> real doorway width, world units, off the collision panel.
 _DOOR_WIDTH = {}
-# model key -> (cx, cy) local-space panel centre from the COLLISION PANEL,
-# world units.  Preferred over _DOOR_CENTROIDS (the mesh-bbox centres cache):
-# verified against placed doors in-world the collision centre is exact to
-# ~1.5u, where the mesh-bbox centre was 25-35u off along the threshold on the
-# CharacterGen prison gates (cgprisoncellgate01, idgate01) — more than half
-# those gates' own 40/63u width, putting the Door Triangle mostly on the jamb.
+#: model key -> collision-panel local (cx, cy), world units; the exact center.
 _DOOR_PANEL_CTR = {}
 
 
@@ -288,10 +268,10 @@ def door_threshold_axis(model_key):
 
 
 def _apply_door_axis(key, a):
-    """Fill the axis/width/centre/floor globals from one axis-cache entry.
+    """Fill the axis/width/center/floor globals from one axis-cache entry.
 
     A bare string is the legacy axis-only form; otherwise the fields are
-    [axis, width, centre_x, centre_y, slab_z_min], each optional from the
+    [axis, width, center_x, center_y, slab_z_min], each optional from the
     right.  Element 4 is the CLOSED slab's z-min, a better floor drop than the
     whole-NIF bounds z-min (which includes the frame reaching below).
     """
@@ -308,9 +288,9 @@ def _apply_door_axis(key, a):
 
 
 def _load_door_axes(apath) -> None:
-    """Read door_panel_axis_cache.json into the axis/width/centre globals.
+    """Read door_panel_axis_cache.json into the axis/width/center globals.
 
-    '__schema__' carries the cache version, not a door model.  A centres-cache
+    '__schema__' carries the cache version, not a door model.  A centers-cache
     model absent here keeps its marker via _DOOR_NO_THRESHOLD.
     See: docs/commentary/tes5_import_navmesh.md#door-base-line-is-local-y
     """
@@ -330,17 +310,13 @@ def _load_door_axes(apath) -> None:
 
 
 def load_door_centroids(cache_path, quiet: bool = False) -> int:
-    """Load door panel centres/axes/widths for the plugin's door models.
+    """Populate the six door caches; returns the model count loaded.
 
-    cache_path: path to door_centers_cache.json (sits beside the bounds cache).
-    Keys are mesh_bounds-style ('tes4/...'), matching the door_fids map.
-
-    The authoritative source is door_panel_axis_cache.json (written by
-    collision_extract.scan_door_axes from the COLLISION
-    PANEL): axis, doorway width, and — in the 4-element form — the exact panel
-    centre.  The legacy door_centers_cache.json (mesh-bbox centres) is only a
-    fallback for models the axis cache lacks a centre for; a plugin without it
-    still loads fully from the axis cache.
+    cache_path: door_centers_cache.json, beside the bounds cache; keys are
+    mesh_bounds-style ('tes4/...'), matching door_fids.  Authoritative source
+    is door_panel_axis_cache.json (collision_extract.scan_door_axes); the
+    legacy mesh-bbox centers only fill models it lacks a center for.
+    See: docs/commentary/tes5_import_navmesh.md#door-center-caches
     """
     _DOOR_CENTROIDS.clear()
     _DOOR_FLOOR_DZ.clear()
@@ -359,7 +335,7 @@ def load_door_centroids(cache_path, quiet: bool = False) -> int:
                 _DOOR_CENTROIDS[k] = (float(v[0]), float(v[1]))
         except (OSError, ValueError) as exc:
             if not quiet:
-                print(f"  Door centres: could not load cache ({exc})")
+                print(f"  Door centers: could not load cache ({exc})")
     _load_door_axes(os.path.join(base_dir, 'door_panel_axis_cache.json'))
     # The REFR pivot sits at the door mesh's local z=0, which for a door is
     # up at the HINGE, not on the floor: impdundoor01's panel runs local z
@@ -385,23 +361,21 @@ def load_door_centroids(cache_path, quiet: bool = False) -> int:
             pass
     n = len(set(_DOOR_CENTROIDS) | set(_DOOR_PANEL_CTR))
     if not quiet:
-        print(f"  Door centres: loaded {n} entries "
-              f"({len(_DOOR_PANEL_CTR)} exact panel centres)")
+        print(f"  Door centers: loaded {n} entries "
+              f"({len(_DOOR_PANEL_CTR)} exact panel centers)")
     return n
 
 
 def _door_threshold(refr, model_key):
-    """World-space doorway centre of a door REFR: (x, y, z) or None.
+    """World-space doorway center of a door REFR: (x, y, z) or None.
 
-    THE REFR POSITION IS THE MODEL'S PIVOT (the HINGE), NOT THE DOORWAY.  The
-    doorway centre is the midpoint of the door mesh's bounding box (see
-    load_door_centroids), offset from the pivot and rotated into world space by
-    the ref's RotZ.  z stays at the REFR position (only used to pick the
-    storey).  Returns None when no midpoint is known (falls back to raw pos).
+    The REFR position is the model PIVOT (the HINGE), not the doorway; the
+    panel center is offset from it and rotated by the TRANSPOSE matrix, and z
+    drops to the panel base.  None when no center is known.
+    See: docs/commentary/tes5_import_navmesh.md#door-center-uses-transpose-rotation
     """
     if not model_key:
         return None
-    # Collision-panel centre first (exact); mesh-bbox centre as fallback.
     c = _DOOR_PANEL_CTR.get(model_key) or _DOOR_CENTROIDS.get(model_key)
     if c is None:
         return None
@@ -409,11 +383,6 @@ def _door_threshold(refr, model_key):
     rz = get_float(refr, 'RotZ') or 0.0
     cosz, sinz = math.cos(rz), math.sin(rz)
     lx, ly = c[0] * scale, c[1] * scale
-    # Bethesda placement applies the TRANSPOSE of the naive rotation (see
-    # navmesh/world.py _rot_matrix, verified against the AnvilFG floor shell).
-    # The naive CCW form put Arvena's upstairs door centre one FULL door width
-    # from the real doorway — only doors rotated 90/270 expose the error
-    # (0/180 are sign-invariant), which is why it survived every 0/180 test.
     wx = get_float(refr, 'PosX') + (lx * cosz + ly * sinz)
     wy = get_float(refr, 'PosY') + (-lx * sinz + ly * cosz)
     # Drop z from the pivot (the hinge, up the door leaf) to the panel's base,
@@ -434,11 +403,11 @@ def _finite_door_point(pt, rot_z):
 def collect_doors(refr_recs, door_fids):
     """Return [(x, y, z, rot_z, ref_fid, is_teleport, width), ...] for doors.
 
-    A door is a REFR whose base is a DOOR (in door_fids) or that carries an
-    XTEL teleport; is_teleport marks the cross-cell ones.  door_fids maps
-    raw low-24 DOOR base FormIDs to normalised model keys (a plain set also
-    works -- membership only, no centring).  The panel centroid moves the
-    point from the REFR pivot to the doorway centre; z is unchanged.
+    A door is a REFR whose base is in door_fids or that carries an XTEL
+    teleport; is_teleport marks the cross-cell ones.  door_fids maps raw
+    low-24 base FormIDs to model keys (a plain set works: membership only, no
+    centering).  rot_z is normalized so local +Y is EVERY door's threshold.
+    See: docs/commentary/tes5_import_navmesh.md#door-center-caches
     """
     if not refr_recs:
         return []
@@ -470,12 +439,6 @@ def collect_doors(refr_recs, door_fids):
         # is nowhere near the pathgrid, so it cannot be linked anyway.
         if not _finite_door_point(pt, rot_z):
             continue
-        # Normalise the rotation so that, for EVERY door, local +Y is the
-        # threshold direction.  Door meshes disagree about which local axis is
-        # the wide one (impdundoor01 is wide in Y, icdoorint01 wide in X), so a
-        # single convention downstream rotated some doors 90 degrees.  Adding a
-        # quarter turn for the X-wide meshes lets every consumer -- the door
-        # quad and navmesh_preview alike -- use one rule.
         rz = rot_z if rot_z is not None else 0.0
         mk = door_fids.get(base) if is_map else None
         # A trapdoor/hatch has no vertical-axis threshold, so it gets NO QUAD
@@ -531,10 +494,10 @@ def _nearest_to_threshold(cents, used_tris, dx, dy, rot_z):
     """The unused triangle nearest a door, or None if none is close enough.
 
     Used only when no triangle CONTAINS the door point.  `collect_doors`
-    normalises RotZ so the THRESHOLD is (sin rz, cos rz) under the transpose
+    normalizes RotZ so the THRESHOLD is (sin rz, cos rz) under the transpose
     placement convention, making the facing its perpendicular
     (cos rz, -sin rz).  Candidates are ranked by distance to the door plus a
-    weighted offset ALONG that facing, which prefers triangles centred near
+    weighted offset ALONG that facing, which prefers triangles centered near
     the threshold line over ones merely close to the point.
     """
     fx, fy = math.cos(rot_z), -math.sin(rot_z)
@@ -560,7 +523,7 @@ def build_door_links(verts, tris, doors):
     edge, so the answer is normally just the triangle CONTAINING the door
     position at its height.  With no such triangle (the quad was culled,
     or there is no mesh there) it falls back to the nearest triangle
-    centred on the threshold line.
+    centered on the threshold line.
     """
     if not doors or not tris:
         return []

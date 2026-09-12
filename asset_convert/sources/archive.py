@@ -4,7 +4,7 @@ Mod archives are downloaded from the internet, so every path inside one is
 untrusted input. This module is the ONLY place archives are opened, and it
 enforces two rules for the whole pipeline:
 
-  * ``safe_relpath`` — every member path is normalised and rejected if it
+  * ``safe_relpath`` — every member path is normalized and rejected if it
     escapes the destination (``..``, absolute paths, drive letters, UNC).
     ``ZipFile.extractall`` is never used; 7-Zip is always given an explicit
     output directory and its results are re-checked on the way out.
@@ -51,7 +51,7 @@ class UnsafeMemberError(ArchiveError):
 class Member:
     """One entry in an archive.
 
-    `path` is always normalised to forward slashes and is guaranteed safe (it
+    `path` is always normalized to forward slashes and is guaranteed safe (it
     passed `safe_relpath`). `is_dir` entries carry no data.
     """
 
@@ -80,7 +80,7 @@ def is_archive(path) -> bool:
 
 
 def safe_relpath(member_path: str) -> str:
-    """Normalise an archive member path, or raise if it escapes.
+    """Normalize an archive member path, or raise if it escapes.
 
     Rejects absolute paths, drive letters, UNC paths and any '..' that walks
     above the root. Returns a clean forward-slash relative path.
@@ -341,7 +341,7 @@ def extract_one(path, member_path, dest_file):
 
 
 def _zip_real_name(zf, rel):
-    """Map a normalised relative path back to the zip's own member name."""
+    """Map a normalized relative path back to the zip's own member name."""
     target = rel.lower()
     for name in zf.namelist():
         try:

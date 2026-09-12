@@ -1,7 +1,7 @@
 """Shared loader for the audit-index navmesh tools (render/sweep/compare).
 
 Every diagnostic that regenerates a cell's navmesh in-process needs the same
-four things: the collision cache, the door-centre cache, the audit index
+four things: the collision cache, the door-center cache, the audit index
 (`export/<plugin>/audit_index3.pkl`, built by tools/navmesh/audit.py), and a
 way to turn a cell EditorID into the exact argument tuple `build_navmesh`
 receives from the real pipeline.  Keeping that in ONE place is what stops a

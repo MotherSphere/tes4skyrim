@@ -185,9 +185,9 @@ def _watr_dnam(rec: dict) -> bytes:
     """The 228-byte TES5 water-visuals struct for `rec`.
 
     0-15    wind/wave constants, mirrored from vanilla (TES5 marks unused)
-    16-27   surface response; Sun Power renormalised TES4 0-50 -> TES5 ~1000
+    16-27   surface response; Sun Power renormalized TES4 0-50 -> TES5 ~1000
     32-39   above-water fog distance, straight across from TES4
-    40-52   colour block (RGB only; vanilla alpha is always 0)
+    40-52   color block (RGB only; vanilla alpha is always 0)
     56-227  noise/fog-under/specular/depth, from Skyrim's DefaultWater
 
     See: docs/commentary/tes5_import_landscape.md#watr-dnam-offset-trap

@@ -3,7 +3,7 @@
 The record/GRUP binary layer lives in `tes5_import/base/tes5_reader.py`; this adds
 what only the LOD stages need.
 
-Every FormID here is NORMALISED: the index byte is rewritten to a global one
+Every FormID here is NORMALIZED: the index byte is rewritten to a global one
 that names the same file in every plugin.  Raw ids cannot be compared across
 plugins -- the index byte is per file -- so without this an overlay merge
 treats numeric coincidences as overrides.
@@ -30,7 +30,7 @@ _WANTED = (b'WRLD', b'CELL', b'REFR') + _LOD_BASE_SIGS
 
 _MASTERS_CACHE: dict = {}
 
-#: Every plugin name seen while normalising, in first-seen order; append-only.
+#: Every plugin name seen while normalizing, in first-seen order; append-only.
 _GLOBAL_FILES: list = []
 _GLOBAL_FILE_IDX: dict = {}
 
@@ -57,7 +57,7 @@ def plugin_masters(esm_path: Path) -> list:
 def global_file_index(name: str) -> int:
     """Stable small integer for a plugin name, assigned on first sight.
 
-    Process-wide and append-only: an id normalised for one worldspace must
+    Process-wide and append-only: an id normalized for one worldspace must
     mean the same thing in the next.
     """
     name = name.lower()
@@ -169,7 +169,7 @@ def parse_esm(esm_path: Path):
     refs:        [{form_id, flags, base_fid, parent_wrld, parent_cell,
                    x, y, z, rx, ry, rz, scale}]
 
-    Every FormID is normalised into the global index space.
+    Every FormID is normalized into the global index space.
     """
     esm_path = Path(esm_path)
     gmap = formid_remap_table(esm_path)
@@ -179,7 +179,7 @@ def parse_esm(esm_path: Path):
     refs: list = []
 
     def g(fid: int) -> int:
-        """Normalise one FormID into the global space."""
+        """Normalize one FormID into the global space."""
         return gmap[fid >> 24] | (fid & 0x00FFFFFF)
 
     for rec, stack in walk(esm_path.read_bytes(), *_WANTED):

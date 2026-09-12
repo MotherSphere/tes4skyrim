@@ -1,7 +1,7 @@
 """Ribbon geometry primitives: the leaf every other union module builds on.
 
 A "strip" is the corridor ribbon around one pathgrid edge -- a dict carrying its
-centreline `a`/`b`, unit axis `u`, perpendicular `w`, `half` width, and
+centerline `a`/`b`, unit axis `u`, perpendicular `w`, `half` width, and
 optionally an explicit `poly` outline.  Everything here is a pure function of a
 strip or a triangle: no mesh state, no shapely at module scope.
 
@@ -50,10 +50,10 @@ def _ribbon_cache_clear():
     _RIBBON_CACHE.clear()
 
 def _repair_invalid_outline(poly, s):
-    """A self-intersecting outline as a valid polygon covering its centreline.
+    """A self-intersecting outline as a valid polygon covering its centerline.
 
     Keeps EVERY lobe of the buffer(0) repair and unions in a minimum-width band
-    over the centreline, which the ribbon must always contain.
+    over the centerline, which the ribbon must always contain.
 
     See: docs/commentary/tes5_import_navmesh.md#invalid-ribbon-outline-repair
     """
@@ -102,7 +102,7 @@ def _clip_strip_near(s, nx, ny, r, piece):
 
     Used when a ribbon donates ground at a junction: the owning sheet needs
     the arriving corridor's HEIGHT over the donated disc and nothing beyond.
-    The centreline is cut at the node's own projection and the footprint
+    The centerline is cut at the node's own projection and the footprint
     becomes the donated piece, so the strip can never answer a level lookup
     outside the ground that changed hands.
 
@@ -193,11 +193,11 @@ def _height_on(s, px, py):
     return az + (bz - az) * t
 
 def _distance_to(s, px, py):
-    """Distance from (px, py) to the strip's centreline.
+    """Distance from (px, py) to the strip's centerline.
 
     For a strip with an explicit outline (a door triangle) the distance is 0
     inside that outline, so it only ever claims the ground it actually covers —
-    a centreline measure would let it claim well outside its own shape.
+    a centerline measure would let it claim well outside its own shape.
     """
     if s.get('poly') is not None:
         if _point_in_poly(px, py, s['poly']):

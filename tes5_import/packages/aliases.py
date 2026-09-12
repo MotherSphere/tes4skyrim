@@ -582,7 +582,7 @@ class PackagePlan:
         These are in no actor's AI array — that is the whole point of the call
         — and Skyrim has no equivalent function, so an ALPC is the only way
         arbitration can ever select one.  A call may name the placed ACHR (the
-        usual form) or the base actor; both normalise to the ref an alias
+        usual form) or the base actor; both normalize to the ref an alias
         fills, and anything else cannot take an alias and is skipped.
         """
         ref_to_base = {r: b for b, r in base_to_ref.items()}

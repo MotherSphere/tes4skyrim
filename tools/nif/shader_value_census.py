@@ -137,7 +137,7 @@ def main():
             print(f'    {str(v):<22} {cnt:>6}  {cnt * 100.0 / n_shaders:5.1f}%')
 
     show('glossiness', gloss)
-    show('specular colour', spec)
+    show('specular color', spec)
     show('specular strength', strength)
     show('emissive multiple', emis)
 

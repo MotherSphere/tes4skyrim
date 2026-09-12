@@ -131,7 +131,7 @@ NIFZ[2] = GoblinHandL.NIF
 
 A creature is therefore assembled from **several skinned meshes** sharing one
 skeleton — which is why vanilla creatures show seams at the neck/wrist, and why
-the head is a separate NIF (so NPCs look at the head, not the body centre).
+the head is a separate NIF (so NPCs look at the head, not the body center).
 
 ### 1.2 `KFFZ` — per-actor animation overrides
 
@@ -232,7 +232,7 @@ translation to the actor's world position. This is why:
 | Block | Name | Purpose |
 |---|---|---|
 | `BSXFlags` | `"BSX"` | Behaviour bits. Creatures = **7** = `Animated \| Havok \| Ragdoll`. |
-| `BSBound` | `"BBX"` | Culling/bounding box: centre + half-dimensions. Lion: centre `(0, 0, 30.60)`, dims `(16.48, 53.95, 30.68)`. |
+| `BSBound` | `"BBX"` | Culling/bounding box: center + half-dimensions. Lion: center `(0, 0, 30.60)`, dims `(16.48, 53.95, 30.68)`. |
 | `NiStringExtraData` | `"UPB"` | **User Property Buffer** — a `\r\n`-separated `key = value` text blob, one per bone. |
 | `NiTextKeyExtraData` | — | On the skeleton, holds the export/compression settings for the embedded pose. |
 | `NiBSBoneLODController` | — | Bone LOD groups (which bones drop out at distance). |

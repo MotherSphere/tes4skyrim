@@ -470,7 +470,7 @@ def _pack_one(path):
     if plane is None:
         return (p.name, 'undecodable', None)
     a = plane[2]
-    out = px.normalise_height(bytearray(a), target_range=140)
+    out = px.normalize_height(bytearray(a), target_range=140)
     srt = sorted(a)
     med_in, rng_in = srt[len(srt) // 2], max(a) - min(a)
     why = []

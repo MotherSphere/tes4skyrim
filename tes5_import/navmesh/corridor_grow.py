@@ -5,7 +5,7 @@ the centerline sacred (never moved — principle 1) and the ribbon flat on the
 centerline plane (principle 2), but replaces the single fixed half-width with a
 per-cross-section, per-side GROWN half-width.
 
-From each cross-section centre we step outward along the perpendicular.  Growth
+From each cross-section center we step outward along the perpendicular.  Growth
 stops one step before the FIRST of:
 
   (a) WALL — a thin vertical slab standing at the trial point intersects the
@@ -370,7 +370,7 @@ def _bisect_wall(wall_hit, cx, cy, dirx, diry, tanx, tany, z_lo, z_hi,
 
 
 def _floor_departs(walk_sample, cx, cy, dirx, diry, floor_z, d, lo):
-    """True if the walkable floor has left the centreline plane by distance d.
+    """True if the walkable floor has left the centerline plane by distance d.
 
     Binds only BEYOND the soft floor `lo`.
     See: docs/commentary/tes5_import_navmesh.md#soft-floor-never-beats-a-wall
@@ -383,7 +383,7 @@ def _floor_departs(walk_sample, cx, cy, dirx, diry, floor_z, d, lo):
 
 def grow_half_width(cx, cy, floor_z, dirx, diry, tanx, tany, exclude_nodes,
                     wall_hit, walk_sample, field, lo=None):
-    """Grown half-width from centre (cx,cy) outward along the unit perpendicular
+    """Grown half-width from center (cx,cy) outward along the unit perpendicular
     (dirx,diry).  (tanx,tany) is the edge tangent (slab width axis).
 
     Stops at the first of: wall slab, walkable-floor departure (> MAX_CLIMB or

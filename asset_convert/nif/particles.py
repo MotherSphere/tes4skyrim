@@ -78,7 +78,7 @@ def _make_scale_ramp_from_growfade(gf):
 
 
 def _sample_color_keys(keys, t):
-    """Linearly sample a NiColorData key list at normalised time `t`."""
+    """Linearly sample a NiColorData key list at normalized time `t`."""
     if not keys:
         return (1.0, 1.0, 1.0, 1.0)
     pts = sorted(((float(k.time), k.value) for k in keys),
@@ -102,7 +102,7 @@ def _sample_color_keys(keys, t):
 
 
 def _simple_color_from(mod):
-    """BSPSysSimpleColorModifier carrying the AUTHORED colour gradient.
+    """BSPSysSimpleColorModifier carrying the AUTHORED color gradient.
 
     Oblivion's curve is sampled at its start, middle and end; with no curve at
     all a neutral white ramp tints nothing rather than inventing a hue.
@@ -149,10 +149,10 @@ def _chromatic(color):
 
 
 def _modifier_colors(mod):
-    """Every colour key on one colour modifier, in either vocabulary.
+    """Every color key on one color modifier, in either vocabulary.
 
     A BSPSysSimpleColorModifier has already been rewritten by
-    _skyrimize_modifiers, so its three sampled colours stand in for the curve.
+    _skyrimize_modifiers, so its three sampled colors stand in for the curve.
     """
     if isinstance(mod, NifFormat.BSPSysSimpleColorModifier):
         return list(getattr(mod, 'colors', None) or [])
@@ -167,7 +167,7 @@ def _color_curve_carries_hue(node):
     """Does this system's NiPSysColorModifier supply an actual COLOR?
 
     False for an achromatic ramp, which is an alpha envelope rather than a
-    colour and must not override the material's emissive.
+    color and must not override the material's emissive.
     See: docs/commentary/asset_convert_nif.md#alpha-envelope-vs-color-curve
     """
     for mod in (node.modifiers or []):
@@ -346,7 +346,7 @@ def _build_psys_shader(effective_path, emissive, alpha, curve_hue):
     """The BSEffectShaderProperty for one particle system.
 
     The multiple stays neutral and the AUTHORED emissive supplies the
-    brightness -- unless a chromatic curve is the real colour source.
+    brightness -- unless a chromatic curve is the real color source.
     See: docs/commentary/asset_convert_nif.md#psys-shader-values
     """
     shader = NifFormat.BSEffectShaderProperty()

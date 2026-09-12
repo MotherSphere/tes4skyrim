@@ -280,12 +280,12 @@ layers) binds on 4 quadrants of 20,672.
 
 **2. `DATA.Flags` was 3, which is not a value vanilla ever writes.**
 Per xEdit (`wbDefinitionsTES5.pas`): `0x001` normals/height map, `0x002`
-vertex colours, `0x004` layers, `0x008` unknown4, `0x010` auto-calc normals.
-The old value claimed vertex colours that were never written and omitted
+vertex colors, `0x004` layers, `0x008` unknown4, `0x010` auto-calc normals.
+The old value claimed vertex colors that were never written and omitted
 layers. Census of vanilla Skyrim's 15,564 LAND records: 31 (5,887), 25
 (5,094), 29 (4,207), 28 (149) — **`3` appears zero times, and every value has
 `0x008` set**. We now write **29** (`0x1D`), the vanilla value that carries
-everything we emit and omits only the colours bit.
+everything we emit and omits only the colors bit.
 
 ### <a id="vtex-is-offset-one-column"></a>VTEX is applied one column east of where it is stored
 

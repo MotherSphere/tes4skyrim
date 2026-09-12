@@ -311,7 +311,7 @@ def master_names(export_dir: Path):
 def _scan_cell_coords(esm_path: Path, coords: dict):
     """Collect {cell FormID -> (x, y)} from every CELL carrying XCLC.
 
-    Keys are NORMALISED load-order-wide FormIDs. Every caller accumulates
+    Keys are NORMALIZED load-order-wide FormIDs. Every caller accumulates
     several files into one `coords` dict, and a raw id is meaningful only inside
     the file it came from — the index byte indexes THAT file's master list. Two
     plugins' 02s routinely name unrelated records, so raw keys let one plugin's
@@ -482,12 +482,8 @@ def parse_land_records(esm_path: Path, worldspace_edid: str = 'TES4Tamriel',
                         overlay_paths=None):
     """Parse LAND + CELL water data for one worldspace from the output ESM.
 
-    `overlay_paths` are plugins to apply ON TOP, in load order. Everything is
-    keyed by grid coordinate, so a later file's LAND for a cell simply replaces
-    the earlier one — which is exactly override semantics. This is what lets an
-    override plugin's regraded terrain reach LOD: DLCBattlehornCastle rewrites
-    VHGT on 10 Tamriel cells, and reading only the master left distant terrain
-    showing the ORIGINAL ground while the loaded cells showed the new ground.
+    `overlay_paths` are plugins to apply ON TOP, in load order; everything is
+    keyed by grid coordinate, so a later file's LAND replaces the earlier one.
 
     Returns (lands, cell_water, default_water_height):
       lands:      (cell_x, cell_y) -> {heights: ndarray(33,33 float32),
@@ -496,21 +492,13 @@ def parse_land_records(esm_path: Path, worldspace_edid: str = 'TES4Tamriel',
       cell_water: (cell_x, cell_y) -> (has_water: bool, height: float or None)
                   height is the cell XCLW override; None = use worldspace default
       default_water_height: WRLD DNAM default water height (0.0 if absent)
+    See: docs/commentary/asset_convert_terrain.md#land-scan-scoping
     """
     lands = {}
     cell_water = {}
     wrld_water = {'default': None}
     cell_coords = {}       # cell FormID -> (x, y), shared across load order
 
-    # The worldspace's FormID, taken from the file that DEFINES it. Overlays are
-    # scoped with this rather than their own lookup, because an override plugin
-    # routinely edits a master's worldspace while shipping no WRLD record — and
-    # the unscoped fallback would then sweep in every OTHER worldspace it
-    # carries. That is not hypothetical: it put all 5,796 of Morrowind_ob's
-    # Vvardenfell cells into Cyrodiil's heightmap.
-    # Normalised into the load-order-wide space, because it is handed to the
-    # OVERLAY scans to compare against THEIR ids. A raw id from one file means
-    # nothing in another.
     try:
         from asset_convert.lod.esm_scan import formid_remap_table
         _base_raw = _plugin_bytes(Path(esm_path))
@@ -528,8 +516,6 @@ def parse_land_records(esm_path: Path, worldspace_edid: str = 'TES4Tamriel',
     for _i, _path in enumerate([esm_path] + list(overlay_paths or [])):
         scan_land_file(Path(_path), worldspace_edid, lands, cell_water,
                         wrld_water, cell_coords,
-                        # Only the base file may fall back to "take everything";
-                        # for an overlay that fallback is the corruption above.
                         allow_unscoped=(_i == 0),
                         known_wrld_fid=base_wrld_fid)
     default_wh = (wrld_water['default']
@@ -546,7 +532,7 @@ def scan_land_file(esm_path: Path, worldspace_edid: str,
     `known_wrld_fid` scopes the scan to a worldspace an override edits without
     defining; `allow_unscoped` decides whether an unresolvable worldspace takes
     every LAND record (True, for the defining file) or none (False, mandatory
-    for overlays).  Every FormID is normalised into the load-order-wide space
+    for overlays).  Every FormID is normalized into the load-order-wide space
     first, since the accumulators are shared across the whole stack.
     See: docs/commentary/asset_convert_terrain.md#land-scan-scoping
     """
@@ -559,27 +545,11 @@ def scan_land_file(esm_path: Path, worldspace_edid: str,
     def g(fid: int) -> int:
         return _gmap[fid >> 24] | (fid & 0x00FFFFFF)
 
-    # We need CELL grid coords alongside each LAND.
-    # Strategy: track current CELL grid coords via a lightweight group scanner.
-    # Group type 6  = cell children group (label = cell FormID).
-    # Group type 1  = world children group (label = parent WRLD FormID).
-    # We only collect LAND records that belong to the target worldspace.
-
-    # Find target worldspace FormID first (fast linear scan).
-    #
-    # Normalised, like everything else keyed here — and `known_wrld_fid` is
-    # ALREADY normalised, because it comes from a DIFFERENT file (the one that
-    # defines the worldspace). Comparing it against this file's raw ids is
-    # exactly the cross-file mistake the normalisation exists to prevent.
     _found = _worldspace_fid_cached(esm_path, raw, worldspace_edid)
     target_wrld_fid = None if _found is None else g(_found)
     if target_wrld_fid is not None:
         print(f"  Filtering to worldspace '{worldspace_edid}' (FormID={target_wrld_fid:#010x})")
     elif known_wrld_fid is not None:
-        # This file overrides the worldspace without shipping its WRLD record.
-        # Its edits live under a type-1 GRUP labelled with the DEFINING file's
-        # FormID, so scoping on that is exact — and still excludes every other
-        # worldspace the plugin carries.
         target_wrld_fid = known_wrld_fid
         print(f"  Scoping {esm_path.name} to '{worldspace_edid}' via the "
               f"defining plugin (FormID={target_wrld_fid:#010x})")
@@ -877,6 +847,19 @@ def _tile_water_quads(lands, cell_water, tile_x, tile_y, level, default_wh):
 # DDS writing (DXT1 via PIL/Pillow or pure-Python fallback)
 # ---------------------------------------------------------------------------
 
+def _set_local_bounding_sphere(shapedata, verts) -> None:
+    """Set the shape's bounding sphere in LOCAL coords, vanilla-style.
+
+    Vanilla uses the bbox center with the corner distance as the radius.
+    """
+    va = np.array(verts, dtype=np.float64)
+    lo = va.min(axis=0)
+    hi = va.max(axis=0)
+    ctr = (lo + hi) / 2.0
+    shapedata.center.x, shapedata.center.y, shapedata.center.z = ctr
+    shapedata.radius = float(np.linalg.norm((hi - lo) / 2.0))
+
+
 def _build_water_node(water_quads, level: int):
     """Build the vanilla-style LOD water node for a tile.
 
@@ -957,13 +940,7 @@ def _build_water_node(water_quads, level: int):
         shapedata.triangles[i].v_2 = b
         shapedata.triangles[i].v_3 = c
 
-    # Bounding sphere in LOCAL coords (vanilla: bbox centre, corner radius)
-    va = np.array(verts, dtype=np.float64)
-    lo = va.min(axis=0)
-    hi = va.max(axis=0)
-    ctr = (lo + hi) / 2.0
-    shapedata.center.x, shapedata.center.y, shapedata.center.z = ctr
-    shapedata.radius = float(np.linalg.norm((hi - lo) / 2.0))
+    _set_local_bounding_sphere(shapedata, verts)
 
     if level == 4:
         shape = NifFormat.BSSegmentedTriShape()
@@ -1119,7 +1096,7 @@ def _build_terrain_nif(heights: np.ndarray, tile_x: int, tile_y: int,
     z_world_half  = (z_max - z_min) / 2.0 + 500.0   # extra safety margin
     shapedata.center.x = xy_world_half
     shapedata.center.y = xy_world_half
-    shapedata.center.z = z_ctr              # world-space Z centre
+    shapedata.center.z = z_ctr
     shapedata.radius   = math.sqrt(xy_world_half**2 + xy_world_half**2 + z_world_half**2)
 
     # ---- Texture set ----

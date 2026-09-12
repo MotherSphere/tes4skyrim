@@ -41,9 +41,9 @@ Seat recovery:
     along the approach direction lands on the seat.  A bench's side entry
     is 51.5 from the END seat, so it merges with the correct cluster, and
     curved benches (anviltreebenchseat01) get seats on the arc rather
-    than at the geometry centre.
+    than at the geometry center.
   - SLEEP entry distances vary per bed (67-106) but always point across
-    the hip line, so the geometry centre projected onto the approach ray
+    the hip line, so the geometry center projected onto the approach ray
     recovers the hip position.
 Candidates are then clustered: a chair's 3-4 entries converge on one
 seat; a bench's front/behind entry pairs form one cluster per physical
@@ -110,7 +110,7 @@ def extract_entries(marker_blocks):
 
 
 def geometry_center_xy(root):
-    """World-space XY centre of the geometry bounding box under a PyFFI root
+    """World-space XY center of the geometry bounding box under a PyFFI root
     node (all local transforms applied, including the root's own)."""
     import numpy as np
     lo = [np.inf, np.inf]
@@ -168,13 +168,13 @@ def _entry_flag(entry, seat_x, seat_y, heading):
 def cluster_seats(entries, center_fn):
     """Convert entry points into seats.
 
-    center_fn: zero-arg callable returning the geometry (cx, cy) -- only
-    invoked if a sleep entry is present.
+    center_fn: zero-arg callable returning the geometry (cx, cy), invoked only
+    for a sleep entry, whose seat is the HIP position -- that center projected
+    onto the approach ray.  A sit entry travels a fixed distance instead.
 
-    Returns a list of seat dicts, in a deterministic order both the NIF
-    converter and the FURN importer reproduce:
-      {'x','y','z','heading','sleep','entry_flags',
-       'members': [(tes4_entry_index, entry_flag_bit), ...]}
+    Returns seat dicts in an order the NIF converter and FURN importer both
+    reproduce: {'x','y','z','heading','sleep','entry_flags',
+    'members': [(tes4_entry_index, entry_flag_bit), ...]}
     """
     if not entries:
         return []
@@ -182,7 +182,6 @@ def cluster_seats(entries, center_fn):
     center = None
     for e in entries:
         if e['sleep']:
-            # Hip position: geometry centre projected onto the approach ray
             if center is None:
                 center = center_fn()
             t = max(0.0, (center[0] - e['p'][0]) * e['d'][0] +

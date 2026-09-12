@@ -366,11 +366,11 @@ HAIR_ALPHA_FLAGS = 0x12EC
 
 
 def _texture_bias(dds_path):
-    """Per-channel colour bias of a hair diffuse, normalized to its own mean.
+    """Per-channel color bias of a hair diffuse, normalized to its own mean.
 
     Returns (br, bg, bb) where 1.0 on every channel means a neutral texture.
     Alpha-weighted, because a hair diffuse's transparent margin is not part of
-    the visible strand colour.
+    the visible strand color.
     """
     try:
         from PIL import Image
@@ -395,9 +395,9 @@ def _texture_bias(dds_path):
 
 
 def hair_tint_for_texture(dds_path):
-    """The mesh tint to write so an authored hair colour reads true.
+    """The mesh tint to write so an authored hair color reads true.
 
-    Skyrim MULTIPLIES the hair tint by the diffuse, so the texture's own colour
+    Skyrim MULTIPLIES the hair tint by the diffuse, so the texture's own color
     cast survives into the result.  Oblivion's hair diffuses are nowhere near
     uniform -- measured alpha-weighted channel ratios (r:g:b, normalized):
 
@@ -410,8 +410,8 @@ def hair_tint_for_texture(dds_path):
 
     so the same authored HCLF renders very differently depending on which
     texture the hairstyle happens to use -- a Khajiit mane comes out orange no
-    matter what colour the NPC authored.  Dividing the bias out of the mesh
-    tint cancels the texture's cast, leaving the wearer's own colour to do the
+    matter what color the NPC authored.  Dividing the bias out of the mesh
+    tint cancels the texture's cast, leaving the wearer's own color to do the
     work.  Falls back to the plain vanilla tint when the texture cannot be read.
     """
     bias = _texture_bias(dds_path) if dds_path else None

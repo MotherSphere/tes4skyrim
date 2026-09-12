@@ -601,7 +601,7 @@ def _inv_marker_of(root):
 def finalise_inv_markers(data, stats, has_skin_fn):
     """Orient every inventory-visible mesh from its finished geometry.
 
-    Weapons and shields already sit in Skyrim's normalised attachment frames,
+    Weapons and shields already sit in Skyrim's normalized attachment frames,
     so their constant markers are exact and are left alone. Everything else is
     still in an arbitrary Oblivion modelling frame, where a fixed rotation
     shows a random side.

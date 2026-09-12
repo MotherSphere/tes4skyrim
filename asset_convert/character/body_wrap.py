@@ -1048,7 +1048,7 @@ def _field_corrections(field, pts, abc, weight=0):
     For each point: K nearest body triangles, per-candidate correction =
     barycentric interpolation of vertex deltas at the closest surface point,
     Gaussian-blended by (surface distance, bone-centroid distance) with a
-    wrong-side penalty.  Normalised blending extrapolates the regional
+    wrong-side penalty.  Normalized blending extrapolates the regional
     correction as a constant for far-away points.
 
     CHUNKED for memory, exactly like _blended_clearance."""

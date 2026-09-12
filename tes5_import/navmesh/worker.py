@@ -30,24 +30,12 @@ def init_worker(base_model_by_fid: dict, door_fids: set, collision_cache: str,
                 door_centers_cache: str = None):
     """ProcessPool initializer: stash context; load the collision cache.
 
-    Runs once per worker process.  A spawned child does NOT inherit the parent's
-    module-global state, so everything convert_PGRD relies on must be rebuilt
-    here in each child:
-
-      - `text_reader._formid_index_offset` — the load-order master-index shift
-        get_formid() applies (e.g. +1 for Oblivion.esm behind Skyrim.esm).  If
-        this is left at its default 0, every FormID convert_PGRD reads
-        (PathingCell ParentCELL/ParentWRLD, door REFR links, ONAM base objects)
-        keeps master index 0x00 instead of the plugin's real index.  The engine
-        then can't resolve the navmesh's parent cell at load and null-derefs in
-        Hook_NavMeshLoad.  MUST be set before any get_formid() call.
-      - `collision_extract._COLLISION` — the per-mesh Havok collision soups the
-        navmesh is voxelized from.  Without it every cell has no geometry and
-        produces no navmesh at all.
+    Runs once per worker process.  A spawned child inherits no module-global
+    state, so the FormID index offset, collision cache, door caches and
+    containment job are all rebuilt here.  The offset MUST be set before any
+    get_formid() call.
+    See: docs/commentary/tes5_import_navmesh.md#navmesh-worker-rebuilt-globals
     """
-    # Join the parent's containment job so this worker cannot outlive a parent
-    # that dies without cleanup (crash / external kill). Cheap; no-op off
-    # Windows, and skipped harmlessly on the inline single-job path below.
     from core.process_job import join_pool_job
     join_pool_job()
 
@@ -62,9 +50,6 @@ def init_worker(base_model_by_fid: dict, door_fids: set, collision_cache: str,
         from asset_convert.collision.collision_extract import load_collision
         load_collision(collision_cache, quiet=True)
 
-    # Door panel centroids: the REFR position is the door's hinge, not the
-    # doorway; _collect_doors offsets to the panel centre using these.  Module
-    # global in pgrd_to_navm, so each spawned worker must load its own copy.
     if door_centers_cache:
         from .from_pgrd import load_door_centroids
         load_door_centroids(door_centers_cache, quiet=True)

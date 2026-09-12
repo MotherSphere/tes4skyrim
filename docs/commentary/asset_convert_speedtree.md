@@ -292,7 +292,7 @@ a real crown is higher):
 
 My first reading blamed the clump and cull passes. **Measured, that is wrong.**
 Comparing leaf geometry against the bark skeleton it hangs on, within the crown
-band, both normalised to the same radius:
+band, both normalized to the same radius:
 
 | tree | bark outer-50% | leaf outer-50% | leaf/bark |
 |---|---|---|---|
@@ -415,7 +415,7 @@ median 0.32, range 0.00–0.60.
 <a id="6-growth-model-status"></a>
 
 `GRAVITY_RESPONSE = 4.5`, the disturbance sine-snake
-(`d_turns = rng.uniform(0.5,1.4)`), and the peak-normalised angle profile
+(`d_turns = rng.uniform(0.5,1.4)`), and the peak-normalized angle profile
 (`/ ap_max`) are all **fitted to billboard images**, not derived from the exe.
 They are the least-verified part of the pipeline.
 
@@ -721,9 +721,9 @@ which is **exactly** what `spt_generator.py` already does:
 cnt = parent_lv.child_freq * pstem.stored_length   # spt_generator.py:595
 ```
 
-**There is no `/D` normalisation and no recursive density falloff to port.**
+**There is no `/D` normalization and no recursive density falloff to port.**
 The `w + t*(1-w)` blend at `0x79387a` propagates the *size* argument down the
-recursion (so nested levels normalise against a size that drifts toward 1.0);
+recursion (so nested levels normalize against a size that drifts toward 1.0);
 it is not a count attenuator. My earlier framing of it as a "density falloff"
 was wrong twice over — first with D=1.0 (provably a no-op), then as a count
 mechanism (it is a units divisor).
@@ -834,7 +834,7 @@ fresh `rng.uniform` yaw per card) does not reproduce. Finally:
 ```
 
 Two more constants pinned while here:
-- `0xa3ddd8` = **255.0** — the vertex-colour byte scale.
+- `0xa3ddd8` = **255.0** — the vertex-color byte scale.
 - `0xb2b714` = **6.28318548 (2π)** — the bark-U wrap factor used at `0x7927bb`
   when `u_abs == 0`, i.e. `u = u_tile * run * 2π`. This is the circumference
   term in the bark UV rule.
@@ -1149,11 +1149,11 @@ own curve, with length and radius scaled by tree size. It also fixes the
 happens *between* the length and start-angle evaluations, and each `Evaluate`
 itself consumes a variance draw (§6e).
 
-### ⚠️ UNRESOLVED: is `x` the absolute or window-normalised position?
+### ⚠️ UNRESOLVED: is `x` the absolute or window-normalized position?
 
 At the recursive call (`0x79390f`), arg4/arg5 are written by
 `sub esp,8 ; fstp [esp+4] ; fstp [esp]` fed from `[esp+0x30]` (= `t`, the
-window-normalised position, computed at `0x7937c0`) and a second value. **Which
+window-normalized position, computed at `0x7937c0`) and a second value. **Which
 of the pair lands in arg4 cannot be resolved by static FPU tracing** — the
 `fst`/`fstp` interleave with integer pushes and, at the trunk call, `fst` +
 `fstp` write the *same* value to both slots (`0x7a48e0`/`0x7a48e7`), so the
@@ -1163,9 +1163,9 @@ Measured discrimination: **44 of 139 trees** have a trunk window narrow enough
 that the two readings differ, but only by **5–12° of start angle** (deadbush
 40→30 vs 40→20; dtree01 50→42 vs 50→30).
 
-**Our existing choice is window-normalised `x_rel`**, and that was settled
+**Our existing choice is window-normalized `x_rel`**, and that was settled
 empirically before this decomp — cottonwood forks its whole fan inside the
-trunk's `[0, 0.1]` window, which only works with normalisation
+trunk's `[0, 0.1]` window, which only works with normalization
 ([nif_conversion_notes.md](asset_convert_nif.md) generation-model note).
 The engine passing `t` into the recursion is consistent with that. **Leave it
 as is**; this is not an actionable defect, and the ambiguity is recorded only
@@ -1252,7 +1252,7 @@ Related but NOT yet decoded: `seg_keep_length` (26005) / `seg_keep_cross`
 
 > **🛑 CORRECTION.** Two earlier drafts of this section called `0x78feb0` the
 > "bend integrator" and claimed it proved a constant-curvature gravity arc.
-> **That was wrong.** The error was an unnormalised stack offset: the `lea edx,
+> **That was wrong.** The error was an unnormalized stack offset: the `lea edx,
 > [esp+0x84]` at `0x793477` executes *after* 16 bytes of argument pushes, so the
 > pointer is `esp0+0x74`, not `esp0+0x84`. `esp0+0x84` is gravity; `esp0+0x74`
 > is the **texture-coordinate block**. Everything downstream of that mistake was
@@ -1385,7 +1385,7 @@ angle_deg = -2 * (angle_profile(t) - 0.5)
 ```
 
 **The `(y - 0.5) * 2` remap is the key semantic**: section 6017 is a *signed*
-deflection curve centred on 0.5. Below 0.5 bends one way, above 0.5 the other,
+deflection curve centered on 0.5. Below 0.5 bends one way, above 0.5 the other,
 and **a flat 0.5 profile produces no bend at all**.
 
 **Corroborated against the corpus** (all 401 branch levels of the 139 Oblivion
@@ -1540,7 +1540,7 @@ magnitude terms differ (§6q).
 **Found — see §6p and §6q.** The bend lives in the ring loop of the branch
 builder at `0x7930f9`-`0x793280`, not in `0x78feb0`:
 
-- `0x7930f9`-`0x793141` builds `axis = dir x (0,0,-1)` and normalises it.
+- `0x7930f9`-`0x793141` builds `axis = dir x (0,0,-1)` and normalizes it.
 - `0x7930ac`-`0x7930f5` computes `theta_deg` and the torque falloff.
 - `0x7931ba`-`0x793219` assembles the angle and calls `0x78f160` (Rodrigues).
 - `0x793230` applies it via `0x78edd0` (3x3 x vector), storing back to the
@@ -1859,7 +1859,7 @@ currently computes the card aspect from the texture crop
 no counterpart in the engine.  The authored data confirms the engine's reading:
 every sampled map stores an explicit `size = (x, y)` pair
 (`dbush03` = 0.03/0.03, second map 0.04/0.04) plus an `origin` that is
-**not** centred (0.539, 0.493 / 0.475, 0.562), i.e. the pivot is authored per
+**not** centered (0.539, 0.493 / 0.475, 0.562), i.e. the pivot is authored per
 map — exactly what `origin` at `+0x30` is for.
 
 ### Consequence for the generator
@@ -2013,8 +2013,8 @@ what is 100% finite:
 | `+0x78` | byte | flag, set at `0x788219` / `0x7882e5` |
 | `+0x7c` | float | tree height (84.0; stored `0x788310`) |
 | **`+0x84`** | **uint16** | **leaf count** |
-| `+0x8c` | float* | `count*N` in `[0, 0.863]` — normalised (size/wind) |
-| **`+0x90`** | **float*** | **`count*3` leaf CENTRES**, same world space as the branch coords |
+| `+0x8c` | float* | `count*N` in `[0, 0.863]` — normalized (size/wind) |
+| **`+0x90`** | **float*** | **`count*3` leaf CENTERS**, same world space as the branch coords |
 
 🛑 **`+0x84` is a UINT16, not a dword.** Ginkgo reads `0x000001d6`
 (470) and looks like a clean dword; english oak reads `0x15ec023c`, whose low
@@ -2023,9 +2023,9 @@ member. Reading the full dword yields **367,788,604** and the dump silently
 produces nothing. Measured counts: ginkgo 470, dogwood 1203, oak 572,
 dbush03 100.
 
-### The centres sit ON the branches — measured
+### The centers sit ON the branches — measured
 
-Distance from each engine leaf centre to the nearest branch vertex, as a
+Distance from each engine leaf center to the nearest branch vertex, as a
 percentage of the tree's bounding diagonal:
 
 | tree | leaves | median | p90 |
@@ -2048,11 +2048,11 @@ shell.
 ### What we take, and the one deviation
 
 Positions, count, and map selection come from the engine. The engine emits ONE
-camera-facing billboard per leaf, which Skyrim cannot render, so each centre
+camera-facing billboard per leaf, which Skyrim cannot render, so each center
 becomes **two crossed quads** — the sanctioned deviation. Card size follows
 section 6t (`size.x/size.y * K * 0.5`); map choice follows 6g (uniform modulo,
 no blossom weighting). Implemented in
-`asset_convert/speedtree/spt_engine_geom.py::_leaf_groups_from_centres`.
+`asset_convert/speedtree/spt_engine_geom.py::_leaf_groups_from_centers`.
 
 Shipped output verified: leaf card count is exactly 2x the engine leaf count
 (ginkgo 940 = 2x470, dogwood 2406 = 2x1203, dbush03 200 = 2x100).
@@ -2108,7 +2108,7 @@ a working approximation with invisible leaves.
 Read as one float per leaf it gives `-5.6e29 .. 1.3e11` and NaN means on
 ginkgo, and pure garbage on dbush03. A full stride survey (1/2/3/4/6/8/12/16
 across `+0x88`..`+0xa4`) found only `+0x88` fully finite at any stride, and its
-values are **normalised** (dbush03 `0 .. 0.022`, ginkgo `-0.074 .. 0.982`), not
+values are **normalized** (dbush03 `0 .. 0.022`, ginkgo `-0.074 .. 0.982`), not
 world-unit sizes. Candidate for the wind/size weight, not the card dimension.
 
 ### Measured: card size is NOT the main sparseness cause
@@ -2194,7 +2194,7 @@ Two further rules that were each wrong once:
 * **Derive the winding, never assume it.** The first version wound the repair
   quads BACKWARDS, giving inward-facing normals (an inside-out trunk, reported
   from the render). Each quad is now oriented so its face normal points away
-  from the tube centreline. Ground truth is the engine's own per-vertex
+  from the tube centerline. Ground truth is the engine's own per-vertex
   normals: repair triangles agree **100%** (reversed: 0%).
 
 ### Result (shipped)
@@ -2240,13 +2240,14 @@ that apart from "this dump predates leaf support", so it fell back to the
 Python foliage.
 
 Those cards were placed against **Python** branches and pasted onto **engine**
-bark they were never fitted to. Hence the drift: the leaf bbox reached x=+641
-where the bark stops at x=+53.
+bark they were never fitted to -- **264 cards** on `dtree01`, floating up to
+**36% of the tree diagonal** off the bark. Hence the drift: the leaf bbox
+reached x=+641 where the bark stops at x=+53.
 
 ### Fix
 
 The dump now ALWAYS writes the chunk, with an explicit zero when there are no
-leaves, and `read_leaf_centres` returns an **empty array** (never `None`) for
+leaves, and `read_leaf_centers` returns an **empty array** (never `None`) for
 that case. `None` now means only one thing: no leaf data in this dump.
 
 Affects the 5 trees whose leaf level gates off: `dtree01`, `dtree02`,
@@ -2577,7 +2578,7 @@ first — candidates for the geometry builder:
 - ✅ Level-struct layout, confirmed from BOTH parser and consumer sides.
 - ✅ Child-count formula: `freq * length / D`, where **D starts at the
   RANDOMISED TREE SIZE** (2006 ± 2007) and lerps toward 1.0 each level,
-  squared past level 1 (§6f). We model neither the normalisation nor the
+  squared past level 1 (§6f). We model neither the normalization nor the
   blend, and we drop 2007 entirely.
 - ✅ Bark UV rule (v_abs, u_abs, twist sign) — proven correct as implemented.
 - ✅ Full parse-stage map (§6d) for parser cross-checking.

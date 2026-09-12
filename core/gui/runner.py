@@ -8,7 +8,7 @@ the single most important line of the run green. A tally is judged by its NUMBER
 before any word rule sees "failed" in it, so COUNT_RE tolerates a couple of
 adjectives ("4 compile errors") and FAILED_RE is anchored on what PRECEDES
 `failed`. A failure the stage RECOVERED from is orange, not red: red is reserved
-for what actually broke the run, and colouring recoverable notices red trains
+for what actually broke the run, and coloring recoverable notices red trains
 the user to ignore red. SKIP_RE is deliberately narrow -- bare "skip" shows up in
 tallies and routine chatter, so only a sentence that LEADS with the skip counts.
 
@@ -185,12 +185,12 @@ def _banner_tag(banner, raw: str, low: str):
 
 
 def classify(banner, line: str):
-    """The log tag for one output line, or None to leave it uncoloured.
+    """The log tag for one output line, or None to leave it uncolored.
 
     `banner` is a one-element list holding the open-banner state across calls.
     The count verdict stays outside the rule table because it has a third
     outcome the (predicate, tag) shape cannot carry: None meaning "claimed,
-    but deliberately uncoloured".
+    but deliberately uncolored".
     """
     low = line.lower()
     tag = _banner_tag(banner, line, low)
@@ -382,7 +382,7 @@ def _is_at_bottom(log_text) -> bool:
 def bind(app, sink, log_text) -> None:
     """Bind `app.log` and `app.clear_log` onto the carrier."""
     def _log(line: str, follow: bool = None):
-        """Colour one line into the pane and mirror it to the run log.
+        """Color one line into the pane and mirror it to the run log.
 
         `follow` is the caller's already-made decision for a whole burst of
         lines; None means decide for this line alone.
