@@ -15,6 +15,7 @@ from tes4_export import tes3_reader as reader
 from tes4_export.export_morrowind import MorrowindContext, convert_plugin
 from tes4_export.morrowind_cell import parse_cell
 from tes4_export.morrowind_ids import IdIndex, encode_editor_id, marker_formid
+from tes4_export.morrowind_markers import classify, place_name
 from tes4_export.morrowind_world import cell_grid, quadrant_suffix
 
 MORROWIND_DATA = r'C:\Program Files (x86)\Steam\steamapps\common\Morrowind\Data Files'
@@ -541,7 +542,7 @@ def test_no_reference_outlives_its_base_record(morrowind_records):
     bases = {form_id for sig, records in out.items()
              if sig not in ('CELL', 'REFR', 'LAND')
              for form_id, _ in records}
-    bases.update('%08X' % fid for fid in (1, 2, 3, 5, 6, 0x3B))
+    bases.update('%08X' % fid for fid in (1, 2, 3, 5, 6, 0x10, 0x3B))
     cells = {form_id for form_id, _ in out['CELL']}
     for _, lines in out['REFR']:
         name = next(line[5:] for line in lines if line.startswith('NAME='))
@@ -549,3 +550,28 @@ def test_no_reference_outlives_its_base_record(morrowind_records):
         parent = next(line[11:] for line in lines
                       if line.startswith('ParentCELL='))
         assert parent in cells, f'reference in unwritten cell {parent}'
+
+
+def test_place_name_collapses_the_comma_convention():
+    """A town's forty interiors must yield one marker, not forty.
+
+    See: docs/commentary/tes4_export_morrowind.md#map-markers
+    """
+    assert place_name('Balmora, Eight Plates') == 'Balmora'
+    assert place_name('Vivec, St. Olms Canton') == 'Vivec'
+    assert place_name('Nchuleft') == 'Nchuleft'
+
+
+def test_size_outranks_kind_when_classifying():
+    """A city holding an egg mine is a city; kind-first made it a mine."""
+    assert classify('Gnisis', ['Gnisis, Madach Egg Mine'], 40) == 3
+    assert classify('Abaelun Mine', ['Abaelun Mine'], 1) == 6
+    assert classify('Urshilaku Camp', ['Urshilaku Camp, Yurt'], 10) == 1
+
+
+def test_dwemer_names_are_told_by_consonant_clusters():
+    """Bare "nch" is ordinary spelling and must not flag a ruin."""
+    for name in ('Nchuleft', 'Mzahnch', 'Bthungthumz', 'Arkngthand'):
+        assert classify(name, [name], 1) == 4, name
+    for name in ('Llemis Ranch', 'Entrenched Shipwreck'):
+        assert classify(name, [name], 1) != 4, name

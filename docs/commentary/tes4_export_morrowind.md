@@ -889,6 +889,104 @@ in game.
 emit (0 of 3,238 STAT, 0 of 139 DOOR), including the statics that render
 correctly, so it cannot explain a door-only symptom.
 
+## <a id="map-markers"></a>Map markers
+
+**Code:** `tes4_export/morrowind_markers.py`
+
+Morrowind has no map-marker object. The world map draws exterior cell *names*
+directly from the CELL record, so nothing in the file says "put a marker here",
+and `ENGINE_MARKERS` in `morrowind_ids.py` has no 0x10 entry to find.
+
+Naming exterior cells is also not a usable source. Morrowind names every cell
+of a town the same, and we split each TES3 cell into four TES4 quadrants, so
+the naive reading duplicates hard: measured on Tamriel Rebuilt, 1,143 named
+exterior cells cover only 225 distinct places -- mean 5.1 cells per place,
+worst case 28 ("Port Telvannis"). Vanilla Skyrim.esm carries 398 markers with
+**zero** duplicated names, one per place.
+
+### The authored signal is the teleport door
+
+A door that exits an interior to the world is a builder's statement that a
+place is entered here; the interior cell name behind it is what the place is
+called. So: one marker per interior-name group, positioned at the mean of that
+group's exits.
+
+Morroblivion is the ground truth -- 486 hand-authored markers over the same
+world. Matching its marker names against Morrowind's cells shows where they
+came from: **300 exact matches to an INTERIOR cell name, 57 to an exterior
+name, 37 to a "Place," prefix, 92 invented.** Markers are named after
+interiors, not exteriors.
+
+Morrowind's `Place, Sub` convention collapses the group: the ~40 interiors of
+`Balmora, ...` become one Balmora marker. On Morrowind.esm this yields 402
+markers against Morroblivion's 483, **351 of them name-matching (73%)**, and
+95% of generated places correspond to a real Morroblivion marker.
+
+### Classification
+
+Two independent signals, and they must be applied in that order:
+
+1. **Size** -- how many world exits the place has. Structural, plugin-agnostic.
+2. **Kind** -- vocabulary in the interior cell names.
+
+Size runs **first**, or a city holding an egg mine classifies as a mine:
+Ebonheart (45 doors) became Cave and Gnisis (19) became Mine when kind ran
+first, and Balmora -- the largest city in the game -- fell through to Landmark.
+`camp` outranks size, because a 10-door Ashlander camp is not a town.
+
+Only vocabulary shared between *independent* author teams is used. Comparing
+token rates across Morrowind.esm and TR_Mainland, these hold within a factor of
+3: `tomb`/`ancestral` (21.6% / 12.7%), `mine` (9.7% / 8.6%), `shrine`,
+`shack`, `cabin`, `house`, `tower`, `manor`, `grotto`, `shipwreck`, `camp`,
+`trader`, `propylon`. Rejected as one file's idiom: `yurt` (4.5% / 1.0%),
+`keep`, `storage`, `office`, `plantation`, `dome`.
+
+### Dwemer ruins are phonotactic, not vocabulary
+
+Dwemer names carry consonant clusters no other Tamrielic naming language
+forms. A cluster test generalizes where a prefix list cannot: scored against
+Morroblivion's 24 labelled Elven Ruin markers it gets **13/24 recall at
+1/442 false positives**, and on TR -- never used for tuning -- it finds 20
+genuine Dwemer sites including `Bthalag-Zturamz`, `Mvelthngth-Schel`,
+`Nchazdrumn` and `Ngelfltingth`.
+
+Bare `nch` is **excluded**: it is ordinary word-internal spelling ("Ranch",
+"Entrenched", "Uncharted") and earned nothing the other clusters missed.
+Dropping it cut false positives from 3 to 1. Only syllable-initial `nch` +
+vowel qualifies. Padding the list with `ldr`/`fth`/`ghn`/`dwe`/`ftm` was tried
+and reverted: it tripled false positives, flagging Ald-Ruhn, every "Dwelling"
+and every "-moth Fort".
+
+The ~46% it misses are real Dwemer ruins with pronounceable names -- `Odrosal`,
+`Vemynal`, `Endusal`, `Druscashti`, `Dagoth Ur`. No cluster rule reaches them,
+and hardcoding them is Morrowind-specific memorization. They fall through to
+the generic icon by design.
+
+### Measured output
+
+| Icon | Morrowind.esm (402) | TR_Mainland (1,067) |
+|---|---|---|
+| Landmark | 218 | 543 |
+| Mine | 39 | 88 |
+| Tavern | 29 | 162 |
+| Daedric Shrine | 30 | 40 |
+| Cave | 17 | 85 |
+| Camp | 17 | 20 |
+| Settlement | 15 | 53 |
+| Elven Ruin | 13 | 19 |
+| Oblivion Gate | 10 | 13 |
+| City | 8 | 24 |
+| Fort Ruin | 6 | 20 |
+
+Morrowind's 8 cities are Vivec, Balmora, Ebonheart, Sadrith Mora, Caldera,
+Ald-ruhn, Pelagiad and Suran -- correct. TR's 24 lead with Narsis (344 doors,
+209 interiors), Old Ebonheart, Firewatch and Necrom, found with no TR-specific
+tuning.
+
+Known weakness: Landmark absorbs 51% of TR's markers as the fallback. Most are
+genuine tombs and shipwrecks -- Morroblivion's largest category was also
+Landmark, 130 of 486 -- but it has not been checked on a map in game.
+
 ## <a id="sounds"></a>Sounds
 
 `SOUN` carries a filename relative to `Sound\` and three bytes: volume, minimum

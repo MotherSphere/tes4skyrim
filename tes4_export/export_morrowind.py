@@ -25,6 +25,7 @@ from .morrowind_cell import parse_cell
 from .morrowind_ids import (IdIndex, exterior_key, interior_key, land_key,
                             load_master_doors, persistent_key,
                             load_index, marker_formid)
+from .morrowind_markers import MarkerBuilder, marker_lines
 from .morrowind_patch import PATCH_NAME
 from .morrowind_land import (TES4_TEX_SIZE, decode_heights, decode_textures,
                              encode_heights, layer_lines, ltex_index,
@@ -113,6 +114,7 @@ class MorrowindContext:
         self._ref_counts = Counter()
         self.ltex_by_index = {}
         self.interior_names = set()
+        self.markers = MarkerBuilder()
         self.known_grids = set()
         self.pending_teleports = []
         self.doors_by_cell = {}
@@ -218,6 +220,7 @@ class MorrowindContext:
         """
         if cell.interior:
             self.interior_names.add(cell.name.lower())
+            self.markers.note_interior(cell)
         else:
             self.known_grids.update(tes3_cell_quadrants(*cell.grid))
 
@@ -522,12 +525,31 @@ def convert_plugin(records, ctx: MorrowindContext) -> dict:
             out.setdefault(sig, []).append(
                 (ctx.resolve(rec.record_id, sig), export_record(rec, ctx)))
     teleport_records(ctx)
-    out['PACK'], markers = package_records(ctx)
+    out['PACK'], travel_markers = package_records(ctx)
     for sig in ('NPC_', 'CREA'):
         prune_dropped_packages(out.get(sig, []), ctx)
-    out['REFR'].extend(markers)
+    out['REFR'].extend(travel_markers)
+    out['REFR'].extend(map_marker_records(ctx))
     out['WRLD'] = worldspace_record(ctx)
     out['CELL'].extend(persistent_cell_record(ctx))
+    return out
+
+
+def map_marker_records(ctx: MorrowindContext) -> list:
+    """Every map marker this plugin's interiors imply, as (FormID, lines).
+
+    Markers are persistent references, so they live in the worldspace's dummy
+    cell rather than in the grid square they stand on.
+    See: docs/commentary/tes4_export_morrowind.md#map-markers
+    """
+    parent = ctx.persistent_cell_id()
+    out = []
+    for name, icon, pos in ctx.markers.markers():
+        form_id = ctx.derive(f'mapmarker:{name.lower()}')
+        out.append((form_id, marker_lines(name, icon, pos, parent)))
+    if out:
+        ctx.rehomed_persistent += len(out)
+        print(f"  Synthesized {len(out)} map markers")
     return out
 
 
