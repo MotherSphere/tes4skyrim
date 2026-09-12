@@ -269,6 +269,31 @@ def test_stamp_written_only_by_a_real_build(tmp_path):
     assert open(stamp).read().strip() == geom[1]
 
 
+def test_tag_ignores_line_endings(tmp_path, monkeypatch):
+    """CRLF and LF copies of one source tree must tag identically.
+
+    core.autocrlf rewrites line endings per file, so a checkout, a branch
+    switch or an editor save flips individual files without changing content.
+    Hashing raw bytes made the tag a property of the checkout: caches missed
+    after edits that never touched navmesh logic.
+    """
+    def tag_for(newline, name):
+        """Tag of a copy of the navmesh package written with *newline*."""
+        pkg = tmp_path / name
+        pkg.mkdir()
+        for src in glob.glob(os.path.join(
+                os.path.dirname(navm_pool.__file__), '*.py')):
+            body = open(src, 'rb').read().replace(b'\r\n', b'\n')
+            (pkg / os.path.basename(src)).write_bytes(
+                body.replace(b'\n', newline))
+        col = pkg / 'collision_cache.bin'
+        col.write_bytes(b'payload')
+        monkeypatch.setattr(navm_pool, '__file__', str(pkg / 'pool.py'))
+        return navm_pool.navmesh_geom_cache(str(col))[1]
+
+    assert tag_for(b'\n', 'lf') == tag_for(b'\r\n', 'crlf')
+
+
 def test_cache_matches_tag_is_exact(tmp_path, monkeypatch):
     """A correct cache passes regardless of mtime; a stale one never does."""
     monkeypatch.setattr(nc, 'repo_root', lambda: str(tmp_path))

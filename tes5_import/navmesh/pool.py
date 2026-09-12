@@ -339,7 +339,9 @@ def navmesh_geom_cache(collision_cache: str):
 
     The tag hashes the navmesh generator SOURCES only, so editing any navmesh
     code (params included) invalidates every entry automatically.  Collision
-    enters per-cell via `from_pgrd._geom_hash`, never here.
+    enters per-cell via `from_pgrd._geom_hash`, never here.  Newlines are
+    normalized to LF so the tag is a property of the CONTENT, not of the
+    checkout's line-ending mode.
 
     See: docs/commentary/tes5_import_navmesh.md#pool-orchestration
     """
@@ -352,7 +354,7 @@ def navmesh_geom_cache(collision_cache: str):
     for src in srcs:
         try:
             with open(src, 'rb') as fh:
-                h.update(fh.read())
+                h.update(fh.read().replace(b'\r\n', b'\n'))
         except OSError:
             return None
     cache_dir = os.path.join(os.path.dirname(collision_cache),
