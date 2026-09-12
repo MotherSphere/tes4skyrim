@@ -62,6 +62,7 @@ Cache: two-phase, mirroring mesh_bounds.
 """
 
 from asset_convert.game_paths import current_namespace
+from output_layout import assets_for
 import hashlib
 import json
 import math
@@ -348,6 +349,25 @@ def bounds_from_data(data):
 # is why this looked like a Nehrim-only mesh bug rather than a stale cache.
 BOUNDS_SCHEMA_VERSION = 3
 _BOUNDS_SCHEMA_KEY = '__schema__'
+
+#: Bumped when a door axis entry gains a field or a field changes meaning.
+DOOR_AXIS_SCHEMA_VERSION = 1
+
+
+def door_axis_cache_is_current(axis_cache: str) -> bool:
+    """True if the door axis cache exists AND was written at this schema.
+
+    Entries are plain lists, so one written before a field existed loads
+    cleanly and silently contributes no centre and no floor drop.
+    See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
+    """
+    try:
+        with open(axis_cache, encoding='utf-8') as fh:
+            raw = json.load(fh)
+        return int(raw[_BOUNDS_SCHEMA_KEY][0]) >= DOOR_AXIS_SCHEMA_VERSION
+    except (OSError, json.JSONDecodeError, ValueError, KeyError,
+            TypeError, IndexError):
+        return False
 
 
 def bounds_cache_is_current(bounds_cache: str) -> bool:
@@ -735,17 +755,39 @@ _DIGESTS: Dict[str, str] = {}
 
 
 def collision_cache_is_current(collision_cache: str) -> bool:
-    """True if the cache exists AND was written at the current schema.
+    """True if the cache exists, carries the current magic AND decodes.
 
-    Gates the rescan instead of `os.path.exists`, so a cache built before a
-    change to what counts as walkable is regenerated rather than trusted.
+    Gates the rescan instead of `os.path.exists`: a cache built before a change
+    to what counts as walkable, or one whose entry table cannot be read, is
+    regenerated rather than trusted.
     See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
     """
     try:
         with open(collision_cache, 'rb') as fh:
-            return zlib.decompress(fh.read(), 0, 64)[:8] == _MAGIC
+            return _entry_table_is_intact(zlib.decompress(fh.read()))
     except (OSError, zlib.error):
         return False
+
+
+def _entry_table_is_intact(data: bytes) -> bool:
+    """True if *data* has the current magic and entries consuming it exactly.
+
+    Reads only the lengths, so no float data is decoded.
+    See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
+    """
+    if data[:8] != _MAGIC:
+        return False
+    try:
+        (count,) = struct.unpack_from('<I', data, 8)
+        off = 12
+        for _ in range(count):
+            (klen,) = struct.unpack_from('<H', data, off)
+            off += 2 + klen
+            nw, nb = struct.unpack_from('<II', data, off)
+            off += 8 + (nw + nb) * 9 * 4
+    except struct.error:
+        return False
+    return off == len(data)
 
 
 def _serialize(results: Dict[str, dict]) -> bytes:
@@ -818,19 +860,19 @@ def _list_nifs(mesh_dir_norm: str):
 
 
 def scan_mesh_data(mesh_dir: str, collision_cache: str, bounds_cache: str,
-                   workers: int = None):
+                   workers: int = None, seed_bounds=None, seed_collision=None):
     """Scan the CONVERTED mesh dir ONCE, writing both caches.
 
-    Bounds and collision used to be two separate phases, each with its own
-    os.walk and its own process pool, and each independently parsing every NIF.
-    Parsing is ~174 ms of the ~190-205 ms either analysis costs, so the second
-    pass was almost entirely redundant work: one merged pass is ~1.8x faster
-    over the same file set.
+    Bounds and collision share one NIF parse, which dominates both analyses.
+    `seed_bounds`/`seed_collision` carry entries the producing stage already
+    computed from the graph it was writing; only meshes missing from them are
+    parsed here.
 
     The two caches stay SEPARATE files in their existing formats, so every
     consumer (load_collision / mesh_bounds.load_mesh_bounds) is unchanged.
 
     Returns (n_collision, n_bounds).
+    See: docs/commentary/tes5_import_pipeline.md#producer-emitted-mesh-entries
     """
     mesh_dir_norm = os.path.normpath(mesh_dir)
     if not os.path.isdir(mesh_dir_norm):
@@ -842,16 +884,23 @@ def scan_mesh_data(mesh_dir: str, collision_cache: str, bounds_cache: str,
         print(f"  Mesh scan: no .nif files found in {mesh_dir}")
         return 0, 0
 
-    n = len(nif_files)
+    col_results: Dict[str, dict] = dict(seed_collision or {})
+    bnd_results: Dict[str, tuple] = dict(seed_bounds or {})
+    known = set(bnd_results) | set(col_results)
+    todo = [job for job in nif_files if job[1] not in known]
+
+    n = len(todo)
     if workers is None:
         workers = worker_count()
-    print(f"  Scanning {n} NIFs for bounds + collision ({workers} workers)...")
-
-    col_results: Dict[str, dict] = {}
-    bnd_results: Dict[str, tuple] = {}
+    if known:
+        print(f"  Mesh scan: {len(nif_files) - n} of {len(nif_files)} NIFs "
+              f"came from the mesh stage")
+    if n:
+        print(f"  Scanning {n} NIFs for bounds + collision ({workers} "
+              f"workers)...")
     with ProcessPoolExecutor(max_workers=workers) as ex:
         done = 0
-        for rel_key, bounds, col in ex.map(_worker_both, nif_files,
+        for rel_key, bounds, col in ex.map(_worker_both, todo,
                                            chunksize=16):
             if col is not None:
                 col_results[rel_key] = col
@@ -861,11 +910,25 @@ def scan_mesh_data(mesh_dir: str, collision_cache: str, bounds_cache: str,
             if done % 1000 == 0:
                 print(f"    {done}/{n} processed...")
 
+    _write_mesh_caches(col_results, bnd_results, collision_cache,
+                       bounds_cache, len(nif_files))
+    return len(col_results), len(bnd_results)
+
+
+def _write_mesh_caches(col_results, bnd_results, collision_cache,
+                       bounds_cache, total) -> None:
+    """Report the tallies and write both caches in their shipped formats.
+
+    The bounds payload is stamped so a later run can tell a complete cache
+    from one written before an entry field existed; the key is not a mesh
+    path, so readers that iterate entries must skip it.
+    See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
+    """
     tw = sum(len(e['w']) // 9 for e in col_results.values())
     tb = sum(len(e['b']) // 9 for e in col_results.values())
-    print(f"  Collision: {len(col_results)} / {n} NIFs "
+    print(f"  Collision: {len(col_results)} / {total} NIFs "
           f"({tw} walkable, {tb} blocking tris)")
-    print(f"  Mesh bounds: {len(bnd_results)} / {n} NIFs computed")
+    print(f"  Mesh bounds: {len(bnd_results)} / {total} NIFs computed")
 
     os.makedirs(os.path.dirname(os.path.abspath(collision_cache)),
                 exist_ok=True)
@@ -874,14 +937,9 @@ def scan_mesh_data(mesh_dir: str, collision_cache: str, bounds_cache: str,
 
     os.makedirs(os.path.dirname(os.path.abspath(bounds_cache)), exist_ok=True)
     payload = {k: list(v) for k, v in bnd_results.items()}
-    # Stamp the schema so a later run can tell a complete cache from one
-    # written before an entry field existed (see BOUNDS_SCHEMA_VERSION).  The
-    # key is not a mesh path, so readers that iterate entries must skip it.
     payload[_BOUNDS_SCHEMA_KEY] = [BOUNDS_SCHEMA_VERSION]
     with open(bounds_cache, 'w', encoding='utf-8') as fh:
         json.dump(payload, fh)
-
-    return len(col_results), len(bnd_results)
 
 
 def _door_model_paths(door_txt: str) -> set:
@@ -913,9 +971,14 @@ def _closed_door_entry(args):
 
 
 def _door_axis_jobs(export_plugin_dir: str) -> list:
-    """(original NIF path, 'tes4/<model>') for every DOOR base that exists."""
+    """(original NIF path, '<ns>/<model>') for every DOOR base that exists.
+
+    DOOR.txt is a RECORD file while `meshes` is an ASSET tree; they share a
+    folder only in a flat export, so the mesh root resolves via assets_for.
+    See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
+    """
     door_txt = os.path.join(export_plugin_dir, 'DOOR.txt')
-    root = os.path.join(export_plugin_dir, 'meshes')
+    root = str(assets_for(export_plugin_dir) / 'meshes')
     if not os.path.exists(door_txt) or not os.path.isdir(root):
         return []
     jobs = []
@@ -949,10 +1012,12 @@ def scan_door_axes(export_plugin_dir: str, dest: str,
                 out[key] = [axis, round(width, 2), round(cx, 2),
                             round(cy, 2), round(zmin, 2)]
     os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    n = len(out)
+    out[_BOUNDS_SCHEMA_KEY] = [DOOR_AXIS_SCHEMA_VERSION]
     with open(dest, 'w', encoding='utf-8') as fh:
         json.dump(out, fh, indent=0, sort_keys=True)
-    print(f"  Door axes: {len(out)} / {len(jobs)} door meshes classified")
-    return len(out)
+    print(f"  Door axes: {n} / {len(jobs)} door meshes classified")
+    return n
 
 
 def scan_collision(mesh_dir: str, cache_path: str, workers: int = None) -> int:

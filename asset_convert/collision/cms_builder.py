@@ -35,6 +35,7 @@ culprit was a rotated-root mesh converted to bhkRigidBodyT + CMS).
 import json
 import math
 import os
+import struct
 import subprocess
 import sys
 import uuid
@@ -204,10 +205,21 @@ def _add_big_tris(data, big):
         bt.unknown_short_1 = 0
 
 
+def _f32(value):
+    """`value` rounded to the float32 precision a NIF float field stores."""
+    return struct.unpack('<f', struct.pack('<f', value))[0]
+
+
 def _quantize_bucket(bucket):
     """(base, flat_u16_offsets, indices) of a chunk; triangles collapsed by
-    quantization are dropped."""
-    base = [min(v[i] for t in bucket for v in t) for i in range(3)]
+    quantization are dropped.
+
+    The base is rounded to float32 first, because that is the precision the
+    NIF field holds: quantizing against the float64 minimum offsets every
+    decoded vertex by the rounding error once the file is read back.
+    See: docs/commentary/tes5_import_pipeline.md#producer-emitted-mesh-entries
+    """
+    base = [_f32(min(v[i] for t in bucket for v in t)) for i in range(3)]
     vert_index = {}
     offs = []
     indices = []

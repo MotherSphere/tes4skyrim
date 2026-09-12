@@ -25,6 +25,7 @@ from asset_convert.nif import grass_profile
 from asset_convert.character import hair_pipeline
 from asset_convert.texture import landscape_normals
 from asset_convert.texture import luminance_textures
+from asset_convert.collision import mesh_scan_fragments
 from asset_convert.nif import nif_batch
 from asset_convert.speedtree import spt_converter
 from asset_convert.texture import texture_prune
@@ -128,6 +129,33 @@ def _activate_namespace(rec_dir) -> str:
 # Mesh and texture conversion
 # ---------------------------------------------------------------------------
 
+def _convert_mesh_tree(mesh_src, mesh_dst, asset_dir, rec_dir, mesh_subdirs,
+                       parallax, textures_only):
+    """Run the NIF batch over `mesh_src`; return its stats dict.
+
+    The wearable plan names which _0/_1/plain variants each mesh is actually
+    referenced as -- without it the converter writes all three for every armor
+    and clothing mesh and the plugin loads one or two.  `scan_dir` collects the
+    bounds/collision entries the workers compute from the graphs they write;
+    a previous run's fragments describe meshes this one replaces, so they are
+    cleared first.
+    See: docs/commentary/tes5_import_pipeline.md#producer-emitted-mesh-entries
+    """
+    plan = wearable_plan.build_plan(rec_dir)
+    print(f"  Wearable variant plan: {len(plan)} meshes referenced by "
+          f"ARMO/CLOT")
+    mesh_scan_fragments.clear_fragments(asset_dir)
+    return nif_batch.batch_convert(
+        str(mesh_src), output_dir=str(mesh_dst),
+        fix_textures=True, remap_skeleton=None,
+        subdir_filter=mesh_subdirs,
+        wearable_plan=plan,
+        parallax=parallax,
+        textures_only=textures_only,
+        scan_dir=None if textures_only else str(asset_dir),
+    )
+
+
 def convert_meshes(source_file, extract_dir='export', output_dir='output',
                    mesh_subdirs=None, parallax=False, textures_only=False):
     """Convert extracted NIFs and copy textures into `output_dir/<source_name>/`.
@@ -178,21 +206,9 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("=" * 60)
     mesh_src = asset_dir / 'meshes'
     if mesh_src.exists():
-        mesh_dst = plugin_dir / 'meshes' / ns
-        # Which _0/_1/plain variants each wearable is actually referenced as —
-        # without this the converter writes all three for every armor and
-        # clothing mesh and the plugin only ever loads one or two of them.
-        plan = wearable_plan.build_plan(rec_dir)
-        print(f"  Wearable variant plan: {len(plan)} meshes referenced by "
-              f"ARMO/CLOT")
-        stats['mesh_conversion'] = nif_batch.batch_convert(
-            str(mesh_src), output_dir=str(mesh_dst),
-            fix_textures=True, remap_skeleton=None,
-            subdir_filter=mesh_subdirs,
-            wearable_plan=plan,
-            parallax=parallax,
-            textures_only=textures_only,
-        )
+        stats['mesh_conversion'] = _convert_mesh_tree(
+            mesh_src, plugin_dir / 'meshes' / ns, asset_dir, rec_dir,
+            mesh_subdirs, parallax, textures_only)
         if parallax:
             _write_parallax_notice(plugin_dir)
         # The textures the converted meshes reference, harvested as they were

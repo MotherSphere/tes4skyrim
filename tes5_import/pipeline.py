@@ -673,19 +673,27 @@ def _prescan_mesh_caches(export_dir: str, plugin_out_dir: str, _step_done):
     from asset_convert.collision.collision_extract import (load_collision, scan_mesh_data,
                                                  bounds_cache_is_current,
                                                  collision_cache_is_current,
+                                                 door_axis_cache_is_current,
                                                  scan_door_axes)
+    from asset_convert.collision.mesh_scan_fragments import (clear_fragments,
+                                                             merge_fragments)
     cache_path = str(assets_for(export_dir) / 'mesh_bounds_cache.json')
     col_path = str(assets_for(export_dir) / 'collision_cache.bin')
     axis_path = str(assets_for(export_dir) / 'door_panel_axis_cache.json')
     mesh_dir = os.path.join(plugin_out_dir, 'meshes')
+    assets_dir = assets_for(export_dir)
     if (not bounds_cache_is_current(cache_path)
             or not collision_cache_is_current(col_path)) \
             and os.path.isdir(mesh_dir):
         print(f"  Mesh bounds/collision cache missing or stale, "
               f"scanning {mesh_dir}...")
-        scan_mesh_data(mesh_dir, col_path, cache_path)
-    if not os.path.exists(axis_path):
-        print("  Door threshold cache missing, measuring door panels...")
+        seed_b, seed_c = merge_fragments(assets_dir)
+        scan_mesh_data(mesh_dir, col_path, cache_path,
+                       seed_bounds=seed_b, seed_collision=seed_c)
+        clear_fragments(assets_dir)
+    if not door_axis_cache_is_current(axis_path):
+        print("  Door threshold cache missing or stale, measuring door "
+              "panels...")
         scan_door_axes(export_dir, axis_path)
     load_mesh_bounds(cache_path)
     load_collision(col_path)

@@ -129,6 +129,9 @@ from asset_convert.character.skyrim_overrides import (
     WEAPON_INV_MARKER_ZOOM,
 )
 from asset_convert.character.dismember_falloutnv import hide_dismember_caps
+from asset_convert.nif.mesh_scan_emit import (record_scan_alias,
+                                              record_scan_entry,
+                                              record_scan_removal)
 from asset_convert.collision.collision import (hoist_collision,
                                                remove_empty_collision_nodes)
 from asset_convert.collision.collision_falloutnv import (
@@ -1339,6 +1342,7 @@ def convert_nif(src_path, dst_path, *, fix_textures=True, remap_skeleton=None,
         os.makedirs(dst_dir, exist_ok=True)
     with open(dst_path, 'wb') as f:
         f.write(buf.getvalue())
+    record_scan_entry(data, _output_root(dst_path)[2])
 
     _write_weight_variants(data, buf, src_path, dst_path, src_meshes_dir,
                            wearable_plan, creature, race)
@@ -1487,9 +1491,12 @@ def _write_weight_variants(data, buf, src_path, dst_path, src_meshes_dir,
             os.remove(dst_path)
         except OSError:
             pass
+        record_scan_removal(_output_root(dst_path)[2])
     if want & wp.W0:
         with open(root + '_0' + ext, 'wb') as f:
             f.write(buf.getvalue())
+        record_scan_alias(_output_root(root + '_0' + ext)[2],
+                          _output_root(dst_path)[2])
     if not want & wp.W1:
         return
 
@@ -1503,6 +1510,11 @@ def _write_weight_variants(data, buf, src_path, dst_path, src_meshes_dir,
         w1_bytes = None
     with open(root + '_1' + ext, 'wb') as f:
         f.write(w1_bytes if w1_bytes is not None else buf.getvalue())
+    if w1_bytes is None:
+        record_scan_alias(_output_root(root + '_1' + ext)[2],
+                          _output_root(dst_path)[2])
+    else:
+        record_scan_entry(data, _output_root(root + '_1' + ext)[2])
 
 
 def _write_beast_head_variants(src_path, dst_path, *, fix_textures,

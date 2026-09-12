@@ -12,8 +12,10 @@ import glob
 import json
 import os
 import pickle
+import struct
 import sys
 import zipfile
+import zlib
 
 import numpy as np
 import pytest
@@ -160,6 +162,42 @@ def test_digests_cleared_on_reload(tmp_path, monkeypatch):
                                               'b': list(_soup(9)['b'])}}))
     ce.load_collision(str(path), quiet=True)
     assert ce.collision_digest('a.nif') != first
+
+
+def test_legacy_header_is_not_current(tmp_path):
+    """Current magic + an unreadable entry table must read as STALE.
+
+    A blob carrying a second count before the table (entries at offset 16, not
+    12) passed the magic-only gate, then failed in _deserialize -- which
+    load_collision swallows, so every cell voxelized an empty world.
+    """
+    blob = zlib.decompress(ce._serialize({'a.nif': {'w': list(_soup(1)['w']),
+                                                    'b': list(_soup(1)['b'])}}))
+    legacy = blob[:12] + struct.pack('<I', 1) + blob[12:]
+    path = tmp_path / 'c.bin'
+    path.write_bytes(zlib.compress(legacy, 6))
+    assert legacy[:8] == ce._MAGIC, 'fixture must keep the CURRENT magic'
+    assert ce.collision_cache_is_current(str(path)) is False
+    assert ce.load_collision(str(path), quiet=True) == 0
+
+
+def test_current_cache_round_trips(tmp_path):
+    """A cache this build wrote must read back as current and load."""
+    path = tmp_path / 'c.bin'
+    path.write_bytes(ce._serialize({'a.nif': {'w': list(_soup(1)['w']),
+                                              'b': list(_soup(1)['b'])},
+                                    'b.nif': {'w': [], 'b': []}}))
+    assert ce.collision_cache_is_current(str(path)) is True
+    assert ce.load_collision(str(path), quiet=True) == 2
+
+
+def test_truncated_cache_is_not_current(tmp_path):
+    """A short blob must be rescanned, never partially trusted."""
+    blob = zlib.decompress(ce._serialize({'a.nif': {'w': list(_soup(1)['w']),
+                                                    'b': list(_soup(1)['b'])}}))
+    path = tmp_path / 'c.bin'
+    path.write_bytes(zlib.compress(blob[:-4], 6))
+    assert ce.collision_cache_is_current(str(path)) is False
 
 
 def test_content_hash_ignores_key_order(monkeypatch):

@@ -16,6 +16,7 @@ import multiprocessing as mp
 import os
 from pathlib import Path
 
+from asset_convert.collision.mesh_scan_fragments import set_fragment_dir
 from asset_convert.nif.nif_converter import convert_nif
 from asset_convert.game_paths import current_namespace, set_namespace
 from asset_convert.nif.shaders import (default_normal_texture, SPEC_STRENGTH,
@@ -55,7 +56,7 @@ class _PyFFICapture(_logging.Handler):
         worker_warn_log.append(record.getMessage())
 
 
-def pyffi_capture_init(namespace: str = None) -> None:
+def pyffi_capture_init(namespace: str = None, scan_dir: str = None) -> None:
     """Install silent PyFFI log capture and the parent's asset namespace.
 
     Called as a multiprocessing.Pool initializer (once per worker) and
@@ -64,12 +65,13 @@ def pyffi_capture_init(namespace: str = None) -> None:
     cleanup; that is a no-op off Windows.
 
     A worker is a fresh interpreter, so without `namespace` it rewrites every
-    texture path under the default rather than this plugin's.
+    texture path under the default.  `scan_dir` receives its scan records.
     See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
     """
     join_pool_job()
     if namespace:
         set_namespace(namespace)
+    set_fragment_dir(scan_dir)
 
     global worker_warn_log
     worker_warn_log = []
@@ -204,7 +206,8 @@ def _progress(stats, mesh_path, nif_str, done, total):
           f'copied={stats["copied"]} errors={stats["errors"]}')
 
 
-def _run_batch(work_args, stats, skipped_list, mesh_path, workers):
+def _run_batch(work_args, stats, skipped_list, mesh_path, workers,
+               scan_dir=None):
     """Convert every queued mesh, in a pool or serially."""
     total = len(work_args)
 
@@ -225,12 +228,12 @@ def _run_batch(work_args, stats, skipped_list, mesh_path, workers):
     if workers > 1:
         with mp.Pool(processes=workers,
                      initializer=pyffi_capture_init,
-                     initargs=(ns,)) as pool:
+                     initargs=(ns, scan_dir)) as pool:
             for done, (status, nif_str, payload) in enumerate(
                     pool.imap_unordered(_batch_worker, work_args), 1):
                 handle(done, status, nif_str, payload, 500)
         return
-    pyffi_capture_init(ns)
+    pyffi_capture_init(ns, scan_dir)
     for done, args in enumerate(work_args, 1):
         status, nif_str, payload = _batch_worker(args)
         handle(done, status, nif_str, payload, 200)
@@ -303,7 +306,7 @@ def _report_specular(stats):
     if fallback:
         print(f"  no mask (constant used): {', '.join(fallback)}")
     if spec.get('normal_from_base'):
-        print(f"  {spec['normal_from_base']} shapes share a colour variant's "
+        print(f"  {spec['normal_from_base']} shapes share a color variant's "
               f'base normal map')
     if spec.get('normal_defaulted'):
         print(f"  {spec['normal_defaulted']} shapes had no normal map -- "
@@ -332,7 +335,7 @@ def _report_batch(stats, skipped_list, total, parallax):
 
 def batch_convert(mesh_dir, output_dir, *, fix_textures=True,
                   remap_skeleton=None, subdir_filter=None, wearable_plan=None,
-                  parallax=False, textures_only=False):
+                  parallax=False, textures_only=False, scan_dir=None):
     """Convert every NIF under mesh_dir into output_dir; return run stats.
 
     Skip reasons are VER (unsupported version), RD (read failure) and WR
@@ -369,7 +372,8 @@ def batch_convert(mesh_dir, output_dir, *, fix_textures=True,
          parallax, textures_only, tex_fallback)
         for nif_file in nif_files
     ]
-    _run_batch(work_args, stats, skipped_list, mesh_path, workers)
+    _run_batch(work_args, stats, skipped_list, mesh_path, workers,
+               scan_dir=scan_dir)
     _report_batch(stats, skipped_list, total, parallax)
     return stats
 

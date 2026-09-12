@@ -86,6 +86,7 @@ Returns per-navmesh metadata (centroid, parent) so the caller can build NAVI.
 """
 
 import hashlib
+import json
 import math
 import os
 import pickle
@@ -286,6 +287,48 @@ def door_threshold_axis(model_key):
     return (1.0, 0.0)
 
 
+def _apply_door_axis(key, a):
+    """Fill the axis/width/centre/floor globals from one axis-cache entry.
+
+    A bare string is the legacy axis-only form; otherwise the fields are
+    [axis, width, centre_x, centre_y, slab_z_min], each optional from the
+    right.  Element 4 is the CLOSED slab's z-min, a better floor drop than the
+    whole-NIF bounds z-min (which includes the frame reaching below).
+    """
+    if isinstance(a, str):
+        _DOOR_THRESH_LOCAL_Y[key] = (a == 'Y')
+        return
+    _DOOR_THRESH_LOCAL_Y[key] = (a[0] == 'Y')
+    if len(a) > 1 and a[1]:
+        _DOOR_WIDTH[key] = float(a[1])
+    if len(a) > 3:
+        _DOOR_PANEL_CTR[key] = (float(a[2]), float(a[3]))
+    if len(a) > 4:
+        _DOOR_FLOOR_DZ[key] = float(a[4])
+
+
+def _load_door_axes(apath) -> None:
+    """Read door_panel_axis_cache.json into the axis/width/centre globals.
+
+    '__schema__' carries the cache version, not a door model.  A centres-cache
+    model absent here keeps its marker via _DOOR_NO_THRESHOLD.
+    See: docs/commentary/tes5_import_navmesh.md#door-base-line-is-local-y
+    """
+    if not os.path.exists(apath):
+        return
+    try:
+        with open(apath, encoding='utf-8') as fh:
+            axes = json.load(fh)
+        axes = {k: v for k, v in axes.items() if k != '__schema__'}
+        for k, a in axes.items():
+            _apply_door_axis(k, a)
+        for k in _DOOR_CENTROIDS:
+            if k not in axes:
+                _DOOR_NO_THRESHOLD.add(k)
+    except (OSError, ValueError):
+        pass
+
+
 def load_door_centroids(cache_path, quiet: bool = False) -> int:
     """Load door panel centres/axes/widths for the plugin's door models.
 
@@ -299,7 +342,6 @@ def load_door_centroids(cache_path, quiet: bool = False) -> int:
     fallback for models the axis cache lacks a centre for; a plugin without it
     still loads fully from the axis cache.
     """
-    import json
     _DOOR_CENTROIDS.clear()
     _DOOR_FLOOR_DZ.clear()
     _DOOR_THRESH_LOCAL_Y.clear()
@@ -318,42 +360,7 @@ def load_door_centroids(cache_path, quiet: bool = False) -> int:
         except (OSError, ValueError) as exc:
             if not quiet:
                 print(f"  Door centres: could not load cache ({exc})")
-    # Which LOCAL axis the threshold runs along, its width, and (4-element
-    # entries) the exact panel centre, all read from the door's COLLISION
-    # PANEL (asset_convert.collision.collision_extract).  The whole-NIF bounding box
-    # cannot answer the axis: it includes the door FRAME/arch, which dwarfs
-    # the panel and inverts the result -- AnvilDoorMC01's bbox is 98 x 150
-    # ("Y wider" -> threshold Y) while its panel is 97.9 x 4.5 -> threshold X.
-    # Nine door models were wrong that way, each placing its navmesh door quad
-    # 90 degrees out (Anvil's exterior doors among them).
-    apath = os.path.join(base_dir, 'door_panel_axis_cache.json')
-    if os.path.exists(apath):
-        try:
-            with open(apath, encoding='utf-8') as fh:
-                axes = json.load(fh)
-            for k, a in axes.items():
-                if isinstance(a, str):              # axis-only cache
-                    _DOOR_THRESH_LOCAL_Y[k] = (a == 'Y')
-                    continue
-                _DOOR_THRESH_LOCAL_Y[k] = (a[0] == 'Y')
-                if len(a) > 1 and a[1]:
-                    _DOOR_WIDTH[k] = float(a[1])
-                if len(a) > 3:
-                    _DOOR_PANEL_CTR[k] = (float(a[2]), float(a[3]))
-                if len(a) > 4:
-                    # Closed slab z-min: better floor drop than the whole-NIF
-                    # bounds z-min (which includes the frame reaching below).
-                    _DOOR_FLOOR_DZ[k] = float(a[4])
-            # A centres-cache model ABSENT from the axis cache is a trapdoor/
-            # hatch (thin in Z, no vertical-axis threshold) OR unreadable
-            # collision.  Only the former may lose its door marker, and the
-            # cache cannot tell them apart, so nothing is dropped here — see
-            # the _DOOR_NO_THRESHOLD note in _collect_doors.
-            for k in _DOOR_CENTROIDS:
-                if k not in axes:
-                    _DOOR_NO_THRESHOLD.add(k)
-        except (OSError, ValueError):
-            pass
+    _load_door_axes(os.path.join(base_dir, 'door_panel_axis_cache.json'))
     # The REFR pivot sits at the door mesh's local z=0, which for a door is
     # up at the HINGE, not on the floor: impdundoor01's panel runs local z
     # -140.8..+57.7, so PosZ is ~141u above the threshold it stands on.

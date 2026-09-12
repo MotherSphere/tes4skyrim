@@ -249,9 +249,83 @@ parses cleanly and reads as all-zeroes for that field — which is how Nehrim
 served flag-less entries for every mesh long after the HELD bit shipped, leaving
 breakaway planks and traps unreleased.
 
+**Being current includes being READABLE, not just carrying the right magic.**
+`collision_cache_is_current` originally compared only the 8 magic bytes. A local
+`collision_cache.bin` written at a superseded header layout — magic, then a
+*second* u32 before the entry table, so entries begin at offset 16 rather than
+12 — still matched `TESCOL04` and passed the gate, then failed in `_deserialize`
+on entry 0 (`'utf-8' codec can't decode byte 0xdc`). `load_collision` catches
+that and returns 0, so `get_collision` answered `None` for all 5,951 meshes and
+every cell voxelized an empty world. Measured on Oblivion.esm: the blob decodes
+cleanly from offset 16 and consumes all 68,464,197 bytes exactly, confirming the
+extra header field rather than corruption.
+
+The gate therefore walks the entry table's lengths and requires it to consume the
+blob EXACTLY (`_entry_table_is_intact`); reading lengths only, it decodes no
+floats. A cache that cannot be read is rescanned instead of silently half-read.
+The unit tests build their fixtures through `_serialize`, so a writer/reader pair
+that is self-consistent but disagrees with an on-disk file passes all of them —
+which is exactly how this shipped.
+
 FURN MNAM/FNPR must index the converted NIF's clustered seat positions, and
 REFRs of re-origined furniture models need z compensation (shared algorithm in
 `asset_convert/nif/furniture_markers.py`).
+
+## <a id="producer-emitted-mesh-entries"></a>Phase 0 — the mesh scan is a second parse of what the mesh stage just wrote
+
+Measured on Oblivion.esm's 10,628 converted NIFs, per mesh:
+
+| | ms/mesh | share |
+|---|---|---|
+| NIF parse | 176.8 | **96%** |
+| bounds + physics flags | 2.2 | 1% |
+| collision extract | 6.1 | 3% |
+
+~1,343 s serial, ~112 s at 12 workers — **0.57x the entire mesh stage**, which
+measures 324 ms/mesh. Nearly all of it is re-reading files the mesh stage parsed
+moments earlier.
+
+**The converted graph already holds everything the scan wants.** `_convert_collision`
+builds a real `bhkCompressedMeshShape` via `build_cms_collision`, and
+`hoist_collision` has already moved it to the root — the exact shape
+`collision_from_data` decodes. So a producer computes the same entries for
+**+8.3 ms on a parse already paid**.
+
+**The hook must sit AFTER `_run_post_passes`.** Hooking before them matched a
+re-parse on only 24 of 25 sampled meshes: `convert_flame_nodes` re-converts flame
+sub-NIFs and mutates the tree, so `middlebowlredcandles01.nif` reported bounds
+`(-1,-1,-1,1,2,0)` and no collision against the written file's
+`(-13,-13,-8,13,13,8)` and 216/216 triangles. Hooking at the write point gives
+**25/25 exact** on bounds, collision and physics flags.
+
+Producers emit per-process JSONL fragments (`mesh_scan_fragments`) rather than
+returning soups through the pool pickle, because collision soups are large and
+most producers' workers return only small tuples today. The scan merges the
+fragments and parses **only** the meshes no producer claimed, so it stays correct
+whichever stages ran — `--import-only` on an older tree still scans everything.
+
+Three in-scope writes never hold a parsed graph (the already-Skyrim `shutil.copy2`,
+the grass `landscape/grass` copy, the creature merge-failure copy); copies alias the
+source key, and anything left over falls to the backfill. `_write_weight_variants`
+can also *delete* the base file, so a fragment can carry a removal.
+
+**A pool worker must write each record as it is produced — buffering loses them.**
+`mp.Pool` TERMINATES its children rather than letting them exit, so an `atexit`
+hook registered in the pool initializer mostly never runs: measured, a 4-worker
+pool over 8 tasks fired the hook in **1** process, and a full `--meshes-only` over
+10,627 meshes produced **0** fragment files. (With `maxtasksperchild` the recycled
+generations do flush — 7 files — but the final generation is still terminated.)
+
+Draining via extra pool tasks does not work either: workers are not round-robined,
+so 64 drain tasks over an 8-worker pool reached only **3** of them, and calling
+`pool.map` while the `imap_unordered` generator was still open DEADLOCKED the run.
+
+So each process appends to its own `w_<pid>.jsonl` and flushes per record.
+Measured cost 0.17 ms/mesh against 324 ms of conversion (0.05%), and nothing is
+lost when the pool kills the worker. After the rebuild: **29 fragment files,
+9,421 entries**, leaving the scan **1,207 of 10,628 meshes to parse — 11.4% of
+the previous work.** The remainder are the `actors/` creature meshes
+`batch_convert` skips, which the `os.walk` backfill still covers.
 
 ## <a id="phase-0-hunt-chains-and-script-packages"></a>Phase 0 — hunt chains and script-forced packages
 
