@@ -301,8 +301,12 @@ class GraphBuilder:
         return st
 
     def state_machine(self, name, states, start_id=0, wildcard_ref='null',
-                      binding_ref='null'):
-        """An hkbStateMachine over already-built `states`."""
+                      binding_ref='null', sync_var=None):
+        """An hkbStateMachine over already-built `states`.
+
+        `sync_var` names a graph variable whose value picks the start state
+        on every activation (START_STATE_MODE_SYNC) instead of `start_id`.
+        """
         m = self.pf.add('hkbStateMachine')
         m.param('variableBindingSet', binding_ref)
         m.param('userData', 0)
@@ -316,10 +320,11 @@ class GraphBuilder:
         m.param('randomTransitionEventId', -1)
         m.param('transitionToNextHigherStateEventId', -1)
         m.param('transitionToNextLowerStateEventId', -1)
-        m.param('syncVariableIndex', -1)
+        m.param('syncVariableIndex', self.vidx[sync_var] if sync_var else -1)
         m.param('wrapAroundStateId', False)
         m.param('maxSimultaneousTransitions', 32)
-        m.param('startStateMode', 'START_STATE_MODE_DEFAULT')
+        m.param('startStateMode', 'START_STATE_MODE_SYNC' if sync_var
+                else 'START_STATE_MODE_DEFAULT')
         m.param('selfTransitionMode', 'SELF_TRANSITION_MODE_NO_TRANSITION')
         m.param_array('states', [s.ref for s in states])
         m.param('wildcardTransitions', wildcard_ref)

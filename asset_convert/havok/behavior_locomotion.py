@@ -163,7 +163,11 @@ def _locomotion_machine(gb, clips, speeds, loco):
 # ---------------------------------------------------------------------------
 
 def _standing_idle_machine(gb, clips):
-    """StandingIdleBehavior: NonCombatIdle(0) <-> CombatIdle(1)."""
+    """StandingIdleBehavior: NonCombatIdle(0) <-> CombatIdle(1).
+
+    The start state syncs to `iCombatStance` (0/1), so returning from an
+    action re-enters the combat idle instead of the default state.
+    """
     eid = gb.eid
     idle = gb.clip('Idle', clips['idle'], True)
     combat = gb.clip('CombatStance', combat_idle_clip(clips), True)
@@ -172,7 +176,7 @@ def _standing_idle_machine(gb, clips):
                  transitions=[(eid['combatStanceStart'], 1, F_LOCAL)]),
         gb.state(1, 'CombatIdleState', combat.ref,
                  transitions=[(eid['combatStanceStop'], 0, F_LOCAL)]),
-    ])
+    ], sync_var='iCombatStance')
 
 
 def _standing_machine(gb, clips, loco):

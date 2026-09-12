@@ -36,7 +36,7 @@ import struct
 
 from ..base.writer import (pack_record, pack_subrecord, pack_string_subrecord,
                      pack_formid_subrecord, pack_obnd)
-from ..base.text_reader import get_formid, get_int, get_str
+from ..base.text_reader import get_float, get_formid, get_int, get_str
 
 # GMST fNPCHealthLevelBonus (Skyrim.esm) — health the engine grants per level
 # above 1. Defined here rather than imported from record_types.actors because
@@ -46,6 +46,19 @@ TES5_HEALTH_LEVEL_BONUS = 5
 # ---------------------------------------------------------------------------
 # Vanilla template constants (Skyrim.esm DogRace chain, byte-verified)
 # ---------------------------------------------------------------------------
+
+#: TES4 fMagickaReturnBase/Mult: magicka regen is base + mult * Willpower, %/s.
+_MAGICKA_RETURN = {'fMagickaReturnBase': 0.75, 'fMagickaReturnMult': 0.02}
+
+
+def _load_magicka_return(by_type: dict, master_export: dict) -> None:
+    """Adopt the plugin's (else its master's) fMagickaReturn* GMST values."""
+    for recs in ((master_export or {}).get('GMST', []), by_type.get('GMST', [])):
+        for rec in recs:
+            edid = get_str(rec, 'EditorID')
+            if edid in _MAGICKA_RETURN:
+                _MAGICKA_RETURN[edid] = get_float(rec, 'DATA.Value',
+                                                  _MAGICKA_RETURN[edid])
 
 _RACE_DATA_TEMPLATE = bytes.fromhex(
     '0f23ff00ff00ff00ff00ff00ff0000000000803f0000803f0000803f0000803f'
@@ -817,6 +830,9 @@ def _race_data(rec: dict, race_recs: list = None) -> bytes:
     # magicka can never pay a cast cost, so this pair is a casting gate.
     struct.pack_into('<f', data, 40, 0.0)
     struct.pack_into('<f', data, 44, float(get_int(rec, 'ACBS.Fatigue', 100)))
+    struct.pack_into('<f', data, 88, _MAGICKA_RETURN['fMagickaReturnBase']
+                     + _MAGICKA_RETURN['fMagickaReturnMult']
+                     * get_int(rec, 'DATA.Willpower', 50))
     struct.pack_into('<f', data, 96,
                      float(max(1, get_int(rec, 'DATA.AttackDamage', 5))))
     reach = get_int(rec, 'RNAM.AttackReach', 64) or 64
@@ -1248,6 +1264,20 @@ def _build_race_chain(writer, rec, folder: str, bodies: list, proj: dict,
     return race_fid, vnam
 
 
+def _index_crea_folders(by_type: dict) -> None:
+    """Mesh folder for EVERY CREA, race or not: voice types key off it.
+
+    A creature with no body NIFs (wisps) still needs one, and a plugin with
+    no converted projects still gets creature voices.
+    """
+    for rec in by_type.get('CREA', []):
+        model = (get_str(rec, 'Model.MODL') or '').replace('/', '\\')
+        parts = [p for p in model.lower().split('\\') if p]
+        folder = parts[-2] if len(parts) >= 2 else ''
+        if folder:
+            _CREA_FOLDER_MAP[get_formid(rec, 'FormID') & 0x00FFFFFF] = folder
+
+
 def build_creature_races(by_type: dict, writer, export_dir: str,
                          master_export: dict = None) -> None:
     """Phase 0f: one generated RACE + skin ARMO/ARMA per unique
@@ -1258,17 +1288,8 @@ def build_creature_races(by_type: dict, writer, export_dir: str,
     _CREA_FOLDER_MAP.clear()
     _CREA_ARMA_FOLDER.clear()
     load_creature_item_index(by_type, master_export)
-
-    # Folder for EVERY CREA, independent of whether it earns a generated race —
-    # the creature voice types key off this, and a creature with no body NIFs
-    # (wisps) still needs one. Done before the early return below so a plugin
-    # without converted projects still gets creature voices.
-    for rec in by_type.get('CREA', []):
-        model = (get_str(rec, 'Model.MODL') or '').replace('/', '\\')
-        parts = [p for p in model.lower().split('\\') if p]
-        folder = parts[-2] if len(parts) >= 2 else ''
-        if folder:
-            _CREA_FOLDER_MAP[get_formid(rec, 'FormID') & 0x00FFFFFF] = folder
+    _load_magicka_return(by_type, master_export)
+    _index_crea_folders(by_type)
 
     _PROJECTS = _load_projects(export_dir)
     if not _PROJECTS:
