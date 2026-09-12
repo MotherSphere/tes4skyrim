@@ -29,9 +29,40 @@ from external.pynifly_hkx.anim_fo4 import (Annotation,
 from external.pynifly_hkx.anim_skyrim import (
     load_skyrim_animation)
 
-from asset_convert.havok.hkx_skeleton import BONE_RENAMES
+from asset_convert.havok.hkx_skeleton import BONE_RENAMES, ROOT_BONE_NAME
 from asset_convert.havok.kf_decode import (BoneTrack, DecodedClip, decode_kf,
                                            split_root_motion)
+
+
+def _drop_unanimated_root(reference_pose, track_map):
+    """The reference pose minus an unanimated accum root: bone 0 plays identity."""
+    if not reference_pose or ROOT_BONE_NAME in track_map:
+        return reference_pose
+    return {b: v for b, v in reference_pose.items() if b != ROOT_BONE_NAME}
+
+
+def _bone_track(tr, n_frames, ref) -> TrackData:
+    """One TrackData, using `ref` (trans, quat_wxyz, scale) where tr is silent.
+
+    Rotations arrive as w,x,y,z and are emitted as pynifly's x,y,z,w.
+    """
+    ref_t, ref_q_wxyz, ref_s = ref
+    td = TrackData()
+    for f in range(n_frames):
+        t = tr.translations[f] if tr is not None and \
+            tr.translations is not None else ref_t
+        td.translations.append([float(t[0]), float(t[1]), float(t[2])])
+
+        if tr is not None and tr.rotations is not None:
+            w, x, y, z = tr.rotations[f]
+        else:
+            w, x, y, z = ref_q_wxyz
+        td.rotations.append([float(x), float(y), float(z), float(w)])
+
+        s = float(tr.scales[f]) if tr is not None and \
+            tr.scales is not None else float(ref_s)
+        td.scales.append([s, s, s])
+    return td
 
 
 def _merged_tracks(clip: DecodedClip, bone_names: list) -> dict:
@@ -64,12 +95,12 @@ def clip_to_animation_data(clip: DecodedClip, bone_names: list,
                            annotations=None) -> AnimationData:
     """Build a pynifly AnimationData with one track per skeleton bone.
 
-    bone_names: skeleton bone order (from hkx_skeleton.load_skeleton_bones).
-    reference_pose: optional {bone: (trans(3), quat_wxyz(4), scale)} for
-    bones the clip does not animate; defaults to identity.
-    annotations: [(time, text)] SKYRIM events embedded in the animation,
-    the channel the engine dispatches at runtime; translate Oblivion text
-    keys first (parse_kf_events/event_annotations).
+    bone_names: skeleton bone order (hkx_skeleton.load_skeleton_bones).
+    reference_pose: {bone: (trans(3), quat_wxyz(4), scale)} for bones the
+    clip omits, else identity. An omitted accum root is ALWAYS identity:
+    NonAccum already carries the bind pose the NIF stores on `Bip01`.
+    annotations: [(time, text)] engine events (parse_kf_events first).
+    See: docs/commentary/asset_convert_falloutnv.md#accum-root-identity
     """
     n_frames = len(clip.times)
     track_map = _merged_tracks(clip, bone_names)
@@ -83,33 +114,11 @@ def clip_to_animation_data(clip: DecodedClip, bone_names: list,
     anim.track_to_bone_indices = list(range(len(bone_names)))
     anim.original_skeleton_name = bone_names[0] if bone_names else ''
 
+    pose = _drop_unanimated_root(reference_pose, track_map)
+    identity = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), 1.0)
     for bone in bone_names:
-        td = TrackData()
-        tr = track_map.get(bone)
-        ref_t, ref_q_wxyz, ref_s = (0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), 1.0
-        if reference_pose and bone in reference_pose:
-            ref_t, ref_q_wxyz, ref_s = reference_pose[bone]
-
-        for f in range(n_frames):
-            if tr is not None and tr.translations is not None:
-                t = tr.translations[f]
-            else:
-                t = ref_t
-            td.translations.append([float(t[0]), float(t[1]), float(t[2])])
-
-            if tr is not None and tr.rotations is not None:
-                w, x, y, z = tr.rotations[f]
-            else:
-                w, x, y, z = ref_q_wxyz
-            # pynifly rotations are x,y,z,w
-            td.rotations.append([float(x), float(y), float(z), float(w)])
-
-            if tr is not None and tr.scales is not None:
-                s = float(tr.scales[f])
-            else:
-                s = float(ref_s)
-            td.scales.append([s, s, s])
-        anim.tracks.append(td)
+        ref = pose[bone] if pose and bone in pose else identity
+        anim.tracks.append(_bone_track(track_map.get(bone), n_frames, ref))
 
     for t, text in sorted(annotations or []):
         anim.annotations.append(Annotation(time=float(t), text=text))
@@ -305,18 +314,13 @@ def build_animation_xml(anim: 'AnimationData', skeleton_root: str) -> str:
 
 
 def decode_clip(ob_kf_path: str, fps: float = 30.0,
-                extract_motion: bool = True, flatten_to_first: bool = False):
-    """Decode an Oblivion .kf. Returns (DecodedClip, motion_or_None).
-
-    `flatten_to_first` is `split_root_motion`'s: the accum bone keeps its
-    first-sample rotation instead of identity.
-    """
+                extract_motion: bool = True):
+    """Decode an Oblivion .kf. Returns (DecodedClip, motion_or_None)."""
     clips = decode_kf(ob_kf_path, fps)
     if not clips:
         raise ValueError(f'no NiControllerSequence in {ob_kf_path}')
     clip = clips[0]
-    motion = (split_root_motion(clip, flatten_to_first=flatten_to_first)
-              if extract_motion else None)
+    motion = split_root_motion(clip) if extract_motion else None
     return clip, motion
 
 

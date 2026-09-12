@@ -31,9 +31,6 @@ SENTINEL = -3.0e38          # NIF "no static value" marker (-FLT_MAX)
 SPLINE_DEGREE = 3
 DEFAULT_FPS = 30.0
 
-#: Identity quaternion in this module's (w, x, y, z) component order.
-IDENTITY_QUAT = (1.0, 0.0, 0.0, 0.0)
-
 # NiControllerSequence cycle types
 CYCLE_LOOP = 0
 CYCLE_REVERSE = 1
@@ -496,6 +493,9 @@ def _decode_sequence(seq, fps: float) -> DecodedClip:
 #: Accum-bone spans below these are no motion: game units, radians of yaw.
 MIN_ROOT_DISPLACEMENT, MIN_ROOT_ROTATION = 0.5, 0.02
 
+#: Accum roots that become bone 0: engine-owned, so their tracks play as identity.
+ACCUM_ROOT_BONES = ('Bip01', 'Bip02')
+
 
 def _trans_span(tr) -> float:
     """Extent of a track's translation box, 0 without translations."""
@@ -515,14 +515,14 @@ def _rot_span(tr) -> float:
 
 def split_root_motion(clip: DecodedClip,
                       accum_bones=('Bip01 NonAccum', 'Bip01',
-                                   'Bip02 NonAccum', 'Bip02'),
-                      flatten_to_first: bool = False) -> Optional[dict]:
+                                   'Bip02 NonAccum', 'Bip02')) -> Optional[dict]:
     """Extract root motion from the accum bone (`Bip01` or NonAccum) in place.
 
     Returns {'bone', 'times', 'translations', 'rotations'} RELATIVE to the
     first sample of the candidate that moves most, or None when none moves.
-    The track's translation is flattened to its first sample; its rotation
-    to identity, or to the first sample when `flatten_to_first`.
+    The winner is flattened to its authored FIRST sample: NonAccum carries
+    the bind pose the engine plays once, so its heading and height stay.
+    Every accum ROOT track ends identity, that node being the engine's own.
     See: docs/commentary/asset_convert_falloutnv.md#accum-root-identity
     """
     candidates = [tr for tr in clip.tracks if tr.bone in accum_bones]
@@ -531,12 +531,12 @@ def split_root_motion(clip: DecodedClip,
     best = max(candidates, key=lambda tr: _trans_span(tr) + _rot_span(tr) * 50.0)
     has_trans = _trans_span(best) >= MIN_ROOT_DISPLACEMENT
     has_rot = _rot_span(best) >= MIN_ROOT_ROTATION
-    if not has_trans and not has_rot:
-        return None
 
     n = len(clip.times)
-    motion = {'bone': best.bone, 'times': clip.times.copy(),
-              'translations': None, 'rotations': None}
+    motion = None
+    if has_trans or has_rot:
+        motion = {'bone': best.bone, 'times': clip.times.copy(),
+                  'translations': None, 'rotations': None}
     if has_trans:
         motion['translations'] = best.translations - best.translations[0]
         best.translations = np.tile(best.translations[0], (n, 1))
@@ -545,8 +545,14 @@ def split_root_motion(clip: DecodedClip,
         conj = np.array([q0[0], -q0[1], -q0[2], -q0[3]])
         motion['rotations'] = np.array(
             [_quat_mul(conj, q) for q in best.rotations])
-    flat = best.rotations[0] if flatten_to_first else IDENTITY_QUAT
-    best.rotations = np.tile(flat, (n, 1))
+        best.rotations = np.tile(q0, (n, 1))
+    for tr in candidates:
+        if tr.bone not in ACCUM_ROOT_BONES:
+            continue
+        if tr.translations is not None:
+            tr.translations = np.zeros((n, 3))
+        if tr.rotations is not None:
+            tr.rotations = np.tile((1.0, 0.0, 0.0, 0.0), (n, 1))
     return motion
 
 

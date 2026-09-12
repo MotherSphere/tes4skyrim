@@ -384,7 +384,8 @@ get a type-13 entry like the `iRightHandType` slots.
 ### <a id="accum-root-identity"></a>The accum root plays as identity; NonAccum carries the 90°
 
 **Code:** `clip_retarget.py` `_source_locals`/`retarget_clip`,
-`kf_decode.py` `split_root_motion(flatten_to_first=True)`.
+`kf_decode.py` `split_root_motion` / `ACCUM_ROOT_BONES`,
+`hkx_anim.py` `_drop_unanimated_root`.
 
 Every FNV human clip follows the exporter convention in
 [asset_convert_animation.md](asset_convert_animation.md#animated-object-behaviour-graphs):
@@ -405,14 +406,37 @@ such as `1hpaimdown` got both: 90° + 90°, the drawn pistol stood facing
 frame-0 pelvis forward axis: aimdown (-1, 0, 0), mtidle and forward
 (0, 1, 0).
 
-Now the source root is always identity, the gun path splits with
-`flatten_to_first=True` (NonAccum keeps its authored first-sample
-rotation), and the root is never mapped, so `NPC Root [Root]` stays at
-rest and `NPC COM [COM ]` carries the yaw, as vanilla clips do. `1hpforward`
-had been writing `NPC Root` at -90° with COM at +87.5° to compensate.
-Creatures keep the identity flatten: the Morroblivion accum leak in
-[asset_convert_animation.md](asset_convert_animation.md#accum-bind-pose-leak)
-is the opposite convention, and their patched clips are the reference.
+Now the source root is always identity, `split_root_motion` flattens the
+winner to its authored first sample (NonAccum keeps its heading), and the
+root is never mapped, so `NPC Root [Root]` stays at rest and
+`NPC COM [COM ]` carries the yaw, as vanilla clips do. `1hpforward` had
+been writing `NPC Root` at -90° with COM at +87.5° to compensate.
+
+**Creatures obey the same contract, and it is the whole floating/facing
+story.** Census over every creature skeleton with an idle KF (FalloutNV 39
+of 42, Oblivion 32 of 44, Morrowind_ob 40 of 64, Nehrim ~45 of 70): the
+KF's frame-0 `Bip01 NonAccum` rotation IS the NIF's `Bip01` bind rotation
+(super mutant yaw 90°, centaur the (0.5,-0.5,-0.5,-0.5) axis permutation),
+and its translation is the same pose (smspinebreaker NIF Z 88.13 vs KF
+79.47, deathclaw 105.23 vs 96.23). The NIF stores the biped's world pose on
+`Bip01` with NonAccum at identity; the KF stores it on NonAccum. The engine
+plays it ONCE — the accum root is engine-owned — or every actor would stand
+at double height. Two symmetrical failures came from breaking that:
+
+| track 0 | track 1 | in-game |
+|---|---|---|
+| skeleton rest pose (old fallback) | authored | floats at 2× height; both-90° attacks face 180° |
+| identity | flattened to identity | every super mutant 90° right; centaur on its back |
+| identity | authored first sample | correct (user-verified, FNV) |
+
+So `_drop_unanimated_root` writes bone 0 as identity when the clip has no
+`Bip01` track, `ACCUM_ROOT_BONES` tracks are zeroed after motion extraction
+(a static authored `Bip01` such as ashvampire `idle.kf`'s 54.2°/Z 85.17 is
+a copy of the bind pose, not a pose), and NonAccum's authored frame 0 is
+kept. The user's 386 hand-corrected FNV clips compose to the same pose as
+ours in 365; the 21 others are their unfixed alien/mirelurk/Liberty Prime
+double-heading attacks and the centaur/sentrybot, where their track 0 still
+rotated NonAccum's height out of Z.
 
 ### <a id="jump-and-sprint"></a>Jump and sprint hold the gun
 

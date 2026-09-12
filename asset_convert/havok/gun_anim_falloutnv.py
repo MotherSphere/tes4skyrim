@@ -260,12 +260,11 @@ def retarget_gun_clip(kf_path: str, skeleton_nif: str, fps: float = 30.0,
     See: docs/commentary/asset_convert_falloutnv.md#accum-root-identity
     """
     rig = _rig(skeleton_nif)
-    clip, motion = decode_clip(kf_path, fps, flatten_to_first=True)
+    clip, motion = decode_clip(kf_path, fps)
     if pose:
         clip, motion = first_frame_pose(clip, fps), None
     if fill_kf:
-        fill_missing_tracks(clip, decode_clip(fill_kf, fps,
-                                              flatten_to_first=True)[0])
+        fill_missing_tracks(clip, decode_clip(fill_kf, fps)[0])
     events = parse_kf_events(clip.text_keys, foot_enum_map({0: '', 1: ''}))
     out = retarget_clip(clip, rig['src'], rig['dst'], rig['bone_map'],
                         rig['deltas'], translated=rig['translated'],

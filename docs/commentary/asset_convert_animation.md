@@ -654,39 +654,31 @@ ascendedsleeper, ashghoul, ashslave, ashvampire, ashzombie and wingedtwilight.
 40-bit compressed quaternion (`_read_40bit_quat`, 5 bytes) on **track 1
 (`Bip01 NonAccum`)**, replaced with the identity `01 18 80 01 38`.
 
-### Bug 1 — `split_root_motion` flattens to sample 0, not to identity
+### Bug 1 — the accum ROOT was played twice (SUPERSEDED diagnosis)
 
-`split_root_motion` extracts locomotion, then rewrites the accum track as
-`np.tile(best.rotations[0], ...)` / `np.tile(best.translations[0], ...)`.
-Sample 0 is not identity in Morroblivion KFs: the authored `Bip01 NonAccum`
-frame-0 transform carries the creature's whole bind orientation. That constant
-is baked into the clip as a static rotation and the actor faces the wrong way
-in every state.
+The first reading of these patches — "NonAccum's frame-0 rotation is a
+leak, flatten it to identity" — was wrong, and shipping it turned every
+super mutant 90° and put the centaur on its back once track 0 stopped
+carrying the rest pose. The real contract is
+[the accum root plays as identity](asset_convert_falloutnv.md#accum-root-identity):
+the patches only *looked* like a NonAccum fix because our track 0 still held
+the skeleton rest pose, and rest pose + NonAccum composed the same heading
+twice. The user zeroed the copy on track 1; the converter now zeroes the
+copy on track 0 and keeps NonAccum's authored frame 0 (54.18° / 67.11° /
+89.99° / 32.67° above are the correct static headings, not leaks).
 
 Measured frame-0 accum yaw, ashvampire source KFs:
 
-| clip | our static yaw | patched |
+| clip | NonAccum frame-0 yaw (kept) | track 0 |
 |---|---|---|
-| idle / turnleft / attack / equip / awarevocal / ragdollpose | 54.18° | 0° |
-| stagger | 67.11° | 0° |
-| death | 54.18° | 0° |
-| wingedtwilight cast | 89.99° | 0° |
-| ashslave / ashzombie | 32.67° | 0° |
+| idle / turnleft / attack / equip / awarevocal / ragdollpose | 54.18° | identity |
+| stagger | 67.11° | identity |
+| wingedtwilight cast | 89.99° | identity |
+| ashslave / ashzombie | 32.67° | identity |
 
-Only the ROTATION is wrong. The patches keep every accum translation
-(85.17 / 56.547 all preserved) — the creature's height must survive — so the
-fix flattens rotation to identity and leaves translation alone.
-
-Separately, ashvampire `idle.kf` (alone in the corpus) authors a STATIC
-Z 85.17 on `Bip01` itself. Span 0.000, so `split_root_motion` never touches
-it and the height double-counts against NonAccum's own 85.155. The patch
-zeroes it. NOT fixed here — one clip in one creature, no general rule
-established.
-
-Not Oblivion-specific by skeleton — 34/44 Oblivion, 47/64 Morroblivion and
-52/71 Nehrim creature skeletons have a non-identity root node. The
-discriminator is that Morroblivion KFs author a non-identity frame 0 on the
-accum bone itself.
+Ashvampire `idle.kf` authors a STATIC `Bip01` track (54.2°, Z 85.17), a copy
+of the bind pose: `ACCUM_ROOT_BONES` tracks are always written as identity,
+so it no longer double-counts against NonAccum's 85.155.
 
 ### Bug 2 — the walk speed-bake cap truncates the clip
 

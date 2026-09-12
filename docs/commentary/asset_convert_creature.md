@@ -603,7 +603,11 @@ Regression check: no `hkbBoneIndexArray` feeding a keyframe modifier or the
 contact listener may ever equal `range(parts)`.
 
 <a id="root-bone-not-identity"></a>
-#### Measured, NOT the ragdoll bug, still NOT fixed: 33/42 non-identity `NPC Root [Root]`
+#### Measured, NOT the ragdoll bug: 33/42 non-identity `NPC Root [Root]` (clips fixed, skeleton not)
+
+Clip-side this is solved — every animation writes bone 0 as identity, see
+[the accum root contract](asset_convert_falloutnv.md#accum-root-identity).
+The skeleton's own referencePose[0] below is still the NIF's `Bip01`.
 
 **This is NOT the cause of the broken corpses** — the rat is in the
 non-identity group and is one of the two creatures that ragdoll *correctly*,

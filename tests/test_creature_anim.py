@@ -1725,16 +1725,16 @@ ASHVAMP_DIR = os.path.join(REPO, 'export', 'Morrowind_ob.esm', 'meshes',
 
 @needs_assets
 class TestAccumBindPoseLeak:
-    """The accum bone must flatten to IDENTITY, never to its frame-0 pose.
+    """The accum bone flattens to its authored frame-0 pose, never identity.
 
-    See: docs/commentary/asset_convert_animation.md#accum-bind-pose-leak
+    See: docs/commentary/asset_convert_falloutnv.md#accum-root-identity
     """
 
     @pytest.mark.parametrize('kf,yaw', [('turnleft.kf', 54.18),
                                         ('stagger.kf', 67.11),
                                         ('idle.kf', 54.18)])
-    def test_accum_rotation_flattens_to_identity(self, kf, yaw):
-        """The accum track ends identity, though the source carries `yaw`."""
+    def test_accum_rotation_flattens_to_first_sample(self, kf, yaw):
+        """The accum track ends static at the source's authored `yaw`."""
         from asset_convert.havok.kf_decode import split_root_motion
         path = os.path.join(ASHVAMP_DIR, kf)
         if not os.path.exists(path):
@@ -1751,7 +1751,7 @@ class TestAccumBindPoseLeak:
         for t in clip.tracks:
             if t.bone == motion['bone']:
                 assert t.rotations == pytest.approx(
-                    np.tile((1.0, 0.0, 0.0, 0.0), (len(clip.times), 1)))
+                    np.tile(pre[t.bone], (len(clip.times), 1)))
 
     def test_accum_translation_is_preserved(self):
         """Flattening the rotation must not disturb the accum height."""
