@@ -35,6 +35,7 @@ CLI:
 Templates are auto-extracted from the SSE BSAs by default (skyrim_assets).
 """
 
+from asset_convert.game_paths import current_namespace
 import argparse
 import os
 import struct
@@ -89,15 +90,22 @@ NOTE_TEMPLATE = 'meshes\\clutter\\books\\note01\\note02.nif'
 BOOK_COVER_TEXES = ('largebookskyrim.dds', 'largebookskyrimback.dds')
 NOTE_SHEET_TEXES = ('largenote02.dds',)
 
-INV_MESH_DIR = 'meshes\\tes4\\clutter\\books\\inv'
-INV_TEX_DIR = 'textures\\tes4\\clutter\\books\\inv'
-
 FLAT_NORMAL = (128, 128, 255, 255)  # RGBA flat tangent-space normal
 
 
 # ---------------------------------------------------------------------------
 # NIF geometry access
 # ---------------------------------------------------------------------------
+
+def inv_mesh_dir() -> str:
+    """Inventory-art mesh folder under the ACTIVE namespace."""
+    return 'meshes\\' + current_namespace() + '\\clutter\\books\\inv'
+
+
+def inv_tex_dir() -> str:
+    """Inventory-art texture folder under the ACTIVE namespace."""
+    return 'textures\\' + current_namespace() + '\\clutter\\books\\inv'
+
 
 def read_nif(source):
     # sse_nif handles LE, SSE (BSA-sourced templates) and Oblivion formats;
@@ -815,16 +823,17 @@ def _convert_one(model_rel):
                    if cover_n is not None else _flat_canvas(FLAT_NORMAL))
 
         out_root = _W['out_root']
-        dds_out = os.path.join(out_root, *INV_TEX_DIR.split('\\'), base + '.dds')
-        dds_n_out = os.path.join(out_root, *INV_TEX_DIR.split('\\'), base + '_n.dds')
-        nif_out = os.path.join(out_root, *INV_MESH_DIR.split('\\'), base + '.nif')
+        tex_dir, mesh_dir = inv_tex_dir(), inv_mesh_dir()
+        dds_out = os.path.join(out_root, *tex_dir.split('\\'), base + '.dds')
+        dds_n_out = os.path.join(out_root, *tex_dir.split('\\'), base + '_n.dds')
+        nif_out = os.path.join(out_root, *mesh_dir.split('\\'), base + '.nif')
         write_dds(dds_out, atlas)
         write_dds(dds_n_out, atlas_n)
         emit_inam_nif(
             tpl_bytes, nif_out,
             BOOK_COVER_TEXES if kind == 'book' else NOTE_SHEET_TEXES,
-            INV_TEX_DIR + '\\' + base + '.dds',
-            INV_TEX_DIR + '\\' + base + '_n.dds')
+            tex_dir + '\\' + base + '.dds',
+            tex_dir + '\\' + base + '_n.dds')
         return (model_rel, 'ok', kind)
     except Exception as exc:  # keep the batch going; report per-model
         return (model_rel, 'fail', '%s: %s' % (type(exc).__name__, exc))

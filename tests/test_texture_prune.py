@@ -8,7 +8,10 @@ texture tree every run — and only shows in game as untextured terrain.
 
 import re
 
+from asset_convert import game_paths as gp
+from asset_convert.nif.tex_paths import rewrite_tex_path
 from asset_convert.texture import texture_prune as tp
+from tes5_import.record_types.common import prefix_path
 
 
 def _write(tmp_path, name, body):
@@ -232,3 +235,78 @@ class TestBinaryTextureScan:
         got = tp.texture_refs_in(raw)
         assert len(got[0]) == 204
         self._assert_same(raw)
+
+
+class TestAssetNamespace:
+    """Unrelated games must not collide in one flat Data namespace.
+
+    Measured before the split: FalloutNV and Oblivion shipped 14 mesh paths
+    and 24 texture paths in common, every one with DIFFERENT content.
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+
+    def _plugin(self, root, name, masters=()):
+        """An export dir whose _HEADER.txt declares `masters`."""
+        d = root / 'export' / name
+        d.mkdir(parents=True, exist_ok=True)
+        lines = ['Signature=TES4']
+        lines += ['Master[%d]=%s' % (i, m) for i, m in enumerate(masters)]
+        (d / '_HEADER.txt').write_text('\n'.join(lines), encoding='utf-8')
+        return d
+
+    def test_a_masterless_plugin_names_its_own_namespace(self, tmp_path):
+        """A game with no masters roots its own namespace."""
+        d = self._plugin(tmp_path, 'FalloutNV.esm')
+        assert gp.namespace_for(d) == 'falloutnv'
+
+    def test_oblivion_keeps_tes4_so_shipped_output_stays_valid(self, tmp_path):
+        """Renaming the largest existing tree would buy nothing."""
+        d = self._plugin(tmp_path, 'Oblivion.esm')
+        assert gp.namespace_for(d) == gp.DEFAULT_NAMESPACE == 'tes4'
+
+    def test_a_dependent_inherits_its_masters_namespace(self, tmp_path):
+        """Knights must keep resolving Oblivion cathedral art."""
+        self._plugin(tmp_path, 'Oblivion.esm')
+        child = self._plugin(tmp_path, 'Knights.esp', ['Oblivion.esm'])
+        assert gp.namespace_for(child) == 'tes4'
+
+    def test_the_chain_is_followed_to_its_masterless_root(self, tmp_path):
+        """A master of a master still decides the namespace."""
+        self._plugin(tmp_path, 'FalloutNV.esm')
+        mid = self._plugin(tmp_path, 'Fallout3.esm', ['FalloutNV.esm'])
+        assert gp.namespace_for(mid) == 'falloutnv'
+
+    def test_a_master_cycle_cannot_hang(self, tmp_path):
+        """A malformed header must terminate, not spin."""
+        self._plugin(tmp_path, 'A.esm', ['B.esm'])
+        b = self._plugin(tmp_path, 'B.esm', ['A.esm'])
+        assert gp.namespace_for(b)
+
+
+class TestNamespaceSidesAgree:
+    """The record writer and the asset copy must spell the same prefix.
+
+    If they disagree every converted record names a path no archive ships.
+    """
+
+    def test_both_sides_produce_the_same_path(self):
+        """rewrite_tex_path and prefix_path agree per namespace."""
+        src = 'textures' + chr(92) + 'architecture' + chr(92) + 'x.dds'
+        try:
+            for ns in ('tes4', 'falloutnv', 'nehrim'):
+                gp.set_namespace(ns)
+                asset = rewrite_tex_path(src.encode())
+                record = prefix_path(src)
+                assert asset.lower() == ('textures' + chr(92) + record).lower()
+        finally:
+            gp.set_namespace(gp.DEFAULT_NAMESPACE)
+
+    def test_another_games_prefix_is_still_namespaced(self):
+        """The idempotence check keys on the ACTIVE namespace, not a literal."""
+        try:
+            gp.set_namespace('falloutnv')
+            got = rewrite_tex_path(('Textures' + chr(92) + 'tes4' + chr(92)
+                                    + 'x.dds').encode())
+            assert got.lower().startswith('textures' + chr(92) + 'falloutnv')
+        finally:
+            gp.set_namespace(gp.DEFAULT_NAMESPACE)

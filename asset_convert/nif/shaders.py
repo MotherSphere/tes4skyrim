@@ -7,6 +7,7 @@ masks, flip-book atlases and the UV-transform controllers that drive them.
 See: docs/commentary/asset_convert_shader.md
 """
 
+from asset_convert.game_paths import current_namespace
 import os
 
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
@@ -82,9 +83,10 @@ _CTRL_FLAGS_ACTIVE_SCALED = 0x48
 #: NiTimeController cycle bits, preserved so CLAMP/REVERSE loops survive.
 _CTRL_FLAGS_CYCLE_MASK = 0x06
 
-#: Written once per plugin by landscape_normals.write_default_normal.
-DEFAULT_NORMAL_TEXTURE = 'Textures\\' + \
-    landscape_normals.DEFAULT_NORMAL_REL.split('\\', 1)[1]
+def default_normal_texture() -> str:
+    """Slot-1 path for a shape with no resolvable normal map."""
+    return 'Textures\\' + landscape_normals.default_normal_rel(
+    ).split('\\', 1)[1]
 
 #: Alpha verdicts by absolute path. See: docs/commentary/asset_convert_shader.md#texture-classification-caches
 _PARALLAX_ALPHA_CACHE = {}
@@ -111,7 +113,8 @@ def resolve_source_texture(tex_rel, src_nif_path, fallback_roots=()):
     tex_root = norm[:i] + os.sep + 'textures' + os.sep
     rel = tex_rel.replace('/', '\\')
     low = rel.lower()
-    for prefix in ('textures\\tes4\\', 'textures\\'):
+    for prefix in ('textures\\' + current_namespace() + '\\',
+                   'textures\\'):
         if low.startswith(prefix):
             rel = rel[len(prefix):]
             break

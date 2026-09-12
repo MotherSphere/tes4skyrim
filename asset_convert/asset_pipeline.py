@@ -19,6 +19,7 @@ import os
 import shutil
 from pathlib import Path
 
+from asset_convert.game_paths import namespace_for, set_namespace
 from asset_convert.sources import bsa_extract
 from asset_convert.nif import grass_profile
 from asset_convert.character import hair_pipeline
@@ -109,6 +110,24 @@ def _write_parallax_notice(plugin_dir):
     print('  Wrote PARALLAX-READ-ME.txt (Community Shaders / ENB required)')
 
 
+# ---------------------------------------------------------------------------
+# Asset namespace
+# ---------------------------------------------------------------------------
+
+def _activate_namespace(rec_dir) -> str:
+    """Install this plugin's asset namespace before any path is rewritten.
+
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+    ns = namespace_for(rec_dir)
+    set_namespace(ns)
+    return ns
+
+
+# ---------------------------------------------------------------------------
+# Mesh and texture conversion
+# ---------------------------------------------------------------------------
+
 def convert_meshes(source_file, extract_dir='export', output_dir='output',
                    mesh_subdirs=None, parallax=False, textures_only=False):
     """Convert extracted NIFs and copy textures into `output_dir/<source_name>/`.
@@ -138,6 +157,8 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     # per plugin (source_registry.asset_root / record_dir).
     asset_dir = _asset_root(extract_dir, source_name)
     rec_dir = record_dir(extract_dir, source_name)
+    plugin_dir = _out_root(output_dir, source_name, extract_dir)
+    ns = _activate_namespace(rec_dir)
 
     stats = {
         'mesh_conversion': {},
@@ -158,7 +179,7 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("=" * 60)
     mesh_src = asset_dir / 'meshes'
     if mesh_src.exists():
-        mesh_dst = plugin_dir / 'meshes' / 'tes4'
+        mesh_dst = plugin_dir / 'meshes' / ns
         # Which _0/_1/plain variants each wearable is actually referenced as —
         # without this the converter writes all three for every armor and
         # clothing mesh and the plugin only ever loads one or two of them.
@@ -221,58 +242,41 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("=" * 60)
 
     tex_src = asset_dir / 'textures'
-    if tex_src.exists():
-        tex_dst = plugin_dir / 'textures' / 'tes4'
-        stats['textures_copied'] = _copy_tree(tex_src, tex_dst)
-        print(f"  Textures: {stats['textures_copied']} files -> {tex_dst}")
+    if not tex_src.exists():
+        return
+    tex_dst = plugin_dir / 'textures' / ns
+    stats['textures_copied'] = _copy_tree(tex_src, tex_dst)
+    print(f"  Textures: {stats['textures_copied']} files -> {tex_dst}")
 
-        # Oblivion ships its GLOW maps as 8-bit DDPF_LUMINANCE, whose single
-        # channel sits under the RED mask (R 0xFF, G 0, B 0).  Skyrim's glow
-        # shader samples slot 2 as ordinary RGB and does not replicate that
-        # channel, so the glow renders PURE RED -- the "candles glow red"
-        # report (clutter\candle_g.dds on uppersilverplatecandles01).  Expand
-        # L into R=G=B.  Runs after the copy so re-copies can't resurrect the
-        # L8 originals; re-running is a no-op once converted.
-        lum_checked, lum_fixed = luminance_textures.run(tex_dst)
-        stats['luminance_textures_fixed'] = lum_fixed
-        print(f"  Luminance textures: {lum_checked} L8 found, "
-              f"{lum_fixed} expanded to BGRA")
+    lum_checked, lum_fixed = luminance_textures.run(tex_dst)
+    stats['luminance_textures_fixed'] = lum_fixed
+    print(f"  Luminance textures: {lum_checked} L8 found, "
+          f"{lum_fixed} expanded to BGRA")
 
-        # Landscape normal maps: DXT1 has no alpha channel, which Skyrim's
-        # landscape shader reads as a full-strength specular mask (shiny
-        # ground).  Re-container as DXT5 with a dark alpha.  Runs after the
-        # copy so re-copies don't resurrect the DXT1 versions.
-        checked, fixed = landscape_normals.run(tex_dst / 'landscape')
-        stats['landscape_normals_fixed'] = fixed
-        print(f"  Landscape normals: {checked} checked, {fixed} DXT1->DXT5 fixed")
+    checked, fixed = landscape_normals.run(tex_dst / 'landscape')
+    stats['landscape_normals_fixed'] = fixed
+    print(f"  Landscape normals: {checked} checked, {fixed} DXT1->DXT5 fixed")
 
-        n_checked, n_fixed, n_kinds = landscape_normals.normalize_specular_alpha(
-            tex_dst, skip=(os.sep + 'landscape' + os.sep,))
-        # AFTER the sweep: the stand-in is a constant alpha by design, so a
-        # sweep that saw it would count it as one more file it "fixed".
-        landscape_normals.write_default_normal(tex_dst)
-        stats['spec_alpha_fixed'] = n_fixed
-        print(f"  Specular masks: {n_checked} normal maps checked, {n_fixed} "
-              f"given a constant mask "
-              f"(alpha {landscape_normals.DEFAULT_MASK_ALPHA}/255)")
-        if n_kinds:
-            print('    ' + ', '.join(f'{k}={v}'
-                                     for k, v in sorted(n_kinds.items())))
+    n_checked, n_fixed, n_kinds = landscape_normals.normalize_specular_alpha(
+        tex_dst, skip=(os.sep + 'landscape' + os.sep,))
+    landscape_normals.write_default_normal(tex_dst.parent)
+    stats['spec_alpha_fixed'] = n_fixed
+    print(f"  Specular masks: {n_checked} normal maps checked, {n_fixed} "
+          f"given a constant mask "
+          f"(alpha {landscape_normals.DEFAULT_MASK_ALPHA}/255)")
+    if n_kinds:
+        print('    ' + ', '.join(f'{k}={v}'
+                                 for k, v in sorted(n_kinds.items())))
 
-        # A diffuse whose alpha was carried out to a `_p` height map has no
-        # use for that channel any more, and DXT1 is half the size.  Keyed on
-        # the `_p` file the mesh stage wrote, so this is a no-op unless
-        # --parallax ran.  After the copy, for the same reason as above.
-        from asset_convert.texture import parallax as _parallax
-        _n, _skip, _kept, _saved = _parallax.strip_diffuse_alpha(
-            tex_dst, keep=stats.get('mesh_conversion', {}).get(
-                'alpha_opacity_diffuse', ()))
-        if _n or _skip or _kept:
-            stats['parallax_diffuse_bc1'] = _n
-            print(f"  Parallax diffuse: {_n} DXT5->DXT1 "
-                  f"({_saved / (1024 * 1024):.1f} MB saved)"
-                  + (f", {_kept} kept (read as opacity)" if _kept else "")
-                  + (f", {_skip} already stripped" if _skip else ""))
+    _n, _skip, _kept, _saved = _parallax.strip_diffuse_alpha(
+        tex_dst, keep=stats.get('mesh_conversion', {}).get(
+            'alpha_opacity_diffuse', ()))
+    if _n or _skip or _kept:
+        stats['parallax_diffuse_bc1'] = _n
+        print(f"  Parallax diffuse: {_n} DXT5->DXT1 "
+              f"({_saved / (1024 * 1024):.1f} MB saved)"
+              + (f", {_kept} kept (read as opacity)" if _kept else "")
+              + (f", {_skip} already stripped" if _skip else ""))
 
     return stats
 
@@ -308,8 +312,8 @@ def convert_speedtrees(source_file, extract_dir='export', output_dir='output',
                 if d.is_dir():
                     master_tree_dirs.append(d)
     if spt_src.exists():
-        spt_dst = plugin_dir / 'meshes' / 'tes4' / 'speedtrees'
-        # tree textures ship via the generic texture copy (textures/tes4/trees/)
+        ns = _activate_namespace(record_dir(extract_dir, source_name))
+        spt_dst = plugin_dir / 'meshes' / ns / 'speedtrees'
         spt_stats['spt_conversion'] = spt_converter.convert_spt_directory(
             spt_src, spt_dst,
             export_dir=record_dir(extract_dir, source_name),

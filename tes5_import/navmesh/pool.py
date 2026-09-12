@@ -8,6 +8,7 @@ tag, and the process pool that runs them.  Geometry itself lives in
 See: docs/commentary/tes5_import_navmesh.md#pool-orchestration
 """
 
+from asset_convert.game_paths import current_namespace
 import glob
 import hashlib
 import os
@@ -72,14 +73,15 @@ def ensure_cell_grid(cell: dict) -> None:
 def _model_key(model: str) -> str:
     """Normalise a TES4 model path to the mesh_bounds cache key.
 
-    Lowercase, forward slashes, 'tes4/' prefix, '.nif' suffix -- e.g.
-    'Furniture\\ChairNoble01.NIF' -> 'tes4/furniture/chairnoble01.nif'.
+    Lowercase, forward slashes, game-namespace prefix, '.nif' suffix --
+    e.g. 'Furniture\\ChairNoble01.NIF' -> 'tes4/furniture/chairnoble01.nif'.
     """
     p = model.lower().replace('\\', '/').lstrip('/')
     if p.startswith('textures/'):
         p = p[len('textures/'):]
-    if not p.startswith('tes4/'):
-        p = 'tes4/' + p
+    ns = current_namespace() + '/'
+    if not p.startswith(ns):
+        p = ns + p
     if not p.endswith('.nif'):
         p += '.nif'
     return p

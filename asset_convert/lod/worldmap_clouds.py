@@ -56,6 +56,8 @@ import os
 
 from pyffi.formats.nif import NifFormat
 
+from asset_convert.game_paths import current_namespace
+
 # Bethesda's bank: half-extent 56902.8 local * node scale 8.0.
 _STOCK_NODE_SCALE = 8.0
 _STOCK_HALF_EXTENT = 56902.8 * _STOCK_NODE_SCALE
@@ -85,11 +87,12 @@ _DECK_OVER_LAND_Y = (_STOCK_HALF_EXTENT * 2.0) / _SKYRIM_LAND_Y   # 2.365
 
 _SOURCE_REL = 'meshes\\sky\\skyrimworldmapcloudbank.nif'
 
-# Where generated banks go, relative to `meshes\`.  Under the converter's
-# `tes4\` namespace like every other shipped asset, and NOT in `sky\`, so a
-# generated bank can never shadow the vanilla file for the SKY renderer (the
-# same folder holds clouds.nif etc. that the weather system loads by name).
-OUT_DIR = 'tes4\\worldmapclouds'
+def out_dir() -> str:
+    """Where generated cloud banks go, relative to `meshes\\`.
+
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+    return current_namespace() + '\\worldmapclouds'
 
 
 def cloud_model_path(editor_id: str) -> str:
@@ -100,7 +103,7 @@ def cloud_model_path(editor_id: str) -> str:
     writes on disk, so the record writer and the asset writer can never
     disagree about the name.
     """
-    return '%s\\%s.nif' % (OUT_DIR, editor_id.lower())
+    return '%s\\%s.nif' % (out_dir(), editor_id.lower())
 
 
 def compute_axis_scales(reach_x: float, reach_y: float) -> tuple:

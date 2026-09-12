@@ -30,6 +30,7 @@ the Oblivion skeleton — hits still register, dismember targeting is off),
 and ARMA has no footstep SNDD yet.
 """
 
+from asset_convert.havok.behavior_vocabulary import movement_type_names
 import os
 import struct
 
@@ -1045,8 +1046,7 @@ def _build_movts(writer, folder: str, proj: dict) -> None:
     (no AI movement, no `tc` control, no locomotion events: the 2026-07-09
     stuck-in-idle root cause). The names come from the creature pipeline
     manifest so graph and records agree by construction (like ATKE)."""
-    names = proj.get('movement_types') or [f'TES4{folder}Default',
-                                           f'TES4{folder}Run']
+    names = proj.get('movement_types') or movement_type_names(folder)
     speeds = proj.get('speeds') or {}
     sped = _movt_sped(speeds)
     sped_swim = _movt_sped_swim(speeds)

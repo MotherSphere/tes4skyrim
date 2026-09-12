@@ -13,6 +13,7 @@ from script_convert.command_rows import (
     ACTOR_ONLY_FUNCTIONS, OBJREF_SHARED_FUNCTIONS
 )
 from tes5_import.base.text_reader import parse_export_file
+from asset_convert.game_paths import current_namespace
 from core.worker_budget import worker_count
 
 # ===========================================================================
@@ -732,8 +733,9 @@ class CrossRefGraph:
         if not model:
             return False
         key = model.replace('\\\\', '/').replace('\\', '/').lower().lstrip('/')
-        if not key.startswith('tes4/'):
-            key = 'tes4/' + key
+        ns = current_namespace() + '/'
+        if not key.startswith(ns):
+            key = ns + key
         return bool(get_mesh_physics_flags(key) & 2)
 
     def script_owner_needs_havok_release(self, script_edid: str) -> bool:
@@ -763,8 +765,9 @@ class CrossRefGraph:
             if not model:
                 continue
             key = model.replace('\\\\', '/').replace('\\', '/').lower().lstrip('/')
-            if not key.startswith('tes4/'):
-                key = 'tes4/' + key
+            ns = current_namespace() + '/'
+            if not key.startswith(ns):
+                key = ns + key
             if get_mesh_physics_flags(key) & 2:
                 return True
         return False

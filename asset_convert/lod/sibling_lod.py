@@ -81,37 +81,53 @@ MERGED_DIR_NAME = "ZZZ Merged Sibling LOD"
 
 
 def _lod_mod_deliverables(lod_dir: Path) -> list:
-    """Mesh subtrees the LOD mod legitimately OWNS, as absolute dirs.
+    """Mesh subtrees the LOD mod OWNS: the baked tiles and the cloud banks.
 
-    Everything else under `meshes/` is scratch. Kept as one list so a new
-    generator that writes into the LOD mod has exactly one place to register
-    itself, instead of the sweep silently eating its output.
+    Everything else under `meshes/` is scratch, EXCEPT a file carrying a
+    `.nif.generated` marker. One list, so a new generator writing here has one
+    place to register itself instead of the sweep eating its output.
+    See: docs/commentary/asset_convert_terrain.md#generated-far-nif-belong-to-the-lod-mod
     """
-    from asset_convert.lod.worldmap_clouds import OUT_DIR as _CLOUD_DIR
+    from asset_convert.lod.worldmap_clouds import out_dir as _cloud_dir
 
     return [
-        # The baked tiles -- the whole point of the mod.
         lod_dir / 'meshes' / 'terrain',
-        # World-map cloud banks: ONE file per worldspace at a fixed shared
-        # path, written here by merge_cloud_bank from the UNION of every
-        # sibling's land. The per-plugin copies are the rival versions; this
-        # is the authoritative one, so it must survive the sweep.
-        lod_dir / 'meshes' / _CLOUD_DIR.replace(chr(92), '/'),
+        lod_dir / 'meshes' / _cloud_dir().replace(chr(92), '/'),
     ]
+
+
+def _has_generated(d: Path) -> bool:
+    """True if anything under `d` was DERIVED here rather than staged in."""
+    for _r, _dirs, files in os.walk(d):
+        if any(f.endswith('.nif.generated') for f in files):
+            return True
+    return False
+
+
+def _count_files(d: Path) -> int:
+    """Files under `d`, counted for the removal tally."""
+    return sum(len(f) for _r, _dirs, f in os.walk(d))
+
+
+def _derived_here(f: Path) -> bool:
+    """True for a generated mesh or its marker, which the sweep must keep."""
+    return (f.name.endswith('.nif.generated')
+            or f.with_suffix('.nif.generated').exists())
 
 
 def drop_staged_meshes(lod_dir: Path) -> int:
     """Delete the meshes a previous bake staged into the LOD mod.
 
     Staged models are scratch: LODGen resolves geometry under a single
-    PathData root, so `lod_gen._import_master_mesh` copies each model in for
-    the duration of the bake and `_drop_staged_master_meshes` removes it
-    afterwards. Nothing DERIVES an ordinary mesh here -- `far_nif_dirs` routes
-    every generated _far.nif to the plugin tree that ships its full model,
-    which is also where lod_far_gen writes the `.nif.generated` marker that
-    proves authorship. Staging copies the .nif alone and never its marker, so
-    a staged mesh in this tree has no provenance to lose. Measured before this
-    first ran: 4,120 .nif here, 0 markers.
+    PathData root, so `lod_gen._import_master_mesh` copies each AUTHORED _far
+    in for the duration of the bake and `_drop_staged_master_meshes` removes it
+    afterwards. Staging copies the .nif alone and never a marker, so a staged
+    mesh has no provenance to lose.
+
+    A GENERATED _far.nif is different and must SURVIVE: it is derived straight
+    into this tree and carries lod_far_gen's `.nif.generated` marker, which is
+    what tells the two apart.
+    See: docs/commentary/asset_convert_terrain.md#generated-far-nif-belong-to-the-lod-mod
 
     What the mod genuinely owns is listed by `_lod_mod_deliverables` and is
     never touched -- the tiles, and the world-map cloud banks that
@@ -149,15 +165,12 @@ def drop_staged_meshes(lod_dir: Path) -> int:
         nd = Path(os.path.normcase(str(d)))
         return any(k == nd or k in nd.parents for k in keep)
 
-    def _count(d: Path) -> int:
-        return sum(len(f) for _r, _dirs, f in os.walk(d))
-
     n = 0
     for child in sorted(meshes.iterdir()):
         if not child.is_dir():
             continue
-        if not _protected(child):
-            n += _count(child)
+        if not _protected(child) and not _has_generated(child):
+            n += _count_files(child)
             shutil.rmtree(child, ignore_errors=True)
             continue
         # Mixed: this subtree holds a deliverable somewhere beneath it, so
@@ -167,12 +180,12 @@ def drop_staged_meshes(lod_dir: Path) -> int:
             cur = stack.pop()
             for sub in sorted(cur.iterdir()):
                 if sub.is_dir():
-                    if _protected(sub):
+                    if _protected(sub) or _has_generated(sub):
                         stack.append(sub)
                     else:
-                        n += _count(sub)
+                        n += _count_files(sub)
                         shutil.rmtree(sub, ignore_errors=True)
-                elif not _is_deliverable_dir(cur):
+                elif not _is_deliverable_dir(cur) and not _derived_here(sub):
                     # A loose file inside a directory that merely CONTAINS a
                     # deliverable is still scratch; only files sitting in the
                     # deliverable directory itself are kept.

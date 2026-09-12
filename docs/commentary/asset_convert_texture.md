@@ -6,6 +6,9 @@
 
 - [Oblivion parallax → Skyrim height maps (asset_convert/texture/parallax.py, opt-in, 2026-08-15)](#oblivion-parallax-skyrim-height-maps)
 - [Landscape normal maps: DXT1 = shiny ground (2026-07-09)](#landscape-normal-maps-dxt1-shiny)
+- [Dependents borrow a master's textures](#dependents-borrow-a-masters-textures)
+- [Per-game asset namespace](#per-game-asset-namespace)
+- [Tree billboards are named, never written down](#tree-billboards-are-named-never-written-down)
 
 ## Oblivion parallax → Skyrim height maps (`asset_convert/texture/parallax.py`, opt-in, 2026-08-15)
 <a id="oblivion-parallax-skyrim-height-maps"></a>
@@ -578,3 +581,172 @@ being mesh products.
 - Skyrim's landscape shader reads the normal map ALPHA channel as the specular mask. Oblivion's terrain shader never used it, so most Oblivion landscape `*_n.dds` are DXT1 (no alpha) → sampled alpha = 1.0 → full-strength specular over the whole terrain (user-visible "very shiny ground"). Oblivion normals that are already DXT5 carry a real mask (avg ~77/255) and are correct as-is.
 - Fix: `asset_convert/texture/landscape_normals.py` (pipeline step after the texture copy, so re-copies can't resurrect DXT1) re-containers DXT1 → DXT5 with constant dark alpha 32/255. DXT1 and DXT5 share the 8-byte color block format, so RGB is preserved losslessly; DXT1 3-color blocks (c0<=c1, ~0.05%) get endpoints swapped + indices 0↔1 remapped since DXT5 color blocks are always 4-color mode.
 - Related: LTEX SNAM is a Phong exponent (never write 0 — see convert_LTEX comment); the alpha mask is what actually controls specular *amount*.
+
+## Dependents borrow a master's textures
+<a id="dependents-borrow-a-masters-textures"></a>
+
+**Code:** `_refs_from_dependents`, `_dependent_export_dirs` in `asset_convert/texture/texture_prune.py`
+
+Every converted plugin ships its own BSA pair, and all of them merge into ONE
+flat Data namespace holding exactly one file per path. So a child plugin's mesh
+that names `<ns>\architecture\cathedral\tracery01.dds` resolves against the
+MASTER's copy and correctly ships none of its own -- `_fill_missing_lod_textures`
+relies on the same rule, and duplicating instead would cost 828 files / 165 MB
+for ElsweyrAnequina alone.
+
+But `build_refs` assembles each plugin's keep-set from that plugin's OWN
+producers (its mesh manifest, its records, its generated meshes), and
+`bsa_pack` drops anything absent from it. A texture only a DEPENDENT uses is
+invisible to the master that ships it.
+
+Measured with each supplier's keep-set reconstructed the way `nif_batch` builds
+`textures_used` (the union of every converted mesh's own texture paths):
+
+| plugin | borrowed refs the SUPPLIER would prune |
+|---|---|
+| Knights.esp | **58** (cathedral floor/pillar/step/wall, from Oblivion.esm) |
+| TWMP_Valenwood_Elsweyr.esp | **2** (`anvilstonetrimuc02`, from Oblivion.esm) |
+| Oblivion.esm, Tamriel.esp, Translation.esp | 0 |
+
+No Oblivion mesh or record names `tracery01.dds`; Knights' meshes do. Oblivion's
+BSA dropped it and Knights rendered untextured. Loose `output/` copies survive,
+so this only ever appeared in a PACKED build -- the same blind spot that hid the
+tree-billboard prune.
+
+The fix unions in each dependent's mesh manifest. Membership is AUTHORED, read
+from `_HEADER.txt` via `master_names`: a sibling export dir counts only when it
+declares this plugin as a master. Never a filesystem sweep of `output/*`, which
+would keep unrelated plugins' art and defeat the prune.
+
+## Per-game asset namespace
+<a id="per-game-asset-namespace"></a>
+
+**Code:** `namespace_for`, `set_namespace`, `current_namespace` in `asset_convert/game_paths.py`
+
+Every converted asset used to ship under one hardcoded `tes4\` folder,
+whatever game it came from. All converted plugins merge into ONE flat Data
+namespace holding exactly one file per path, so two unrelated games writing the
+same relative path silently overwrite each other -- last BSA in load order wins.
+
+Measured on the built output, FalloutNV.esm against Oblivion.esm:
+
+| kind | colliding paths | identical | **DIFFERENT** |
+|---|---|---|---|
+| meshes | 14 | 0 | **14** |
+| textures | 25 | 1 | **24** |
+
+`tes4\marker_error.nif` is 7,178 bytes in FNV and 3,420 in Oblivion;
+`tes4\creatures\dog\dog.dds` is 1,398,256 against 699,192. Nehrim is the same
+hazard with far more overlap -- it is a total conversion built on Oblivion's
+asset NAMES with modified content -- and shares no worldspace or master with
+Oblivion, so neither should ever see the other's meshes.
+
+The namespace is the NAME of the masterless plugin at the root of the master
+chain, read from `_HEADER.txt` via `master_names`. Resolved over the 11 plugins
+with headers in `export/`:
+
+```
+Oblivion.esm   (masterless) -> tes4        <- kept, so existing output stays valid
+  Knights.esp, Tamriel.esp, Morrowind_ob.esm, ElsweyrAnequina/Pelletine,
+  TWMP_Valenwood_Elsweyr, Unique Landscapes  -> tes4
+FalloutNV.esm  (masterless) -> falloutnv
+  Fallout3.esm (master=FalloutNV.esm)        -> falloutnv
+Nehrim.esm     (masterless) -> nehrim
+```
+
+Plugins that share a master keep sharing art, which is required -- Knights
+borrows Oblivion's cathedral textures rather than shipping its own (see
+[dependents borrow a master's textures](#dependents-borrow-a-masters-textures)).
+Only unrelated FAMILIES are separated.
+
+Oblivion keeps `tes4` deliberately: it is the largest existing output tree, and
+renaming it would invalidate every shipped BSA for no collision benefit.
+
+`Fallout3.esm` declares FalloutNV.esm as its master in this workspace (a
+TTW-style setup), so it correctly lands in the FNV namespace rather than
+claiming its own.
+
+🛑 **The record side must move in lockstep.** `tes5_import` writes the
+namespace into MODL paths; if the asset copy and the record writer disagree,
+every converted record points at a path no BSA provides. That is total purple,
+far worse than the handful of missing textures this fixes.
+
+## The namespace crosses process boundaries through the environment
+<a id="namespace-crosses-process-boundaries"></a>
+
+**Code:** `NAMESPACE_ENV`, `set_namespace` in `asset_convert/game_paths.py`
+
+The active namespace is module state, and **module state does not survive a
+process boundary.** Windows SPAWNS pool workers -- a fresh interpreter that
+re-imports `game_paths` and starts at `DEFAULT_NAMESPACE`. Measured, parent set
+to `falloutnv`, in an unseeded spawned child:
+
+```
+namespace     = 'tes4'
+anim_prefix   = 'Animations\TES4Guns\'
+inv_tex_dir   = 'textures\tes4\clutter\books\inv'
+script_name   = 'TES4_AbcScript'
+project_hkx   = 'Actors\tes4\creatures\scamp\tes4creatures_scampproject.hkx'
+```
+
+Every value wrong. This is why guns, books, creatures and scripts kept writing
+`tes4` folders under FalloutNV long after the helpers themselves were correct
+-- an audit of the helpers, or a grep for a stray `tes4` literal, can never
+find it, because there is no offending string and no wrong helper.
+
+An AST sweep of all 55 pool constructions found **10** whose worker reached a
+namespace-derived helper without seeding it. Fixing them one pool at a time
+requires every future call site to remember, which is precisely the failure
+mode -- three separate rounds each fixed the pools then in view and missed the
+rest.
+
+So the namespace rides the ENVIRONMENT, which spawn and `subprocess` both
+inherit by construction: `set_namespace` exports `TESCONV_ASSET_NAMESPACE`, and
+module init reads it back. A child is correct with no per-pool code, and a pool
+added later inherits it without knowing this contract exists.
+
+Per-pool `initializer`/`initargs` seeding is kept where it already exists
+(`nif_batch`, `spt_converter`, `lod_far_gen`, `script_convert/pipeline`): it is
+harmless, explicit, and independent of environment inheritance.
+
+🛑 The environment is per-process GLOBAL state, so a parent that converts two
+plugins must call `set_namespace` for each -- it is the phase's entry point
+that owns this, not the pool.
+
+## Tree billboards are named, never written down
+<a id="tree-billboards-are-named-never-written-down"></a>
+
+**Code:** `refs_from_tree_billboards` in `asset_convert/texture/texture_prune.py`
+
+A TREE record points at a SpeedTree model (MODL names a `.spt`), and the
+distant-LOD card is the shipped render of that same tree, found BY NAME:
+`<billboard dir>/<model stem>.dds`. Nothing writes that path down -- not the
+record, not a NIF -- so neither `refs_from_records` (which matches `.dds`
+literals) nor the mesh manifest (billboards belong to no mesh) can see it. The
+prune dropped 43 of Oblivion.esm's 245 billboards from the archive. The loose
+`output/` copy survives, so it only ever showed as missing distant trees in a
+PACKED build.
+
+Two producers cover it, and they must agree:
+
+1. This function, from the plugin's own `TREE.txt`.
+2. The `late` `_far.nif` scan in `build_refs`, which reads the path the
+   generator actually embedded.
+
+`generate_tree_billboard_far` retries a stem without its leading digits --
+TWMP prefixes tree MESHES with load-order digits (`00llltreevwelmforestmosssu`)
+that the billboard TEXTURES do not carry. Measured: 8 TWMP `_far.nif` embed the
+stripped name. Only producer 2 saw those, so this function keeps the bare
+variant as well; otherwise removing the generator's retry would silently drop
+them from the archive.
+
+Measured against the authored source across 453 TREE records in 5 plugins, the
+MODL stem is the right key and EditorID adds nothing:
+
+```
+both=233  editorid_only=0  modl_only=192  neither=28
+```
+
+`editorid_only = 0` -- EditorID never rescues a record the MODL stem misses.
+Shared stems are genuine: `darkwoodgrosserbaumbelaubt` serves 6
+`TreeDarkwoodFreeVar*` records, none of which ship their own card.

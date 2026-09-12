@@ -16,7 +16,8 @@ See: docs/commentary/script_convert.md#block-type-mapping
 import re
 
 from script_convert.constants import (
-    is_base_object_type, record_type_to_papyrus, safe_property_name,
+    is_base_object_type, is_generated_script_type,
+    record_type_to_papyrus, safe_property_name,
 )
 from script_convert.constants_falloutnv import (
     FALLOUT_BLOCK_FILTER_PARAM,
@@ -114,7 +115,7 @@ def _rebind_existing(param: str, safe: str, param_type: str,
     keep the body but not run it.
     See: docs/commentary/script_convert.md#block-filter-guards
     """
-    if (existing.startswith('TES4_')
+    if (is_generated_script_type(existing)
             and param_type in ('Actor', 'ObjectReference', 'Form')):
         return f'{param} == {safe}'
     if param_type == 'Form' and is_base_object_type(existing):

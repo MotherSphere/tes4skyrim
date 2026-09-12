@@ -249,19 +249,35 @@ class TestPerPluginProjectNamespace:
     """
 
     def test_layout_is_namespaced_everywhere(self):
+        from asset_convert.game_paths import set_namespace
         from asset_convert.havok.hkx_behavior import project_layout
+        set_namespace('tes4')
         a = project_layout('scamp', 'oblivion')
         b = project_layout('scamp', 'morrowind_ob')
         for key in ('project_hkx', 'project_txt', 'behavior_hkx', 'anim_dir',
                     'skeleton_nif', 'body_dir', 'fs_dir'):
             assert a[key] != b[key], key
         assert a['project_hkx'] == \
-            'Actors\\TES4\\oblivion\\scamp\\tes4oblivion_scampproject.hkx'
-        assert a['behavior_hkx'] == ('Actors\\TES4\\oblivion\\scamp\\'
+            'Actors\\tes4\\oblivion\\scamp\\tes4oblivion_scampproject.hkx'
+        assert a['behavior_hkx'] == ('Actors\\tes4\\oblivion\\scamp\\'
                                      'Behaviors\\tes4oblivion_scampbehavior.hkx')
         assert a['project_txt'] == 'tes4oblivion_scampproject.txt'
         assert a['fs_dir'] == os.path.join('actors', 'tes4', 'oblivion',
                                            'scamp')
+
+    def test_layout_is_namespaced_per_GAME(self):
+        """A second game's creature of the same name is a distinct project."""
+        from asset_convert.game_paths import set_namespace
+        from asset_convert.havok.hkx_behavior import project_layout
+        set_namespace('tes4')
+        obl = project_layout('scamp', 'oblivion')
+        set_namespace('falloutnv')
+        fnv = project_layout('scamp', 'oblivion')
+        set_namespace('tes4')
+        for key in ('project_hkx', 'project_txt', 'behavior_hkx', 'anim_dir',
+                    'skeleton_nif', 'body_dir', 'fs_dir'):
+            assert obl[key] != fnv[key], key
+        assert fnv['project_txt'] == 'falloutnvoblivion_scampproject.txt'
 
     def test_namespace_is_the_plugin_stem(self):
         from asset_convert.havok.creature_pipeline import plugin_namespace

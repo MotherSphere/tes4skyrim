@@ -16,8 +16,8 @@ import os
 from pathlib import Path
 
 from asset_convert.nif.nif_converter import convert_nif
-from asset_convert.nif.shaders import (DEFAULT_NORMAL_TEXTURE, GLOW_SLOT,
-                                       SHADER_TYPE_GLOWMAP, SPEC_STRENGTH,
+from asset_convert.game_paths import current_namespace, set_namespace
+from asset_convert.nif.shaders import (default_normal_texture, SPEC_STRENGTH,
                                        master_texture_roots)
 from core.process_job import join_pool_job
 from core.worker_budget import worker_count
@@ -38,22 +38,37 @@ worker_warn_log: list = []
 
 
 class _PyFFICapture(_logging.Handler):
-    """Capture PyFFI log messages at WARNING+ without printing them."""
+    """Capture PyFFI log messages at WARNING+ without printing them.
+
+    Carries its own level: constructing any PyFFI Toaster lowers the shared
+    'pyffi' logger to INFO, which the handler level overrides.
+    See: docs/commentary/asset_convert_nif.md#pyffi-log-capture
+    """
+
+    def __init__(self) -> None:
+        """Install at WARNING so INFO chatter cannot reach `emit`."""
+        super().__init__(level=_logging.WARNING)
 
     def emit(self, record: _logging.LogRecord) -> None:
         """Accumulate the message instead of printing it."""
         worker_warn_log.append(record.getMessage())
 
 
-def pyffi_capture_init() -> None:
-    """Install silent PyFFI log capture.
+def pyffi_capture_init(namespace: str = None) -> None:
+    """Install silent PyFFI log capture and the parent's asset namespace.
 
     Called as a multiprocessing.Pool initializer (once per worker) and
     directly before single-worker processing. The worker joins the parent's
     containment job first, so it cannot outlive a parent that dies without
     cleanup; that is a no-op off Windows.
+
+    A worker is a fresh interpreter, so without `namespace` it rewrites every
+    texture path under the default rather than this plugin's.
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
     """
     join_pool_job()
+    if namespace:
+        set_namespace(namespace)
 
     global worker_warn_log
     worker_warn_log = []
@@ -215,14 +230,16 @@ def _run_batch(work_args, stats, skipped_list, mesh_path, workers):
         if done % every == 0 or done == total:
             _progress(stats, mesh_path, nif_str, done, total)
 
+    ns = current_namespace()
     if workers > 1:
         with mp.Pool(processes=workers,
-                     initializer=pyffi_capture_init) as pool:
+                     initializer=pyffi_capture_init,
+                     initargs=(ns,)) as pool:
             for done, (status, nif_str, payload) in enumerate(
                     pool.imap_unordered(_batch_worker, work_args), 1):
                 handle(done, status, nif_str, payload, 500)
         return
-    pyffi_capture_init()
+    pyffi_capture_init(ns)
     for done, args in enumerate(work_args, 1):
         status, nif_str, payload = _batch_worker(args)
         handle(done, status, nif_str, payload, 200)
@@ -291,21 +308,18 @@ def _report_specular(stats):
     verdicts = ('mask', 'no_alpha', 'flat', 'binary', 'missing_normal')
     on = spec.get('mask', 0)
     tot = sum(spec.get(k, 0) for k in verdicts)
-    print(f'\nSpecular: strength {SPEC_STRENGTH} on every shape; {on} of '
-          f'{tot} ({on * 100.0 / max(1, tot):.1f}%) modulate it with an '
-          f"AUTHORED mask in the normal map's alpha")
-    for k in ('no_alpha', 'flat', 'binary', 'missing_normal'):
-        if spec.get(k):
-            print(f'  {k}: {spec[k]} shapes -> the texture stage bakes a '
-                  f'constant mask instead')
+    print(f'\nSpecular: {on}/{tot} shapes ({on * 100.0 / max(1, tot):.0f}%) '
+          f"use a mask from the normal map alpha; strength {SPEC_STRENGTH}")
+    fallback = [f'{k}={spec[k]}' for k in
+                ('no_alpha', 'missing_normal', 'binary', 'flat') if spec.get(k)]
+    if fallback:
+        print(f"  no mask (constant used): {', '.join(fallback)}")
     if spec.get('normal_from_base'):
-        print(f"  normal shared with the base name: {spec['normal_from_base']}"
-              f" shapes (a colour variant reuses its base's _n, the way the "
-              f'artists authored it)')
+        print(f"  {spec['normal_from_base']} shapes share a colour variant's "
+              f'base normal map')
     if spec.get('normal_defaulted'):
-        print(f"  normal map absent: {spec['normal_defaulted']} shapes -> "
-              f'{DEFAULT_NORMAL_TEXTURE} (a fabricated _n path would only '
-              f'dangle; vanilla never ships an empty slot 1)')
+        print(f"  {spec['normal_defaulted']} shapes had no normal map -- "
+              f'pointed at {default_normal_texture()}')
 
 
 def _report_batch(stats, skipped_list, total, parallax):

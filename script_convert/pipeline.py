@@ -10,8 +10,11 @@ import struct
 from tes5_import.base.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
+from asset_convert.game_paths import (current_namespace,
+                                      set_namespace)
 from script_convert.constants import (sanitize_name, safe_property_name, record_type_to_papyrus, papyrus_script_name,
-                                     SERVICE_MENU_CALL, UDF_WIDE_TYPES)
+                                     SERVICE_MENU_CALL, UDF_WIDE_TYPES,
+                                     script_prefix)
 from script_convert.command_rows import KNOWN_COMMANDS
 from script_convert.cross_ref import CrossRefGraph, master_names
 from script_convert.converter import ScriptConverter
@@ -108,7 +111,15 @@ def _script_worker_init(xref, output_dir, info_reveals, service_topics,
                         quest_edid_by_fid=None, topic_unlock_globals=None,
                         message_menus=None, mesh_bounds_cache=None,
                         chargen_menus=None, say_topics=None,
-                        music_cues=None):
+                        music_cues=None, namespace=None):
+    """Seed one worker with the parent state that spawning does not carry.
+
+    `namespace` is installed FIRST: the generated-script prefix derives from
+    the active namespace, so any name built before it is wrong.
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+    if namespace:
+        set_namespace(namespace)
     # Windows spawns workers, so module-level caches loaded in the parent do
     # NOT carry over — each worker reloads the mesh-bounds cache or every
     # needs_havok_release() lookup answers 0 and no trap gets its release.
@@ -435,7 +446,7 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
                 unlock_plan['stage_reveals'], say_durations,
                 quest_script_vars, quest_edid_by_fid, topic_unlock_globals,
                 message_menus, _bounds_cache, chargen_menus, say_topics,
-                _load_music_cues(output_dir))
+                _load_music_cues(output_dir), current_namespace())
     return {'initargs': initargs, 'scpt_work': scpt_work,
             'info_work': info_work, 'qust_work': qust_work, 'stats': stats}
 
@@ -1050,7 +1061,7 @@ def _info_batch(records: list, output_dir: str, xref: CrossRefGraph,
                 body_lines = conv.convert_fragment(result_script, 'TopicInfo')
                 prop_refs = dict(conv.sc.property_refs)
 
-            script_name = f'TES4_TIF__{formid}'
+            script_name = f'{script_prefix("_TIF__")}{formid}'
             out_lines = [
                 f'ScriptName {script_name} extends TopicInfo Hidden',
                 '',
@@ -1233,7 +1244,7 @@ def _qust_batch(records: list, output_dir: str, xref: CrossRefGraph,
             conv = ScriptConverter(xref)
             # Pre-populate external references from SCRO entries
             _preload_scro_refs(conv, rec, xref)
-            script_name = papyrus_script_name(edid, 'TES4_QF_')
+            script_name = papyrus_script_name(edid, script_prefix('_QF_'))
             out_lines = [
                 f'ScriptName {script_name} extends Quest Hidden',
                 '',
@@ -1575,7 +1586,7 @@ def build_vmad_quest_fragments(quest_edid: str, stage_fragments: list[tuple[int,
 
     Returns VMAD binary data.
     """
-    script_name = papyrus_script_name(quest_edid, 'TES4_QF_')
+    script_name = papyrus_script_name(quest_edid, script_prefix('_QF_'))
     buf = bytearray()
 
     # VMAD header
@@ -1778,7 +1789,7 @@ def build_vmad_info_fragment(info_formid: str, property_values: dict = None,
 
     Returns VMAD binary data.
     """
-    script_name = script_name or f'TES4_TIF__{info_formid}'
+    script_name = script_name or f'{script_prefix("_TIF__")}{info_formid}'
     buf = bytearray()
 
     # VMAD header

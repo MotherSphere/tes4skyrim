@@ -20,10 +20,14 @@ from script_convert.constants import (
     ACTOR_VALUE_MAP,
     TES4_ATTRIBUTES,
     PAPYRUS_MAX_SCRIPT_NAME,
+    is_generated_script_type,
     papyrus_script_name,
     safe_property_name,
+    script_prefix,
     PLAYER_ALIAS_EXTENDS,
 )
+from asset_convert.game_paths import (current_namespace,
+                                      set_namespace)
 from script_convert.tes4 import nodes as N
 from script_convert.emit import expr as _E
 from script_convert.emit import script as _S
@@ -4629,6 +4633,67 @@ class TestTypeOf:
         converter._property_refs = {}
         converter.sc.var_types = {}
         assert converter.type_of('nothing') == ''
+
+
+class TestGeneratedScriptTypeNamespace:
+    """The generated-script prefix is per-game; nothing may hardcode 'TES4_'.
+
+    See: docs/commentary/script_convert.md#generated-script-types
+    """
+
+    @pytest.fixture(autouse=True)
+    def _restore_namespace(self):
+        """Put the process-global namespace back after each test."""
+        previous = current_namespace()
+        yield
+        set_namespace(previous)
+
+    @staticmethod
+    def _graph(edid, variables):
+        """A CrossRefGraph whose only script is `edid` declaring `variables`."""
+        xref = CrossRefGraph()
+        xref.script_formid_to_edid['00001111'] = edid
+        xref.script_all_vars[edid.lower()] = dict.fromkeys(
+            variables, 'ObjectReference')
+        return xref
+
+    @pytest.mark.parametrize('namespace', ['tes4', 'falloutnv'])
+    def test_predicate_and_remote_type_follow_the_namespace(self, namespace):
+        """A cross-script member read resolves under EVERY namespace."""
+        set_namespace(namespace)
+        edid = 'MyQuestScript'
+        xref = self._graph(edid, ['refvar'])
+        xref.script_all_vars[edid.lower()]['counter'] = 'Int'
+        ptype = papyrus_script_name(edid)
+        assert ptype.startswith(script_prefix())
+        assert is_generated_script_type(ptype)
+        assert not is_generated_script_type('Actor')
+        conv = ScriptConverter(xref)
+        conv.sc.property_refs['Owner'] = ptype
+        assert conv.remote_type_of('Owner.counter') == 'Int'
+
+    def test_truncated_owner_still_resolves_its_editorid(self):
+        """A name that only truncates under the longer prefix still resolves.
+
+        Slicing the prefix off a truncated type yields a hash-suffixed stem
+        matching no EditorID, which silently disabled every lookup keyed by
+        one -- including the dangling-access check that keeps an authored bad
+        write from reaching the compiler.
+        See: docs/commentary/script_convert.md#stem-a-script-type-via-script-edid-for
+        """
+        set_namespace('falloutnv')
+        edid = 'GomorrahCasinoEnterTriggerScript'
+        xref = self._graph(edid, ['companion1ref'])
+        ptype = papyrus_script_name(edid)
+        assert ptype.endswith('_B9F2')
+        assert len(ptype) <= PAPYRUS_MAX_SCRIPT_NAME
+        conv = ScriptConverter(xref)
+        conv.sc.property_refs['TriggerREF'] = ptype
+        assert conv._script_edid_for(ptype) == edid.lower()
+        assert 'not declared' in conv._dangling_cross_script_target(
+            'TriggerREF.Follower1')
+        assert conv._dangling_cross_script_target(
+            'TriggerREF.Companion1REF') == ''
 
 
 class TestScaleEnumAv:

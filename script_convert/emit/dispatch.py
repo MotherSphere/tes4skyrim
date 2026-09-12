@@ -16,7 +16,8 @@ import re
 from script_convert.stage_latch import guard_stage_timer
 from script_convert import commands as _commands
 from script_convert.commands import Call
-from script_convert.constants import PLAYER_ALIAS_EXTENDS
+from script_convert.constants import (PLAYER_ALIAS_EXTENDS,
+                                      is_generated_script_type)
 from script_convert.command_rows import MAP
 from script_convert.command_rows import (
     COMMAND_ROWS, COMPOUND_HAS_OWN_HANDLER, DEFAULT_ARGS, DROP_ARGS_FUNCS,
@@ -183,7 +184,7 @@ def _receiver(conv, call, ref_name, papyrus_func: str, extends: str) -> str:
         return f'({ref} as Actor)'
     if cur == '' and conv._is_bindable_property(ref):
         conv.sc.property_refs[ref] = 'Actor'
-    elif cur.startswith('TES4_'):
+    elif is_generated_script_type(cur):
         # Typed as the SCRIPT attached to the record it names (see
         # _resolve_self_ref): cast at the call site so the cross-script
         # variable reads that need that type keep working.

@@ -1065,6 +1065,57 @@ def _lodgen_output_dir(lodgen_input: Path):
     return None
 
 
+def _far_owner_dirs(referenced_models, far_nif_dirs) -> dict:
+    """{plugin output root: models it ships the FULL mesh for}.
+
+    Routing per model rather than per run is the point: one worldspace draws
+    objects from every selected plugin, so no single tree owns them all, and
+    generating from a tree that lacks the source mesh produces nothing at all.
+    Later dirs win, matching load order -- if two plugins ship the same path,
+    the one that overrides it is the geometry actually placed.
+    """
+    by_dir: dict = {}
+    for model in referenced_models:
+        owner = None
+        for d in far_nif_dirs:
+            if _mesh_exists(model, Path(d) / 'meshes'):
+                owner = Path(d)
+        if owner is not None:
+            by_dir.setdefault(owner, set()).add(model)
+    return by_dir
+
+
+def _derive_far_meshes(stats, output_dir, referenced_models, far_nif_dirs):
+    """Derive every referenced model's LOD mesh into the bake tree.
+
+    Generated files are written straight to `output_dir`; only a plugin's
+    AUTHORED _far/_lod has to be staged in, and is removed after the bake.
+    See: docs/commentary/asset_convert_terrain.md#generated-far-nif-belong-to-the-lod-mod
+    """
+    from asset_convert.lod.lod_far_gen import (generate_missing_far_nifs,
+                                               has_authored_lod)
+    if not far_nif_dirs:
+        generate_missing_far_nifs(stats, output_dir / 'meshes',
+                                  referenced_models=referenced_models,
+                                  force_regen_generated=True,
+                                  tex_root=output_dir / 'textures')
+        return
+    by_dir = _far_owner_dirs(referenced_models, far_nif_dirs)
+    made = 0
+    for d, models in by_dir.items():
+        made += generate_missing_far_nifs(
+            stats, d / 'meshes', referenced_models=models,
+            force_regen_generated=True, tex_root=d / 'textures',
+            gen_meshes_dir=output_dir / 'meshes')
+        for model in models:
+            far_rel = far_nif_path(model, d / 'meshes')
+            if has_authored_lod(d / 'meshes', far_rel):
+                _import_master_mesh(far_rel, output_dir / 'meshes',
+                                    [d / 'meshes'])
+    if made:
+        print(f"  Derived {made} _far.nif mesh(es) into the LOD tree")
+
+
 # ---------------------------------------------------------------------------
 # 5. Top-level orchestration
 # ---------------------------------------------------------------------------
@@ -1313,45 +1364,7 @@ def generate_lod(esm_path: Path, output_dir: Path,
                   f"generating only this plugin's "
                   f"{len(referenced_models)}")
 
-    from asset_convert.lod.lod_far_gen import generate_missing_far_nifs
-    if far_nif_dirs:
-        # Derive each model's _far.nif in the plugin that ships its FULL model,
-        # then stage the result here for the bake. Routing per model rather than
-        # per run is the whole point: one worldspace draws objects from every
-        # selected plugin, so there is no single tree that owns them all, and
-        # generating from a tree that lacks the source mesh silently produces
-        # nothing at all.
-        #
-        # Later dirs win, matching load order: if two plugins ship the same
-        # path, the one that overrides it is the geometry actually placed.
-        by_dir: dict = {}
-        for model in referenced_models:
-            owner = None
-            for d in far_nif_dirs:
-                if _mesh_exists(model, Path(d) / 'meshes'):
-                    owner = Path(d)
-            if owner is not None:
-                by_dir.setdefault(owner, set()).add(model)
-
-        made = 0
-        for d, models in by_dir.items():
-            made += generate_missing_far_nifs(
-                stats, d / 'meshes', referenced_models=models,
-                force_regen_generated=True, tex_root=d / 'textures')
-            # Stage into the bake tree. _import_master_mesh records what it
-            # copies, so _drop_staged_master_meshes removes these afterwards
-            # and the LOD mod ships only tiles, never meshes.
-            for model in models:
-                _import_master_mesh(far_nif_path(model, d / 'meshes'),
-                                    output_dir / 'meshes', [d / 'meshes'])
-        if made:
-            print(f"  Derived {made} _far.nif mesh(es) into "
-                  f"{len(by_dir)} plugin tree(s)")
-    else:
-        generate_missing_far_nifs(stats, output_dir / 'meshes',
-                                  referenced_models=referenced_models,
-                                  force_regen_generated=True,
-                                  tex_root=output_dir / 'textures')
+    _derive_far_meshes(stats, output_dir, referenced_models, far_nif_dirs)
 
     # Write LOD input (all LOD-flagged objects) and run LODGenx64 once.
     # LODGen resolves every mesh under the single PathData root (output_dir),
@@ -1479,15 +1492,99 @@ def _bto_texture_refs(bto_dir: Path) -> set:
     return refs
 
 
+#: Suffixes a derived map carries, longest first so `_msn` beats `_n`.
+_MAP_SUFFIXES = ('_msn', '_em', '_sk', '_n', '_g', '_m', '_s', '_e', '_p')
+
+
+def _destem_lod_texture(rel: str) -> str:
+    """`roadwasteland01_lod_n.dds` -> `roadwasteland01_n.dds`, else ''.
+
+    See: docs/commentary/asset_convert_terrain.md#authored-lod-texture-names
+    """
+    head, _, name = rel.rpartition('\\')
+    if not name.lower().endswith('.dds'):
+        return ''
+    stem = name[:-4]
+    tail = ''
+    for suffix in _MAP_SUFFIXES:
+        if stem.lower().endswith(suffix):
+            tail = stem[-len(suffix):]
+            stem = stem[:-len(suffix)]
+            break
+    for marker in ('_lod', 'lod'):
+        if stem.lower().endswith(marker):
+            base = stem[:-len(marker)] + tail + '.dds'
+            return (head + '\\' + base) if head else base
+    return ''
+
+
+def _copy_lod_destem(rel: str, dest: Path, tex_root: Path,
+                     master_tex_roots=None) -> bool:
+    """Satisfy a missing `*_lod.dds` from the full-size texture it names.
+
+    See: docs/commentary/asset_convert_terrain.md#authored-lod-texture-names
+    """
+    base = _destem_lod_texture(rel)
+    if not base:
+        return False
+    for root in [tex_root] + [Path(m) for m in (master_tex_roots or [])]:
+        src = _win_join(root, base)
+        if not src.exists():
+            continue
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            return True
+        except OSError:
+            return False
+    return False
+
+
+def _find_lod_texture(name, tex_root, master_tex_roots):
+    """This plugin's copy of `name`, else a master's, else the local path.
+
+    A master's model baked into our LOD keeps its textures in the master's
+    output, and its real normal beats falling back to a flat one. Callers
+    test `.exists()` on the result.
+    """
+    p = _win_join(tex_root, name)
+    if p.exists():
+        return p
+    for mr in (master_tex_roots or []):
+        q = _win_join(mr, name)
+        if q.exists():
+            return q
+    return p
+
+
+def _synth_lod_normal(rel: str, dest: Path, tex_root: Path,
+                      master_tex_roots=None) -> bool:
+    """Write the `_n` an atlas diffuse needs: its source normal, else flat."""
+    stem = rel[:-len('_n.dds')]
+    base = stem[:-2] if stem.endswith('_a') else stem
+    src_normal = _find_lod_texture(f'{base}_n.dds', tex_root, master_tex_roots)
+    diffuse = _find_lod_texture(f'{stem}.dds', tex_root, master_tex_roots)
+    if not diffuse.exists():
+        diffuse = _find_lod_texture(f'{base}.dds', tex_root, master_tex_roots)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if src_normal.exists() and src_normal != dest:
+            shutil.copy2(src_normal, dest)
+        else:
+            _write_flat_normal_for(diffuse, dest)
+        return True
+    except Exception:
+        return False
+
+
 def _fill_missing_lod_textures(bto_dir: Path, tex_root: Path,
                                master_tex_roots=None):
     """Create the LOD textures the .bto tiles reference but that don't exist.
 
-    Mostly these are NORMAL maps: LODGen writes each atlas diffuse
-    (<name>_a.dds) but no matching atlas normal (<name>_a_n.dds), and object LOD
-    renders unlit against a missing _n.  Each one is written at the exact path
-    the .bto asks for, built from the atlas's source normal when there is one
-    (single-texture atlas) and otherwise a flat normal sized to the diffuse.
+    Mostly NORMAL maps (`_synth_lod_normal`): LODGen writes each atlas diffuse
+    but no matching atlas normal, and object LOD renders unlit against a
+    missing _n.  A missing DIFFUSE is an FO3/FNV `_lod` texture Bethesda
+    dropped from its BSAs, recovered by `_copy_lod_destem`.
 
     A plugin can also bake a MASTER's models into its own LOD (Morrowind_ob
     places Oblivion architecture in its worldspace), and those diffuse textures
@@ -1511,39 +1608,14 @@ def _fill_missing_lod_textures(bto_dir: Path, tex_root: Path,
     for rel in missing:
         dest = _win_join(tex_root, rel)
         if not rel.endswith('_n.dds'):
-            # Nothing to copy: a master-shipped path was filtered out above,
-            # so anything reaching here exists in no tree we know of.
-            unresolved.append(rel)
-            continue
-        stem = rel[:-len('_n.dds')]              # 'tes4\...\lcstone01_a'
-        # An atlas ('..._a') borrows the normal of the texture it was built from.
-        base = stem[:-2] if stem.endswith('_a') else stem
-
-        # Look in this plugin's textures first, then any master's — a master's
-        # model baked into our LOD keeps its textures in the master's output,
-        # and using its real normal beats falling back to a flat one.
-        def _find(name):
-            p = _win_join(tex_root, name)
-            if p.exists():
-                return p
-            for mr in (master_tex_roots or []):
-                q = _win_join(mr, name)
-                if q.exists():
-                    return q
-            return p          # non-existent local path (callers test .exists())
-
-        src_normal = _find(f'{base}_n.dds')
-        diffuse = _find(f'{stem}.dds')
-        if not diffuse.exists():
-            diffuse = _find(f'{base}.dds')
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if src_normal.exists() and src_normal != dest:
-                shutil.copy2(src_normal, dest)
+            if _copy_lod_destem(rel, dest, tex_root, master_tex_roots):
+                synth += 1
             else:
-                _write_flat_normal_for(diffuse, dest)
+                unresolved.append(rel)
+            continue
+        if _synth_lod_normal(rel, dest, tex_root, master_tex_roots):
             synth += 1
-        except Exception:
+        else:
             unresolved.append(rel)
 
     if synth:

@@ -44,7 +44,8 @@ import numpy as np
 
 from core.worker_budget import worker_count
 
-from asset_convert.game_paths import win_join
+from asset_convert.game_paths import (current_namespace,
+                                      set_namespace, win_join)
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 apply_patches()
 from pyffi.formats.nif import NifFormat
@@ -54,6 +55,21 @@ from asset_convert.lod.mesh_decimate import (compute_tangents,
                                              MAX_DEV_FRAC,
                                              TOPO_BOUNDARY_WEIGHT,
                                              WELD_EPS)
+
+
+# ---------------------------------------------------------------------------
+# Namespaced asset folders
+# ---------------------------------------------------------------------------
+
+def tree_model_prefix() -> str:
+    """Speedtree mesh folder under the ACTIVE game namespace."""
+    return current_namespace() + '\\speedtrees\\'
+
+
+def billboard_tex_dir() -> str:
+    """Billboard texture folder under the ACTIVE game namespace."""
+    return current_namespace() + '\\trees\\billboards'
+
 
 _SKYRIM_VER = 0x14020007
 _NIF_FLAGS  = 14
@@ -69,10 +85,6 @@ _NO_CAP = 1 << 30
 
 #: SF2 bit to clear when removing vertex colors.
 _SF2_VERTEX_COLORS = 0x20
-
-#: Trees get a crossed-quad billboard instead: decimating leaf cards shreds them.
-_TREE_MODEL_PREFIX = 'tes4\\speedtrees\\'
-BILLBOARD_TEX_DIR = 'tes4\\trees\\billboards'
 
 
 # ---------------------------------------------------------------------------
@@ -465,13 +477,13 @@ def generate_tree_billboard_far(dst_path: Path, obnd, model_rel: str,
     if _bare and _bare != stem:
         candidates.append(_bare)
     for _cand in candidates:
-        if win_join(tex_root, f'{BILLBOARD_TEX_DIR}\\{_cand}.dds').exists():
+        if win_join(tex_root, f'{billboard_tex_dir()}\\{_cand}.dds').exists():
             stem = _cand
             break
     else:
         return False
-    diffuse_rel = f'{BILLBOARD_TEX_DIR}\\{stem}.dds'
-    normal_rel = f'{BILLBOARD_TEX_DIR}\\{stem}_n.dds'
+    diffuse_rel = f'{billboard_tex_dir()}\\{stem}.dds'
+    normal_rel = f'{billboard_tex_dir()}\\{stem}_n.dds'
     normal_path = win_join(tex_root, normal_rel)
     if not normal_path.exists():
         try:
@@ -739,45 +751,27 @@ def is_tree_model(stat: dict) -> bool:
     rel = stat.get('model', '').lower().replace('/', '\\').lstrip('\\')
     if rel.startswith('meshes\\'):
         rel = rel[len('meshes\\'):]
-    return rel.startswith(_TREE_MODEL_PREFIX)
+    return rel.startswith(tree_model_prefix())
 
 
-def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
-                               referenced_models: 'set | None' = None,
-                               workers: int = None,
-                               force_regen_generated: bool = False,
-                               tex_root: 'Path | None' = None) -> int:
-    """Generate _far.nif files for all LOD-flagged stats that lack one.
+def has_authored_lod(src_meshes_dir, far_rel) -> bool:
+    """True when the source tree ships a hand-made _far/_lod here."""
+    authored = win_join(src_meshes_dir, far_rel)
+    return authored.exists() and not _is_generated(authored)
 
-    TREE-type stats get a crossed-quad billboard card (Oblivion's shipped
-    billboard render); everything else is QEM-decimated from the full mesh.
 
-    Args:
-        stats:                  {form_id: {flags, model, ...}} from lod_gen._parse_esm()
-        output_meshes_dir:      e.g. output/Oblivion.esm/meshes/
-        referenced_models:      If provided, only generate for models in this set.
-        workers:                Process count; defaults to cpu_count - 1.
-        force_regen_generated:  If True, regenerate files that were previously
-                                auto-generated (have a .nif.generated marker).
-                                Hand-crafted _far.nif files (no marker) are
-                                never overwritten.
-        tex_root:               textures/ root (for billboard lookup); defaults
-                                to <output_meshes_dir>/../textures.
+def _plan_far_tasks(stats, src_meshes_dir, gen_meshes_dir, referenced_models,
+                    force_regen_generated, tex_root):
+    """(_far_nif_worker task tuples, models seen) for one plugin tree.
 
-    Returns the number of _far.nif files successfully created.
+    Full models and AUTHORED _far.nif resolve against `src_meshes_dir`; the
+    file each task WRITES lands under `gen_meshes_dir`.
+    See: docs/commentary/asset_convert_terrain.md#generated-far-nif-belong-to-the-lod-mod
     """
     from asset_convert.lod.lod_gen import (FLAG_DISTANT_LOD, far_nif_path,
                                            LOD8_MIN_SIZE, obnd_max_dim)
-    import multiprocessing as mp
-
-    if workers is None:
-        workers = worker_count()
-    if tex_root is None:
-        tex_root = output_meshes_dir.parent / 'textures'
-
     tasks: List[tuple] = []
     seen: set = set()
-
     for stat in stats.values():
         if not (stat.get('flags', 0) & FLAG_DISTANT_LOD):
             continue
@@ -785,34 +779,64 @@ def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
         if not model or model in seen:
             continue
         seen.add(model)
-
         if referenced_models is not None and model not in referenced_models:
             continue
-
-        # Resolve to filesystem paths
         rel = model.lower().replace('/', '\\').lstrip('\\')
         if rel.startswith('meshes\\'):
             rel = rel[len('meshes\\'):]
-        src = win_join(output_meshes_dir, rel)
+        src = win_join(src_meshes_dir, rel)
 
         far_rel = far_nif_path(rel.replace('\\', '/'),
-                               output_meshes_dir).replace('/', '\\')
-        dst = win_join(output_meshes_dir, far_rel)
-
-        if dst.exists():
-            if not force_regen_generated:
-                continue  # skip — we have a _far.nif and aren't forcing regen
-            if not _is_generated(dst):
-                continue  # skip — hand-crafted, never overwrite
+                               src_meshes_dir).replace('/', '\\')
+        if has_authored_lod(src_meshes_dir, far_rel):
+            continue
+        dst = win_join(gen_meshes_dir, far_rel)
+        if dst.exists() and not force_regen_generated:
+            continue
 
         tree = is_tree_model(stat)
         if not src.exists() and not tree:
-            continue  # source doesn't exist yet
-
+            continue
         need8 = need16 = (not tree) and obnd_max_dim(stat) >= LOD8_MIN_SIZE
-
         tasks.append((src, dst, tree, stat.get('obnd'), rel, tex_root,
                       need8, need16))
+    return tasks, seen
+
+
+def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
+                               referenced_models: 'set | None' = None,
+                               workers: int = None,
+                               force_regen_generated: bool = False,
+                               tex_root: 'Path | None' = None,
+                               gen_meshes_dir: 'Path | None' = None) -> int:
+    """Generate _far.nif files for all LOD-flagged stats that lack one.
+
+    TREE-type stats get a crossed-quad billboard card; everything else is
+    QEM-decimated from the full mesh. `output_meshes_dir` is the SOURCE tree
+    (full models and authored _far.nif); `gen_meshes_dir` receives the
+    GENERATED ones and defaults to it. `tex_root` defaults to
+    <output_meshes_dir>/../textures. `force_regen_generated` rewrites files
+    carrying a .nif.generated marker; authored files are never overwritten.
+
+    Runs on multiprocessing.Pool for true CPU parallelism (PyFFI is GIL-bound),
+    each worker seeded with the parent's asset namespace.
+
+    See: docs/commentary/asset_convert_terrain.md#generated-far-nif-belong-to-the-lod-mod
+
+    Returns the number of _far.nif files successfully created.
+    """
+    import multiprocessing as mp
+
+    if workers is None:
+        workers = worker_count()
+    if tex_root is None:
+        tex_root = output_meshes_dir.parent / 'textures'
+    if gen_meshes_dir is None:
+        gen_meshes_dir = output_meshes_dir
+
+    tasks, seen = _plan_far_tasks(stats, output_meshes_dir, gen_meshes_dir,
+                                  referenced_models, force_regen_generated,
+                                  tex_root)
 
     if not tasks:
         print(f'  LOD: all {len(seen)} unique models already have _far.nif')
@@ -828,8 +852,8 @@ def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
             else:
                 failed += 1
     else:
-        # Use multiprocessing.Pool for true CPU parallelism (PyFFI is GIL-bound)
-        with mp.Pool(processes=workers) as pool:
+        with mp.Pool(processes=workers, initializer=set_namespace,
+                     initargs=(current_namespace(),)) as pool:
             for ok in pool.imap_unordered(_far_nif_worker, tasks, chunksize=8):
                 if ok:
                     success += 1
@@ -859,20 +883,20 @@ def _tier_path(far_path: Path, suffix: str) -> Path:
 
 
 def _render_missing_billboard(src: Path, model_rel: str, tex_root: Path) -> bool:
-    """Render `textures\\tes4\\trees\\billboards\\<stem>.dds` for a tree.
+    """Render the billboard texture for a tree that ships none.
 
     Oblivion ships these; plugins often do not, and a tree without one used to
     be decimated as full geometry.  Rendering it here keeps the billboard path
     whole, so no tree ever reaches the simplifier.  Written next to the shipped
-    ones so the normal lookup finds it on the very next call.
+    ones, lowercased like every lookup, so the next call finds it.
     """
     from asset_convert.lod.tree_billboard import (render_billboard, write_dds_rgba,
-                                 BILLBOARD_DIR)
+                                 billboard_dir)
     if not Path(src).exists():
         return False
     stem = os.path.splitext(os.path.basename(
-        str(model_rel).replace('\\', '/')))[0]
-    dst = win_join(tex_root, BILLBOARD_DIR + '\\' + stem + '.dds')
+        str(model_rel).replace('\\', '/')))[0].lower()
+    dst = win_join(tex_root, billboard_dir() + '\\' + stem + '.dds')
     if dst.exists():
         return True
     try:

@@ -33,10 +33,14 @@ from PIL import Image
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 apply_patches()
 from pyffi.formats.nif import NifFormat
-from asset_convert.game_paths import win_join
+from asset_convert.game_paths import current_namespace, win_join
 
 BS = chr(92)
-BILLBOARD_DIR = 'tes4' + BS + 'trees' + BS + 'billboards'
+
+
+def billboard_dir() -> str:
+    """Billboard folder under the ACTIVE game namespace."""
+    return current_namespace() + BS + 'trees' + BS + 'billboards'
 
 # Baked lighting.  The LOD card is drawn UNLIT in game, so all of a distant
 # tree's shading has to live in this texture — a flat sample reads as a

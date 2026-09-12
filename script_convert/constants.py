@@ -3,6 +3,8 @@
 import hashlib
 import re
 
+from asset_convert.game_paths import current_namespace
+
 # ===========================================================================
 # Constants
 # ===========================================================================
@@ -367,7 +369,29 @@ def music_cue_editor_id(plugin: str, source_rel: str) -> str:
     return 'MUSCue%s_%s' % (stem, tail)
 
 
-def papyrus_script_name(edid: str, prefix: str = 'TES4_') -> str:
+def script_prefix(suffix: str = '_') -> str:
+    """The generated-script name prefix for the ACTIVE game."""
+    return current_namespace().upper() + suffix
+
+
+def is_generated_script_type(ptype: str) -> bool:
+    """Whether `ptype` names a script class this pipeline generated.
+
+    See: docs/commentary/script_convert.md#generated-script-types
+    """
+    return bool(ptype) and ptype.startswith(script_prefix())
+
+
+def generated_script_stem(ptype: str) -> str:
+    """`ptype` with the generated-script prefix removed.
+
+    See: docs/commentary/script_convert.md#generated-script-types
+    """
+    return ptype[len(script_prefix()):] if is_generated_script_type(ptype) \
+        else ptype
+
+
+def papyrus_script_name(edid: str, prefix: str = None) -> str:
     """Return the Papyrus ScriptName for a TES4 script EditorID.
 
     MUST be the single source of truth: the same name is written as the .psc
@@ -379,7 +403,7 @@ def papyrus_script_name(edid: str, prefix: str = 'TES4_') -> str:
     which keeps them unique (several Oblivion scripts differ only in a suffix
     past the cut, e.g. TrigZoneCloseCurrentOblivionRdCitadel0{1..5}SCRIPT).
     """
-    name = prefix + sanitize_name(edid)
+    name = (prefix or script_prefix()) + sanitize_name(edid)
     if len(name) <= PAPYRUS_MAX_SCRIPT_NAME:
         return name
     digest = hashlib.md5(name.encode('utf-8')).hexdigest()[:4].upper()
@@ -508,7 +532,7 @@ def wants_placed_reference(ptype: str) -> bool:
     caller's record-type gate.
     """
     return (ptype in ('Actor', 'ObjectReference')
-            or ptype.startswith('TES4_'))
+            or is_generated_script_type(ptype))
 
 
 def _record_type_to_base_papyrus(rtype: str) -> str:

@@ -16,7 +16,7 @@ from asset_convert.nif.shaders import (ALPHA_BLEND_ENABLED, ALPHA_DST_ONE,
                                        ALPHA_DST_SHIFT, APPLY_HILIGHT2,
                                        DEFAULT_DIFFUSE_TEXTURE,
                                        DEFAULT_GLOSSINESS,
-                                       DEFAULT_NORMAL_TEXTURE,
+                                       default_normal_texture,
                                        LIGHTING_EMISSIVE_ONLY, SPEC_STRENGTH,
                                        apply_fx_soft_effect, apply_glow,
                                        apply_parallax,
@@ -224,7 +224,7 @@ def _normal_slot(diffuse, authored_normal, fix_textures, stats):
     if found is None:
         stats['spec_normal_defaulted'] = \
             stats.get('spec_normal_defaulted', 0) + 1
-        return DEFAULT_NORMAL_TEXTURE
+        return default_normal_texture()
     if found != base + '_n.dds':
         stats['spec_normal_from_base'] = \
             stats.get('spec_normal_from_base', 0) + 1

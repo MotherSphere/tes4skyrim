@@ -41,11 +41,9 @@ from core.subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
 from core.worker_budget import worker_count
 
 
-# Shared-folder resolution lives in output_layout -- see asset_pipeline. An
-# imported mod's plugins share one `sound/` payload but keep their own
-# voicemap/liptext files. Without an explicit `extract_dir` the export root is
-# assumed, which is where the registry lives for every caller that omits it.
-from output_layout import asset_root as _asset_root, plugin_out_root
+from output_layout import (asset_root as _asset_root, plugin_out_root,
+                           record_dir)
+from asset_convert.game_paths import namespace_for
 from asset_convert import paths
 
 _DEFAULT_EXPORT = paths.EXPORT
@@ -413,7 +411,8 @@ def convert_sounds(
         print(f'  No sound directory found at {snd_src}')
         return {'converted': 0, 'copied': 0, 'failed': 0, 'total': 0}
 
-    snd_dst = _out_root(output_dir, source_name, extract_dir) / 'sound' / 'tes4'
+    snd_dst = (_out_root(output_dir, source_name, extract_dir) / 'sound'
+               / namespace_for(record_dir(extract_dir, source_name)))
     ffmpeg    = find_ffmpeg(ffmpeg_path)
 
     # ── Voice files: reorganise into TES5 layout ────────────────────────────

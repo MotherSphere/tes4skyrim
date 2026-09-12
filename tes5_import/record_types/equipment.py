@@ -1,5 +1,6 @@
 """Equipment converters: WEAP, ARMO, CLOT, AMMO, BOOK, ENCH, SPEL, ALCH, INGR, SGST, APPA."""
 
+from asset_convert.game_paths import current_namespace
 import re
 import struct
 
@@ -786,7 +787,8 @@ def _fix_book_html(text: str) -> str:
     def _prefix_img(m):
         path = m.group(2).replace('\\', '/')
         if not path.lower().startswith('img://'):
-            path = 'img://textures/tes4/menus/' + path.lstrip('/')
+            path = ('img://textures/' + current_namespace()
+                    + '/menus/' + path.lstrip('/'))
         return f"<img src='{path}'"
     # Match opening quote, path, and consume the matching closing quote.
     text = re.sub(r'<IMG\s+src=(["\']?)([^"\'>\s]+)\1', _prefix_img, text, flags=re.IGNORECASE)

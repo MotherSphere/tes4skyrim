@@ -34,14 +34,16 @@ from __future__ import annotations
 
 import struct
 
+from asset_convert.game_paths import current_namespace
+
 from ..base.text_reader import get_float, get_formid, get_int, get_str
 from ..base.writer import (pack_obnd, pack_record, pack_string_subrecord,
                      pack_subrecord)
 
-# Relative path (under the output Data folder) of the generated mesh.  One
-# mesh serves every placement: the plane is built at its own origin and the
-# REFR supplies the height.
-LAVA_MESH_REL = r'tes4\water\lavasurface.nif'
+def lava_mesh_rel() -> str:
+    """The generated lava plane, under the ACTIVE game namespace."""
+    return current_namespace() + '\\water\\lavasurface.nif'
+
 
 # The worldspace default water height the WRLD converter writes (DNAM's second
 # float).  Exterior cells inherit it when they author no XCLW.
@@ -103,7 +105,7 @@ def build_lava_stat(stat_fid: int) -> bytes:
     subs = b''
     subs += pack_string_subrecord('EDID', 'TES4LavaSurface')
     subs += pack_obnd(-half, -half, 0, half, half, 0)
-    subs += pack_string_subrecord('MODL', LAVA_MESH_REL)
+    subs += pack_string_subrecord('MODL', lava_mesh_rel())
     # DNAM: Max Angle (30-degree default, unused for a flat plane) + a null
     # Directional Material.
     subs += pack_subrecord('DNAM', struct.pack('<fI', 0.0, 0))

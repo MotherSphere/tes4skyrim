@@ -30,6 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+from asset_convert.game_paths import namespace_for, set_namespace
 from tes5_import.base.text_reader import parse_export_file
 from script_convert import pipeline
 
@@ -85,31 +86,14 @@ def main(argv=None) -> int:
     export_dir = str(ROOT / 'export' / args.plugin)
     out = args.out or str(ROOT / 'temp' / 'subset_scripts' / args.plugin)
     os.makedirs(out, exist_ok=True)
+    set_namespace(namespace_for(export_dir))
 
     ctx = pipeline.build_script_context(export_dir, out)
     scpt_work, info_work, qust_work = (ctx['scpt_work'], ctx['info_work'],
                                        ctx['qust_work'])
 
-    want_scpt = {s.lower() for s in args.scpt}
-    want_info = {s.upper().zfill(8) for s in args.info}
-    want_qust = {s.lower() for s in args.qust}
-    if args.quest:
-        by_type = {}
-        for sig in ('DIAL', 'INFO', 'QUST', 'SCPT'):
-            p = os.path.join(export_dir, f'{sig}.txt')
-            by_type[sig] = parse_export_file(p) if os.path.exists(p) else []
-        s, i, q = _quest_records(export_dir, args.quest, by_type)
-        want_scpt |= {x.lower() for x in s}
-        want_info |= {x.upper() for x in i}
-        want_qust |= {x.lower() for x in q}
-        print(f'  quest {args.quest}: {len(s)} scripts, {len(i)} INFOs')
-
-    scpt = [r for r in scpt_work if (r.get('EditorID') or '').lower() in want_scpt]
-    info = [r for r in info_work if (r.get('FormID') or '').upper() in want_info]
-    qust = [r for r in qust_work if (r.get('EditorID') or '').lower() in want_qust]
-    missing = want_scpt - {(r.get('EditorID') or '').lower() for r in scpt}
-    if missing:
-        print(f'  ** SCPT not found / no body: {sorted(missing)}')
+    scpt, info, qust = _select(args, export_dir, scpt_work, info_work,
+                               qust_work)
 
     pipeline._script_worker_init(*ctx['initargs'])
     stats = pipeline._new_stats()

@@ -26,6 +26,7 @@ without re-reading the (multi-GB) output tree:
 Anything under textures/ that no reference names is left out of the archive.
 """
 
+from asset_convert.game_paths import current_namespace
 import re
 from pathlib import Path
 from output_layout import assets_for
@@ -117,7 +118,12 @@ _MAP_SUFFIXES = ('_msn', '_em', '_sk', '_n', '_g', '_m', '_s', '_e', '_p')
 
 
 def refs_from_records(export_dir) -> set:
-    """Texture paths named by the plugin's records (icons, LTEX, ...)."""
+    """Texture paths named by the plugin's records (icons, LTEX, ...).
+
+    Records name the path as the source game wrote it; the importer prefixes
+    it with the game namespace on the way into the plugin, so both spellings
+    are kept or the shipped file is pruned as unreferenced.
+    """
     refs = set()
     for txt in Path(export_dir).glob('*.txt'):
         # The filename IS the record signature, which is the only way to know
@@ -138,35 +144,25 @@ def refs_from_records(export_dir) -> set:
                 continue
             for variant in ({p, prefix + p} if prefix else {p}):
                 refs.add(variant)
-                # records name the path as Oblivion wrote it; the importer
-                # prefixes it with tes4\ on the way into the plugin.
-                refs.add('tes4/' + variant)
+                refs.add(current_namespace() + '/' + variant)
     return refs
 
 
 def refs_from_tree_billboards(export_dir) -> set:
     """Billboard renders, which no texture path in the plugin ever names.
 
-    A TREE record points at a SpeedTree model (MODL names a `.spt`) and
-    the distant-LOD card for it is Oblivion's shipped render of that same tree,
-    found by NAME: `<billboard dir>/<model stem>.dds`. Nothing writes that path
-    down -- not the record, not a NIF -- so neither `refs_from_records` (which
-    matches `.dds` literals) nor the mesh manifest (billboards belong to no
-    mesh) can see it, and the prune dropped 43 of Oblivion.esm's 245 billboards
-    from the archive. The loose output/ copy survives, so this only ever showed
-    up as missing distant trees in a PACKED build.
-
-    The stem comes from the record's own MODL, and the folder from the
-    generator that consumes these files (`lod_far_gen._BILLBOARD_TEX_DIR`), so
-    the pair stays in step with whatever actually reads them.
+    The stem comes from the TREE record's own MODL and the folder from the
+    generator that consumes these files, so the pair cannot drift. The
+    leading-digit variant is kept too, matching the generator's own retry.
+    See: docs/commentary/asset_convert_texture.md#tree-billboards-are-named-never-written-down
     """
-    from asset_convert.lod.lod_far_gen import BILLBOARD_TEX_DIR
+    from asset_convert.lod.lod_far_gen import billboard_tex_dir
 
     tree_txt = Path(export_dir) / 'TREE.txt'
     if not tree_txt.is_file():
         return set()
 
-    bb_dir = BILLBOARD_TEX_DIR.replace('\\', '/').strip('/').lower()
+    bb_dir = billboard_tex_dir().replace('\\', '/').strip('/').lower()
     refs = set()
     for ln in tree_txt.read_text(encoding='utf-8', errors='replace').splitlines():
         ln = ln.strip()
@@ -177,8 +173,12 @@ def refs_from_tree_billboards(export_dir) -> set:
         raw = ln.split('=', 1)[1].strip().lower().replace('\\', '/')
         stem = raw.rsplit('/', 1)[-1]
         stem = stem.rsplit('.', 1)[0]
-        if stem:
-            refs.add(f'{bb_dir}/{stem}.dds')
+        if not stem:
+            continue
+        refs.add(f'{bb_dir}/{stem}.dds')
+        bare = stem.lstrip('0123456789')
+        if bare and bare != stem:
+            refs.add(f'{bb_dir}/{bare}.dds')
     return refs
 
 
@@ -276,8 +276,36 @@ def build_refs(plugin_dir, export_dir, mesh_texture_refs=None) -> set:
             if p.suffix.lower() in _LATE_ASSET_SUFFIXES]
     refs |= refs_from_assets(late)
 
+    refs |= _refs_from_dependents(export_dir)
     refs |= _companions(refs)
     refs |= _shared_maps_on_disk(plugin_dir, refs)
+    return refs
+
+
+def _dependent_export_dirs(export_dir) -> list:
+    """Sibling export dirs whose _HEADER.txt declares THIS plugin a master."""
+    from asset_convert.lod.terrain_lod import master_names
+    export_dir = Path(export_dir)
+    root = export_dir.parent
+    me = export_dir.name.lower()
+    out = []
+    for d in (sorted(root.iterdir()) if root.is_dir() else ()):
+        if not d.is_dir() or d.name.lower() == me:
+            continue
+        if any(m.lower() == me for m in master_names(d)):
+            out.append(d)
+    return out
+
+
+def _refs_from_dependents(export_dir) -> set:
+    """Textures a DEPENDENT plugin needs that only this master ships.
+
+    See: docs/commentary/asset_convert_texture.md#dependents-borrow-a-masters-textures
+    """
+    refs = set()
+    for d in _dependent_export_dirs(export_dir):
+        refs |= {_norm(r) for r in read_manifest(assets_for(d))}
+    refs.discard('')
     return refs
 
 

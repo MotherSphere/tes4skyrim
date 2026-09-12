@@ -17,6 +17,7 @@ cache stages (gun_graph_falloutnv).
 See: docs/commentary/asset_convert_falloutnv.md#gun-animations
 """
 
+from asset_convert.game_paths import current_namespace
 import json
 import os
 import re
@@ -63,10 +64,6 @@ _ACTION = re.compile(
 
 GUN_MANIFEST = 'guns_manifest.json'
 
-#: Where the clips live, relative to the PROJECT folder (clip generators).
-ANIM_PREFIX = 'Animations\\TES4Guns\\'
-#: The same folder as the animationsetdata CRC list hashes it.
-ANIM_DIR = 'meshes\\actors\\character\\animations\\tes4guns'
 #: (source clip folder under characters, project subfolder, manifest key).
 VIEWS = (('_male', '', 'clips'), ('_1stperson', '_1stperson', 'first_person'))
 
@@ -88,6 +85,11 @@ FIRST_PERSON_ANCHOR = ('Bip01 Looking', 'NPC LookNode [Look]')
 # ---------------------------------------------------------------------------
 # Classification and selection
 # ---------------------------------------------------------------------------
+
+def anim_prefix() -> str:
+    """Clip folder relative to the PROJECT folder (clip generators)."""
+    return 'Animations\\' + current_namespace().upper() + 'Guns\\'
+
 
 def classify_stem(stem: str) -> dict:
     """Decompose a clip stem, or None when it is not a gun clip.
@@ -311,7 +313,7 @@ def convert_one(kf_path: str, out_hkx: str, skeleton_nif: str,
     stem = stem or os.path.splitext(os.path.basename(kf_path))[0].lower()
     write_clip_hkx(clip, rig['dst_bones'], out_hkx, annotations)
     entry = {
-        'stem': stem, 'anim': f'{ANIM_PREFIX}{stem}.hkx',
+        'stem': stem, 'anim': f'{anim_prefix()}{stem}.hkx',
         'duration': float(clip.duration), 'frames': len(clip.times),
         'tracks': len(clip.tracks), 'sounds': events['sounds'],
         'feet': events['feet'], 'hits': events['hits'],
@@ -344,10 +346,11 @@ def gun_layout(out_meshes_dir: str, sub: str = '') -> dict:
     names resolve relative to its own folder.
     See: docs/commentary/asset_convert_falloutnv.md#first-person-rig
     """
+    leaf = current_namespace() + 'guns'
     project = ['actors', 'character'] + ([sub] if sub else [])
     return {'dir': os.path.join(out_meshes_dir, *project, 'animations',
-                                'tes4guns'),
-            'anim_dir': '\\'.join(['meshes', *project, 'animations', 'tes4guns'])}
+                                leaf),
+            'anim_dir': '\\'.join(['meshes', *project, 'animations', leaf])}
 
 
 def read_manifest(out_meshes_dir: str) -> dict:

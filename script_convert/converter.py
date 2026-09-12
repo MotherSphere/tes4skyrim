@@ -10,7 +10,7 @@ from script_convert.constants import (
     KNOWN_GLOBALS, LOOSE_OPS, PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS,
     PLAYER_ALIAS_EXTENDS, RETURN_TYPES, SELF_NAMES, TYPE_MAP, _REF_TYPES,
     _canonical_global, digit_stripped_formid, _record_type_to_base_papyrus,
-    record_type_to_papyrus, safe_property_name, papyrus_script_name,
+    generated_script_stem, is_generated_script_type, record_type_to_papyrus, safe_property_name, papyrus_script_name,
     resolve_property_formid,
     script_type_may_override
 )
@@ -268,24 +268,17 @@ class ScriptConverter:
                         via_record: bool = True) -> list:
         """Converted scripts `ref_name` may name, lowercase.
 
-        Two resolution routes, written out inline at three call sites: the
-        property's declared type, and EditorID -> SCRI -> script EditorID for a
-        name bound to a record rather than held in a property.  The flags say
-        which routes a caller trusts, because they did not agree:
-
-        `converted_only` keeps only a `TES4_<script>` property type.  Off, a
-        plain `Actor`/`Quest` type is also tried as a script name -- which only
-        `_is_ref_as_int_crossscript` did.
-
-        `via_record` enables the EditorID route, which
-        `_is_ref_typed_access` did not use (it has `is_remote_ref_var` for it).
+        `converted_only` keeps only a generated-script property type; off, a
+        plain `Actor`/`Quest` type is tried as a script name too.  `via_record`
+        enables the EditorID -> SCRI -> script EditorID route.
+        See: docs/commentary/script_convert.md#stem-a-script-type-via-script-edid-for
         """
         if not self.xref:
             return []
         out = []
         ptype = self._property_type_ci(ref_name)
-        if ptype.startswith('TES4_'):
-            out.append(ptype[5:].lower())
+        if is_generated_script_type(ptype):
+            out.append(self._script_edid_for(ptype))
         elif ptype and not converted_only:
             out.append(ptype.lower())
         if not via_record:
@@ -932,7 +925,7 @@ class ScriptConverter:
             # it casts at the assignment rather than being retyped, which the
             # cross-script variable reads through it still need.
             if want == 'Actor' and (got == 'ObjectReference'
-                                    or got.startswith('TES4_')):
+                                    or is_generated_script_type(got)):
                 return f'{target} = {self._cast(value, "Actor")}'
         return f'{target} = {value}'
 
@@ -1072,15 +1065,16 @@ class ScriptConverter:
         """Type of `Var` in `Owner.Var`, resolved on the script Owner is typed as.
 
         TES4 let one script read another's variables directly.  The owner is a
-        property typed `TES4_<script>`, so the remote script's variable table
-        answers what the member is -- three sites resolved this identically by
-        hand.
+        property typed as a generated script class, so the remote script's
+        variable table answers what the member is -- three sites resolved this
+        identically by hand.
+        See: docs/commentary/script_convert.md#generated-script-types
         """
         if '.' not in dotted or not self.xref:
             return ''
         owner, _, member = dotted.partition('.')
         owner_type = self.type_of(owner.strip(), locals_first=False)
-        if not owner_type.startswith('TES4_'):
+        if not is_generated_script_type(owner_type):
             return ''
         script = self._script_edid_for(owner_type)
         member_low = member.lower()
@@ -1093,7 +1087,7 @@ class ScriptConverter:
         return self.xref.script_all_vars.get(script, {}).get(member_low, '')
 
     def _script_edid_for(self, owner_type: str) -> str:
-        """Source script EditorID behind a `TES4_<script>` property type.
+        """Source script EditorID behind a generated-script property type.
 
         Papyrus caps a ScriptName at 38 characters, so a long EditorID arrives
         truncated and never matches `script_all_vars`.  The reverse map is
@@ -1101,7 +1095,7 @@ class ScriptConverter:
         case-sensitive, so a lowercased key produces a different suffix.
         See: docs/commentary/script_convert.md#truncated-script-names
         """
-        stem = owner_type[5:].lower()
+        stem = generated_script_stem(owner_type).lower()
         if stem in self.xref.script_all_vars:
             return stem
         if self._truncated_scripts is None:
@@ -2117,7 +2111,7 @@ class ScriptConverter:
                     low_canon = canon.lower()
                     if self.sc.var_types.get(low_canon) == 'ObjectReference':
                         self.sc.var_types[low_canon] = 'Actor'
-                elif cur.startswith('TES4_'):
+                elif is_generated_script_type(cur):
                     # The property is typed as the SCRIPT attached to the record
                     # it names (_add_scro_ref prefers that so cross-script
                     # variable reads work).  That type is not an Actor, so an
@@ -2321,8 +2315,8 @@ class ScriptConverter:
             script_low = owner_low
         if not script_low:
             ptype = self._property_type_ci(owner.strip())
-            if ptype.startswith('TES4_'):
-                script_low = ptype[5:].lower()
+            if is_generated_script_type(ptype):
+                script_low = self._script_edid_for(ptype)
         if not script_low:
             return ''
         known = self.xref.script_all_vars.get(script_low)

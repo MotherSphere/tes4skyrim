@@ -35,6 +35,7 @@ import sys
 import time
 
 from core.plugin_masters import masters_from_export_header
+from asset_convert.game_paths import namespace_for, set_namespace
 from .registry import IMPORT_DISPATCH, SKIP_TYPES
 from .overrides.nested import (DELETED_FLAG as OVERRIDE_DELETED_FLAG,
                         OverrideContext, detect_injected_records)
@@ -964,17 +965,18 @@ def _reserve_formid_space(all_records: list, num_tes4_masters: int,
 
 def _open_import_run(masters, skip_types, output_path: str,
                      export_dir: str) -> tuple:
-    """Resolve the run's masters, skip set and output paths.
+    """Resolve the run's masters, skip set, namespace and output paths.
 
     A per-plugin output dir is named after the plugin (`output/Oblivion.esm/`
     is a FOLDER), so given the folder we write `<folder>/<folder-name>` inside
-    it rather than failing to overwrite a directory with a file at the end of
-    the run.  Stale stage artifacts fail here, not fifteen pre-scans in.
+    it.  Stale stage artifacts fail here, not fifteen pre-scans in.
 
     Returns (masters, all_skip, output_path, plugin_out_dir).
 
     See: docs/commentary/tes5_import_pipeline.md#reserved-ids-and-preflight
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
     """
+    set_namespace(namespace_for(export_dir))
     if masters is None:
         masters = ['Skyrim.esm']
     if skip_types is None:

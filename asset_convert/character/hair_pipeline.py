@@ -43,6 +43,7 @@ FORMID CONTRACT
     is FormID drift.
 """
 
+from asset_convert.game_paths import current_namespace
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -63,11 +64,6 @@ _WORKERS = worker_count()
 #
 # 🛑 CHANGING THIS RENUMBERS EVERY NON-ZERO HAIR VARIANT (FormID drift).
 LENGTH_BUCKETS = 8
-
-# Oblivion hair lives here; converted output is namespaced under tes4\ like
-# every other converted mesh so it can never collide with a vanilla path.
-OUT_REL_DIR = os.path.join('tes4', 'characters', 'hair')
-
 
 def quantize_length(value: float) -> int:
     """Authored LNAM float -> bucket index in [0, LENGTH_BUCKETS].
@@ -137,6 +133,11 @@ def variant_edid(edid: str, bucket: int, female: bool = False,
 # ---------------------------------------------------------------------------
 # Geometry baking
 # ---------------------------------------------------------------------------
+
+def out_rel_dir() -> str:
+    """Hair output folder, under the ACTIVE game namespace."""
+    return os.path.join(current_namespace(), 'characters', 'hair')
+
 
 def bake_hair_variant(nif_bytes: bytes, tri_bytes, weight: float,
                       female: bool = False, race=None, group=None):
@@ -681,7 +682,109 @@ def _bake_one(job):
     if baked_tri:
         with open(os.path.join(out_dir, out_stem + '.tri'), 'wb') as fh:
             fh.write(baked_tri)
-    return out_stem, True, tinted, None
+    for stem in dict.fromkeys(out_stems[1:]):
+        if stem == out_stem:
+            continue
+        shutil.copyfile(dst_nif, os.path.join(out_dir, stem + '.nif'))
+        if baked_tri:
+            shutil.copyfile(dst_tri, os.path.join(out_dir, stem + '.tri'))
+    n = len(out_stems)
+    return out_stem, n, tinted * n, None
+
+
+def _job_cost(src_nif) -> int:
+    """Source size, a free monotone proxy for a mesh's bake cost."""
+    try:
+        return os.path.getsize(src_nif)
+    except OSError:
+        return 0
+
+
+def _group_plan(edid: str) -> list:
+    """The (fit group, name suffix) pairs one hair record bakes for.
+
+    A beast-race pack fits its own head; a race-NAMED hair bakes one mesh
+    for its group, keeping the bare stem because its RNAM already restricts
+    the races; generic hair bakes one mesh per race group.
+    """
+    if _fit_race(edid) is not None:
+        return [(None, None)]
+    lock = fit_group_lock(edid)
+    if lock is not None:
+        return [(None if lock == 'humans' else lock, None)]
+    return [(None, None), ('elves', 'elves'), ('orc', 'orc')]
+
+
+def _record_variants(entry, rel, src_nif, src_tri, out_dir, shared, order,
+                     morphed):
+    """Fold one record's variants into `shared`/`order`; returns their count.
+
+    A variant whose bake inputs match an earlier one only adds its NAME to
+    that bake.  `morphed` says whether the .tri morph can reach this mesh;
+    `weight` enters the bake identity only when it can, so a plugin whose
+    hair ships no usable .tri bakes once for all its length buckets.
+    """
+    stem = os.path.splitext(os.path.basename(rel))[0]
+    race = _fit_race(entry['edid'])
+    n = 0
+    for bucket, female, (group, name_grp) in [
+            (b, f, g) for b in sorted(entry['buckets'])
+            for f in entry.get('genders', (False, True))
+            for g in _group_plan(entry['edid'])]:
+        n += 1
+        weight = bucket_weight(bucket) if morphed else 0.0
+        key = (rel, weight, female, race, group)
+        out_stem = variant_stem(stem, bucket, female, name_grp)
+        if key in shared:
+            shared[key].append(out_stem)
+            continue
+        shared[key] = [out_stem]
+        order.append((key, rel, src_nif, src_tri, weight, female, race,
+                      group, out_dir))
+    return n
+
+
+def _plan_jobs(plan, src_root, src_tex_root, out_root, stats,
+               verbose: bool) -> list:
+    """The bakes this plugin needs, each carrying every name that shares it.
+
+    One bake per distinct set of bake inputs rather than one per output
+    name, ordered LONGEST FIRST so a slow mesh never starts with nothing
+    left to overlap it.  `stats` gains hairs/variants/missing in place.
+
+    See: docs/commentary/asset_convert_armor.md#hair-bake-sharing
+    """
+    shared: dict = {}
+    order: list = []
+    morphed_by_mesh: dict = {}
+    out_dir = os.path.join(out_root, *out_rel_dir().split(os.sep))
+    for fid in sorted(plan):
+        entry = plan[fid]
+        if not entry['model']:
+            continue
+        rel = _norm_model(entry['model'])
+        src_nif = os.path.join(src_root, *rel.split('/'))
+        if not os.path.isfile(src_nif):
+            stats['missing'] += 1
+            if verbose:
+                print('    hair: missing source mesh %s' % rel)
+            continue
+        stats['hairs'] += 1
+        os.makedirs(out_dir, exist_ok=True)
+        src_tri = os.path.splitext(src_nif)[0] + '.tri'
+        if not os.path.isfile(src_tri):
+            src_tri = None
+        if rel not in morphed_by_mesh:
+            morphed_by_mesh[rel] = morph_applies(src_nif, src_tri)
+        stats['variants'] += _record_variants(
+            entry, rel, src_nif, src_tri, out_dir, shared, order,
+            morphed_by_mesh[rel])
+
+    order.sort(key=lambda item: _job_cost(item[2]), reverse=True)
+    return [(rel, src_nif, src_tri, weight, female, race, group,
+             shared[key], out_dir, src_root, src_tex_root)
+            for (key, rel, src_nif, src_tri, weight, female, race, group,
+                 out_dir) in order]
 
 
 def run(export_dir, out_meshes_dir, *, verbose: bool = True) -> dict:
@@ -709,56 +812,7 @@ def run(export_dir, out_meshes_dir, *, verbose: bool = True) -> dict:
     if not plan:
         return stats
 
-    # Build every variant's job first, then bake them in a process pool:
-    # each variant reads immutable source bytes and writes one uniquely
-    # named output pair, so they are fully independent.
-    jobs = []
-    for fid in sorted(plan):
-        entry = plan[fid]
-        model = entry['model']
-        if not model:
-            continue
-        rel = _norm_model(model)
-        src_nif = os.path.join(src_root, *rel.split('/'))
-        if not os.path.isfile(src_nif):
-            stats['missing'] += 1
-            if verbose:
-                print('    hair: missing source mesh %s' % rel)
-            continue
-
-        stats['hairs'] += 1
-        stem = os.path.splitext(os.path.basename(rel))[0]
-        src_tri = os.path.splitext(src_nif)[0] + '.tri'
-        if not os.path.isfile(src_tri):
-            src_tri = None
-
-        out_dir = os.path.join(out_root, *OUT_REL_DIR.split(os.sep))
-        os.makedirs(out_dir, exist_ok=True)
-
-        race = _fit_race(entry['edid'])
-        if race is not None:
-            group_plan = [(None, None)]          # beast pack: its own head
-        else:
-            lock = fit_group_lock(entry['edid'])
-            if lock is not None:
-                # race-named hair: ONE mesh fitted to its group's head; the
-                # bare stem is kept (its RNAM already restricts the races)
-                group_plan = [(None if lock == 'humans' else lock, None)]
-            else:
-                # generic hair: one mesh per race group
-                group_plan = [(None, None), ('elves', 'elves'),
-                              ('orc', 'orc')]
-
-        for bucket, female, (group, name_grp) in [
-                (b, f, g) for b in sorted(entry['buckets'])
-                for f in entry.get('genders', (False, True))
-                for g in group_plan]:
-            stats['variants'] += 1
-            jobs.append((rel, src_nif, src_tri, bucket_weight(bucket),
-                         female, race, group,
-                         variant_stem(stem, bucket, female, name_grp),
-                         out_dir, src_root, src_tex_root))
-
+    jobs = _plan_jobs(plan, src_root, src_tex_root, out_root, stats, verbose)
     if not jobs:
         return stats
 
@@ -832,8 +886,9 @@ def resolve_hair_texture(rel: str, textures_root):
     norm = rel.replace(_BS, '/').lower().lstrip('/')
     if norm.startswith('textures/'):
         norm = norm[len('textures/'):]
-    if norm.startswith('tes4/'):
-        norm = norm[len('tes4/'):]
+    ns = current_namespace() + '/'
+    if norm.startswith(ns):
+        norm = norm[len(ns):]
 
     if textures_root and os.path.isfile(
             os.path.join(str(textures_root), *norm.split('/'))):
@@ -849,7 +904,7 @@ def resolve_hair_texture(rel: str, textures_root):
     if textures_root and not os.path.isfile(
             os.path.join(str(textures_root), *fixed.split('/'))):
         return None                      # the repair target is missing too
-    return 'tes4' + _BS + fixed.replace('/', _BS)
+    return current_namespace() + _BS + fixed.replace('/', _BS)
 
 
 # Vanilla hair specular masks (the normal map's alpha) average mean-alpha
@@ -908,7 +963,7 @@ def _fix_hair_textures(data, textures_root):
     if not diffuse_rel or not textures_root:
         return None, _SPEC_STRENGTH_BASE
     norm = diffuse_rel.replace(_BS, '/').lower().lstrip('/')
-    for prefix in ('textures/', 'tes4/'):
+    for prefix in ('textures/', current_namespace() + '/'):
         if norm.startswith(prefix):
             norm = norm[len(prefix):]
     path = os.path.join(str(textures_root), *norm.split('/'))
@@ -963,8 +1018,9 @@ def output_model_path(model: str, bucket: int, female: bool = False,
     disagree about where a variant lives.
     """
     stem = os.path.splitext(os.path.basename(_norm_model(model)))[0]
-    return '%s\\%s.nif' % (OUT_REL_DIR.replace(os.sep, '\\').replace('tes4\\', '', 1),
-                           variant_stem(stem, bucket, female, group))
+    rel = out_rel_dir().replace(os.sep, '\\')
+    rel = rel.split('\\', 1)[1]
+    return '%s\\%s.nif' % (rel, variant_stem(stem, bucket, female, group))
 
 
 def output_tri_path(model: str, bucket: int, female: bool = False,

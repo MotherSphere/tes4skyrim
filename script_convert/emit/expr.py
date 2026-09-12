@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from script_convert.constants import (
     BASE_FORM_TYPES, EVENT_REF_PARAMS, MISMATCH_TYPES, OP_MAP,
-    PAPYRUS_BOOL_FUNCTIONS, SELF_NAMES
+    PAPYRUS_BOOL_FUNCTIONS, SELF_NAMES, is_generated_script_type
 )
 from script_convert.command_rows import PAPYRUS_VALUE_TYPES
 from script_convert.emit.commands import (
@@ -338,7 +338,7 @@ def _form_typed(conv, node: N.Expr) -> bool:
         # global read (`GameHour < 19`) look like a form-vs-number pun and
         # replaced the comparison with a constant.
         t = conv._base_record_type(node.name)
-    return t in MISMATCH_TYPES or t.startswith('TES4_')
+    return t in MISMATCH_TYPES or is_generated_script_type(t)
 
 
 def _is_number(node: N.Expr) -> bool:
@@ -405,12 +405,13 @@ def _self_cast(conv, a, b, node, extends):
     if not isinstance(base, N.Ident):
         return None
     otype = conv.type_of(base.name, locals_first=False)
-    if otype.startswith('TES4_') and not isinstance(b, N.Member) \
+    if is_generated_script_type(otype) \
+            and not isinstance(b, N.Member) \
             and conv._self_reference(extends) == 'Self':
         return ('(Self as ObjectReference)',
                 f'({emit(conv, b, extends)} as ObjectReference)')
     if otype != 'Actor' and not (isinstance(b, N.Member)
-                                 and otype.startswith('TES4_')):
+                                 and is_generated_script_type(otype)):
         return None
     return '(Self as Actor)', emit(conv, b, extends)
 

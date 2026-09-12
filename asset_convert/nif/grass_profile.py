@@ -46,6 +46,7 @@ CLI:
     # e.g. python -m asset_convert.nif.grass_profile export/Oblivion.esm \
     #          output/Oblivion.esm/meshes
 """
+from asset_convert.game_paths import current_namespace
 import shutil
 import struct
 import sys
@@ -83,21 +84,12 @@ GRASS_MAX_ALPHA_THRESHOLD = 100
 def grass_model_dest(model_path):
     """Map a TES4 GRAS Model.MODL path to its Skyrim location.
 
-    Every working GRAS record on record (vanilla, USSEP, BSHeartland,
-    Skyrim Extended Cut, Legacy Orsinium — 45/45 surveyed paths) keeps its
-    model under ``meshes\\landscape\\grass\\``; nothing outside it is known
-    to work.  Basenames are unique across all 97 TES4 grass models, so the
-    tree is flattened with a ``tes4_`` prefix.
+    Flattened into the one shared grass folder under a ``<game>_`` prefix,
+    backslash-separated because convert_GRAS writes this value verbatim.
+    See: docs/commentary/asset_convert_terrain.md#grass-conversion-record-invariants-shader
     """
     base = model_path.replace('/', '\\').rsplit('\\', 1)[-1].lower()
-    # Backslash, not forward slash: this return value is ALSO written
-    # verbatim as the GRAS record's own MODL subrecord (see
-    # tes5_import/record_types/items.py convert_GRAS) -- that is the TES5
-    # binary format's own path convention, independent of the host OS, and
-    # must stay backslash-separated regardless of platform. Filesystem
-    # callers (grass_profile.run) are responsible for splitting it into real
-    # path components themselves.
-    return 'landscape\\grass\\tes4_' + base
+    return 'landscape\\grass\\' + current_namespace() + '_' + base
 
 
 def load_grass_model_paths(export_dir, _seen=None):
@@ -289,18 +281,17 @@ def run(export_dir, output_meshes_root):
     """Profile + place every GRAS model NIF.
 
     output_meshes_root is the plugin meshes root (e.g.
-    output/Oblivion.esm/meshes): converted sources live under its tes4/
+    output/Oblivion.esm/meshes): converted sources live under its namespace
     subtree, and profiled COPIES are placed at meshes\\landscape\\grass\\
     per grass_model_dest() (sources stay put — FLOR/STAT records may share
-    them).  Returns (processed, modified, missing) counts.
+    them).  Each `rel` is backslash-form, so `win_join` splits it explicitly.
+    Returns (processed, modified, missing) counts.
     """
     output_meshes_root = Path(output_meshes_root)
     paths = load_grass_model_paths(export_dir)
     processed = modified = missing = 0
     for rel in sorted(paths):
-        # rel is backslash-form (see load_grass_model_paths), so it needs an
-        # explicit split -- see asset_convert/game_paths.py.
-        nif = win_join(output_meshes_root / 'tes4', rel)
+        nif = win_join(output_meshes_root / current_namespace(), rel)
         if not nif.exists():
             missing += 1
             continue

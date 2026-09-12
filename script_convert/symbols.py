@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 from script_convert.constants import (
     AXIS_COMMANDS, KNOWN_GLOBALS, NUMERIC_RANK, RETURN_TYPES,
-    _BASE_OBJECT_PAPYRUS,
+    _BASE_OBJECT_PAPYRUS, is_generated_script_type,
     _FORM_RETURNING,
 )
 from script_convert.command_rows import (
@@ -283,7 +283,7 @@ def _classify_assignment(usage, value, lookup):
         # Only a type Papyrus REFUSES to store in an ObjectReference forces
         # the widening; a ref-shaped or script-typed value is already fine.
         if (vtype not in ('ObjectReference', 'Actor', 'Form')
-                and not vtype.startswith('TES4_')
+                and not is_generated_script_type(vtype)
                 and vtype not in ('Int', 'Float', 'Bool', 'String')):
             usage.form_type = 'Form'
     usage.ref_assign = True

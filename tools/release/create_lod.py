@@ -104,6 +104,90 @@ def _plan_jobs(wanted, owners, plugins, touched, out_root, export_root,
     return jobs
 
 
+def _use_owner_namespace(export_root: str, owner: str) -> None:
+    """Install `owner`'s asset namespace for the job about to bake."""
+    from asset_convert.game_paths import namespace_for, set_namespace
+    from output_layout import record_dir
+    set_namespace(namespace_for(record_dir(export_root, owner)))
+
+
+def _clear_stale_tiles(lod_dir, edid: str) -> int:
+    """Delete this worldspace's tiles from a previous run.
+
+    The bake writes only the tiles it produces THIS time, so a tile an earlier
+    run emitted -- at coordinates this selection no longer covers, or from a
+    plugin since deselected -- would otherwise survive as an orphan and still
+    ship. Scoped to this worldspace's own tile names, so a run covering several
+    never deletes a sibling's fresh output and the shared, coordinate-free
+    object .nifs are untouched.
+    """
+    stale = 0
+    for sub in ("meshes/terrain", "textures/terrain"):
+        d = lod_dir / sub / edid
+        if not d.is_dir():
+            continue
+        for f in d.rglob(f"{edid}.*"):
+            if f.is_file():
+                f.unlink()
+                stale += 1
+    return stale
+
+
+def _bake_worldspace(job, ctx) -> bool:
+    """Generate one worldspace's object and terrain LOD.
+
+    `ctx` holds what every job shares: the output roots and the two
+    generators. The namespace is installed here because ONE process bakes
+    every plugin's worldspaces.
+    See: docs/commentary/asset_convert_terrain.md#write-lodgen-input-master-modes
+    """
+    edid, owner, owner_esm, overlays, contributors, suppliers = job
+    lod_dir, out_root, export_root = ctx['lod_dir'], ctx['out_root'], ctx['export_root']
+    print("-" * 54)
+    print(f"  {edid}  (records: {owner})")
+    print("-" * 54)
+    _use_owner_namespace(export_root, owner)
+
+    stale = _clear_stale_tiles(lod_dir, edid)
+    if stale:
+        print(f"  Cleared {stale} tile(s) from a previous run")
+
+    asset_dirs = ctx['supplier_asset_dirs']([owner] + suppliers)
+    overlay_dirs = ctx['supplier_overlay_dirs']([owner] + suppliers)
+
+    cloud_rel = ctx['merge_cloud_bank'](out_root, lod_dir, edid, owner,
+                                        contributors, export_root)
+    if cloud_rel:
+        print(f"  World-map cloud bank -> {cloud_rel}")
+
+    print("  Generating object LOD...")
+    ok = ctx['generate_lod'](
+        esm_path=owner_esm,
+        output_dir=lod_dir,
+        worldspace_edid=edid,
+        master_dirs=None,
+        master_mesh_dirs=asset_dirs,
+        master_texture_dirs=asset_dirs,
+        overlay_paths=overlays,
+        only_cells=None,
+        far_nif_dirs=asset_dirs,
+        overlay_manifest_dirs=overlay_dirs,
+    )
+
+    print("  Generating terrain LOD...")
+    ok_terrain = ctx['generate_terrain_lod'](
+        esm_path=owner_esm,
+        output_dir=lod_dir,
+        worldspace_edid=edid,
+        overlay_paths=overlays,
+        only_cells=None,
+        extra_texture_roots=[ctx['lod_textures_root'](Path(d))
+                             for d in asset_dirs],
+    )
+    print()
+    return bool(ok and ok_terrain)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Generate every plugin's distant LOD once, into a "
@@ -251,76 +335,20 @@ def main() -> int:
         print("Dry run - nothing generated.")
         return 0
 
+    ctx = {
+        'lod_dir': lod_dir, 'out_root': out_root, 'export_root': export_root,
+        'generate_lod': generate_lod,
+        'generate_terrain_lod': generate_terrain_lod,
+        'merge_cloud_bank': merge_cloud_bank,
+        'lod_textures_root': _lod_textures_root,
+        'supplier_asset_dirs': lambda names: _supplier_asset_dirs(
+            names, out_root, export_root, _out_root),
+        'supplier_overlay_dirs': lambda names: _supplier_overlay_dirs(
+            names, export_root, record_dir),
+    }
     ok_all = True
-    for edid, owner, owner_esm, overlays, contributors, suppliers in jobs:
-        print("-" * 54)
-        print(f"  {edid}  (records: {owner})")
-        print("-" * 54)
-
-        # Clear this worldspace's tiles from a previous run before rebaking.
-        # The bake writes only the tiles it produces THIS time, so a tile an
-        # earlier run emitted — at coordinates this selection no longer covers,
-        # or from a plugin since deselected — would otherwise survive as an
-        # orphan and still ship. Scoped to this worldspace's own tile names so a
-        # run covering several worldspaces never deletes a sibling's fresh
-        # output, and so the shared, coordinate-free object .nifs are untouched.
-        stale = 0
-        for sub in ("meshes/terrain", "textures/terrain"):
-            d = lod_dir / sub / edid
-            if not d.is_dir():
-                continue
-            for f in d.rglob(f"{edid}.*"):
-                if f.is_file():
-                    f.unlink()
-                    stale += 1
-        if stale:
-            print(f"  Cleared {stale} tile(s) from a previous run")
-
-        asset_dirs = _supplier_asset_dirs(
-            [owner] + suppliers, out_root, export_root, _out_root)
-        overlay_dirs = _supplier_overlay_dirs(
-            [owner] + suppliers, export_root, record_dir)
-
-        cloud_rel = merge_cloud_bank(out_root, lod_dir, edid, owner,
-                                     contributors, export_root)
-        if cloud_rel:
-            print(f"  World-map cloud bank -> {cloud_rel}")
-
-        print(f"  Generating object LOD...")
-        ok = generate_lod(
-            esm_path=owner_esm,
-            output_dir=lod_dir,
-            worldspace_edid=edid,
-            # No tile-ownership skip: this mod is the ONLY place these tiles
-            # are generated now, so there is no master output already shipping
-            # them and nothing may be skipped. Passing any plugin dir here
-            # would skip every tile it once built and leave holes.
-            master_dirs=None,
-            master_mesh_dirs=asset_dirs,
-            master_texture_dirs=asset_dirs,
-            overlay_paths=overlays,
-            # The WHOLE worldspace, every time. `only_cells` existed to rebake
-            # just the tiles an override touched, on top of a master's own LOD
-            # run. There is no separate master run to sit on top of any more.
-            only_cells=None,
-            # Derived _far.nif meshes stay with the plugin that ships the full
-            # model; only tiles and LODSettings land in the LOD mod.
-            far_nif_dirs=asset_dirs,
-            overlay_manifest_dirs=overlay_dirs,
-        )
-
-        print(f"  Generating terrain LOD...")
-        ok_terrain = generate_terrain_lod(
-            esm_path=owner_esm,
-            output_dir=lod_dir,
-            worldspace_edid=edid,
-            overlay_paths=overlays,
-            only_cells=None,
-            extra_texture_roots=[_lod_textures_root(Path(d))
-                                 for d in asset_dirs],
-        )
-        ok_all = ok_all and ok and ok_terrain
-        print()
+    for job in jobs:
+        ok_all = _bake_worldspace(job, ctx) and ok_all
 
     print("-" * 54)
     if ok_all:

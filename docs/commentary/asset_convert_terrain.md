@@ -423,6 +423,90 @@ never matches and every lookup falls through to the same `_far.nif` as before.
 `_far` against a `_lod` path yields `foo_lodfar8.nif`.
 
 
+## <a id="authored-lod-texture-names"></a>An authored `_lod.nif` names a `_lod` texture we never shipped
+
+**Code:** `_destem_lod_texture`, `_copy_lod_destem` in `asset_convert/lod/lod_gen.py`
+
+FO3/FNV's hand-authored `_lod.nif` meshes reference their own low-res textures
+(`roadwasteland01_lod.dds`, 128x128 DXT1). Bethesda shipped pre-baked tiles and
+dropped those sources from the shipping BSAs, so LODGen has nothing to sample
+and the roads bake untextured -- correct up close, blank at distance.
+
+Measured over FalloutNV's 698 `_lod.nif`/full-mesh pairs: **83** name at least
+one missing texture, **168** missing references in all.
+
+The relation is AUTHORED, not guessed: strip `_lod`/`lod` from the texture
+STEM, ahead of any map suffix.
+
+```
+roadwasteland01_lod.dds   -> roadwasteland01.dds
+roadwasteland01_lod_n.dds -> roadwasteland01_n.dds
+```
+
+| bucket | missing refs | destem resolves | unresolved |
+|---|---|---|---|
+| base game | 96 | **78** | 18 |
+| FO3 DLC leftovers (`dlcanch*`, `dlcpitt*`) | 72 | 0 | 72 |
+
+The 72 DLC-leftover references are named by ZERO STAT records and are already
+filtered out by `referenced_models`, so they never reach a tile. Of the 18
+unresolved base-game references, the reachable sets are the satellite dishes,
+`atomicwranglerext`, `mrsingledebris02` and `nv_mrcurvedmg01`; `crawlerplatform`,
+`monoraildclod01/02`, `dome_lod`, `nv_noso_rowhouse_plaster2` and
+`dlc03craextbase` are named by no STAT record at all.
+
+**Do NOT take "a texture from the sibling mesh" instead.** The full-res
+`wastelandroad3wayrb.nif` carries BOTH `roadwasteland01.dds` and
+`architecture\urban\edgetrim01.dds`, so a per-MESH pick paints road LOD with
+wall trim. The substitution has to be per TEXTURE, by name.
+
+Substituting the full-size image is safe because the `_lod` mesh's UVs sit in
+the same [0,1] space and map the same surfaces -- it is the same picture at a
+higher resolution, which a distant mesh does not need but is not harmed by.
+
+Do not add TTW's BSA as a source: it belongs to `TaleOfTwoWastelands.esm`, a
+separate plugin, and stem-matching correctly excludes it.
+
+
+## <a id="generated-far-nif-belong-to-the-lod-mod"></a>GENERATED `_far.nif` belong to the LOD mod
+
+**Code:** `generate_missing_far_nifs` (`gen_meshes_dir`), `lod_gen.generate_lod`
+
+A derived `_far.nif` is a bake-time intermediate, not a shipped asset, so it is
+written into `output/AutoConvertLOD/meshes/` rather than the plugin's tree.
+
+Measured before the change. Scanning 28,828 non-`_far` files (meshes, `.bto`
+tiles, records) across FalloutNV, Oblivion and AutoConvertLOD for any reference
+to a `_far`/`_far8`/`_far16`/`_lod` mesh found **one** hit: `Oblivion.esm`
+naming its own authored `TowerSmall02_far.NIF` and siblings. Cross-checked
+against 6,827 record MODL paths from STAT/TREE/FURN/ACTI/DOOR, **zero**
+`_far.nif` -- authored or generated -- is ever a record's model. Tiles embed
+geometry and name only textures, so nothing loads a generated `_far.nif` at
+runtime.
+
+They are also rebuilt every run: `generate_lod` passes
+`force_regen_generated=True`, and every derived file carries a
+`.nif.generated` marker (FalloutNV 1311/1311 generated; Oblivion 605/762).
+
+| plugin | `_far` | generated | authored |
+|---|---|---|---|
+| FalloutNV.esm | 1,311 | 1,311 | 0 |
+| Oblivion.esm | 762 | 605 | **157** |
+
+**The 157 authored files must stay in the plugin.** Oblivion ships hand-made
+`_far.nif` (`seisland_far.nif`, the Citadel tower set) with no marker, and
+`Oblivion.esm` itself references them -- they are that plugin's own art.
+`_is_generated` is the discriminator, so only the generated branch is
+redirected; the source tree is still read for full models and authored LOD.
+
+Two further gains: the staging round-trip
+(`_import_master_mesh` / `_drop_staged_master_meshes`) becomes a no-op for
+generated files, since they are written where the bake already looks; and they
+stop colliding in the shared namespace, which is where
+`tes4/furniture/lowerclass/lowerbar02_far.nif` was measured differing between
+FalloutNV and Oblivion.
+
+
 ## <a id="lod-suppliers-vs-contributors"></a>Overlay scoping must not scope ASSETS
 
 **Code:** `_plan_jobs` in `tools/release/create_lod.py`
@@ -1026,3 +1110,48 @@ FourCC, five unused masks), `dwCaps`, and four trailing reserved words.
 
 Mipmaps run down to 1×1, as vanilla Skyrim terrain LOD DDS files do. Tile size
 matches vanilla per LOD level: 1024 for LOD4/8, 2048 for LOD16/32.
+
+## The purple test, and two ways to fake a purple
+<a id="the-purple-test"></a>
+
+**Code:** `tools/audit/lod_texture_resolve.py`
+
+A baked tile embeds geometry and names its textures by path. A named texture
+present in neither our output nor vanilla Skyrim renders purple, so scanning
+every tile is the only check that proves "no purple LOD" -- a per-defect check
+passes while a tile still names something nothing provides.
+
+Measured on the FNV rebuild: **1,760 tiles (1.30 GB), 1,943 distinct refs, 0
+purple.** The one ref absent from `output/` is `white.dds`, which resolves in
+vanilla (1,540 bytes) -- which is why the check MUST consult vanilla. An
+output-only check reports every stock reference as a defect.
+
+Two scanner bugs each invented purples that did not exist:
+
+- **Comparing un-normalized paths.** Terrain tiles name textures
+  `data\textures\terrain\...` while object refs are already relative to the
+  textures root. Without stripping both prefixes, every terrain tile reads as
+  missing: **3,952 false positives**, including files sitting on disk.
+- **Matching a substring instead of a whole string.** A regex allowing `.`
+  and `-` inside the run can begin inside binary float data and run forward
+  into a following `.dds`. It invented `JEYE.Dds` (float bytes at offset
+  359,278 glued to a real path's tail) and `default.dds` (from
+  `EyeDefault.dds`). Zero NUL-delimited runs in all 1,760 tiles equal either
+  name. A texture path is a COMPLETE NUL-delimited run, never a slice of one.
+
+Both `jeye.dds` and `default.dds` appear in earlier purple counts and are
+artifacts, not defects. `default_land_texture()` is correctly namespaced
+(`<game>\landscape\default.dds`) and is a read path for baking, not a name
+written into a tile.
+
+### Two `_lod.dds` are absent upstream, not dropped
+<a id="two-lod-dds-absent-upstream"></a>
+
+`falloutnv\architecture\noso\nv_noso_rowhouse_plaster2_lod.dds` and
+`falloutnv\clutter\nvsatellitetripod\nvsatellitedishtripodlod.dds` are listed
+in `textures_used.txt` but exist in neither `export/` nor `output/` -- only
+their `_n` normals shipped. They are named by `_lod.nif` meshes whose base
+`.nif` uses entirely different textures (`ConcreteMetalBase01`,
+`MetalWorkQuad02a/03a`), so a destem fallback has no valid target. The
+rowhouse model is placed by **0 STAT records**; the satellite tripod by 2.
+Neither reaches a shipped tile, so the purple count stays 0.

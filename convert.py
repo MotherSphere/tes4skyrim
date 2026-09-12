@@ -539,6 +539,20 @@ def _plugin_data_dir(file_name: str, tes4_data: str, export_dir: str) -> str:
     beside itself, not in the Oblivion Data directory.
     """
     source = resolve_plugin_path(file_name, tes4_data, export_dir)
+def _use_plugin_namespace(file_name: str) -> str:
+    """Install `file_name`'s asset namespace for the phase about to run.
+
+    Every phase runs in its own process, and only the ones calling into
+    asset_pipeline set this, so the rest wrote the default namespace whatever
+    plugin they were handed.
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+    from asset_convert.game_paths import namespace_for, set_namespace
+    ns = namespace_for(record_dir(str(SCRIPT_DIR / "export"), file_name))
+    set_namespace(ns)
+    return ns
+
+
     if os.path.isfile(source):
         return os.path.dirname(source)
     return tes4_data
@@ -553,6 +567,7 @@ def phase_assets(file_name: str, config: dict, output_dir: str = None,
     """Convert extracted NIF assets and copy textures to output (meshes only).
 
     `winding_fix` tri-states the collision winding repair: True/False force it,
+    _use_plugin_namespace(file_name)
     None takes the per-plugin default for `file_name`.  The decision is pinned
     into the environment because the repair runs inside multiprocessing mesh
     workers, which inherit the environment but not this call's arguments.
@@ -614,6 +629,7 @@ def phase_assets(file_name: str, config: dict, output_dir: str = None,
     print(f"[{file_name}] Book INAM complete: ok={bstats['ok']} "
           f"skip={bstats['skip']} fail={bstats['fail']}")
     return True
+    _use_plugin_namespace(file_name)
 
 # ===========================================================================
 # Phase 4: CONVERT SPEEDTREES
@@ -654,6 +670,7 @@ def phase_speedtrees(file_name: str, config: dict, output_dir: str = None):
 def phase_creatures(file_name: str, tes5_data: str, config: dict,
                     output_dir: str = None):
     """Convert creatures: generated behavior projects (skeleton.hkx,
+    _use_plugin_namespace(file_name)
     animations, behavior graph), skeleton/body NIF conversion, and
     registration in the merged animation singlefiles.
 
@@ -678,6 +695,7 @@ def phase_creatures(file_name: str, tes5_data: str, config: dict,
           f"({len(res['projects'])} projects, {len(res['errors'])} errors)")
     return not res['errors']
 
+    _use_plugin_namespace(file_name)
 # ===========================================================================
 # Phase 6: BUILD TES5 PLUGIN
 # ===========================================================================
@@ -749,6 +767,7 @@ def phase_import(file_name: str, tes4_data: str, tes5_data: str,
         return False
 
     return errors == 0
+    _use_plugin_namespace(file_name)
 
 # ===========================================================================
 # Phase 7: CONVERT SOUNDS
@@ -791,6 +810,7 @@ def phase_sounds(file_name: str, config: dict, output_dir: str = None):
           f"{mstats.get('tracks', 0)} tracks)")
     return True
 
+    _use_plugin_namespace(file_name)
 
 # ===========================================================================
 # Phase 8: CONVERT SCRIPTS
@@ -823,355 +843,6 @@ def phase_scripts(file_name: str, config: dict, output_dir: str = None):
     errs = stats['scpt_err'] + stats['info_err'] + stats['qust_err']
     return errs == 0
 
-def phase_compile(file_name: str, config: dict, output_dir: str = None):
-    """Compile converted Papyrus .psc scripts to .pex using papyrus compiler.
-
-    Attempts batch compilation first.  If the batch fails (e.g. parser error
-    in one script stops the whole run), falls back to per-file compilation so
-    valid scripts still produce .pex output.
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    out_root = Path(output_dir) if output_dir else SCRIPT_DIR / "output"
-    _pout = plugin_out_root(out_root, file_name, str(SCRIPT_DIR / "export"))
-    script_src = _pout / "scripts" / "source"
-    script_out = _pout / "scripts"
-
-    # Nothing to compile is SUCCESS, not failure.  A plugin can legitimately
-    # convert zero scripts -- the merged-BSA DLC plugins export zero records
-    # because their content lives in the master's export, so every phase finds
-    # an empty workload.  Every other phase already reports that as success
-    # ("No meshes found", "No sound directory found"); returning False here
-    # flipped the whole run to "Pipeline completed with errors" and showed the
-    # user a FAILED banner for a run in which nothing had gone wrong.  Only a
-    # missing compiler, missing headers, or a real compile error fails below.
-    if not script_src.is_dir() or not any(script_src.glob("*.psc")):
-        print(f"[{file_name}] No .psc scripts found, skipping compile")
-        return True
-
-    # Find the compiler
-    compiler = SCRIPT_DIR / "external" / "papyrus-compiler" / "papyrus.exe"
-    if not compiler.is_file():
-        print(f"[{file_name}] ERROR: papyrus compiler not found at {compiler}")
-        return False
-
-    # Find Skyrim source headers (Data\Source\Scripts has native type defs)
-    skyrim_headers = _find_skyrim_source_scripts(config)
-    if not skyrim_headers:
-        print(f"[{file_name}] ERROR: Skyrim Papyrus source headers not found")
-        print("  Expected at: <Skyrim SE>\\Data\\Source\\Scripts\\")
-        return False
-
-    script_out.mkdir(parents=True, exist_ok=True)
-
-    # An override plugin's scripts declare properties typed as the MASTER's
-    # converted scripts (`TES4_NQ16Script Property ...`), because the record
-    # they name carries that master's SCRI.  Those .psc live in the master's
-    # own output, so without them on the header path the compiler reports
-    # "undefined type" — 198 of Translation.esp's scripts. They are headers
-    # only: the master's own run compiles and ships the .pex.
-    from script_convert.cross_ref import master_names
-    master_src_dirs = []
-    _exp = str(SCRIPT_DIR / "export")
-    for m in master_names(record_dir(_exp, file_name)):
-        d = plugin_out_root(out_root, m, _exp) / "scripts" / "source"
-        if d.is_dir():
-            master_src_dirs.append(d)
-        else:
-            print(f"[{file_name}] WARNING: master scripts not found ({d}); "
-                  f"scripts referencing {m}'s script types will not compile")
-
-    psc_files = sorted(script_src.glob("*.psc"))
-    psc_count = len(psc_files)
-    print(f"[{file_name}] Compiling {psc_count} Papyrus scripts...")
-
-    workers = worker_count()
-    ok_count = 0
-    err_count = 0
-    err_samples: list = []
-
-    def _header_args() -> list:
-        h = ["-h", str(skyrim_headers), "-h", str(script_src)]
-        for d in master_src_dirs:
-            h += ["-h", str(d)]
-        return h
-
-    def _compile_batch(quarantine: set) -> tuple:
-        """Compile the whole source dir in ONE compiler process.
-
-        papyrus.exe parses the ~3,000 Skyrim headers once per invocation, so
-        compiling per-file paid that cost 15,961 times (~82 ms each = ~22 min
-        of serial CPU, which is what a 4-core machine actually experiences).
-        Batch mode is ~2.4 ms/script marginal — the whole plugin in ~40 s in a
-        single process, with no dependence on the core count at all.
-
-        The catch, and why this is not a plain swap: the compiler ABORTS the
-        run on the first bad file and writes NO .pex at all (measured: 1 broken
-        script of 201 -> 0 .pex).  So a failing file must be quarantined and
-        the batch retried.  Scanner/parser errors surface one file at a time;
-        checker errors surface for every bad file at once.  Either way each
-        error line names its file, so `quarantine` grows by at least one entry
-        per pass and the loop terminates.
-
-        Returns (ok, errors, bad_files).
-        """
-        # A quarantined file must leave the input directory, so a failing batch
-        # runs against a staging copy.  Built ONCE and then maintained
-        # incrementally: re-copying ~16k scripts on every retry costs far more
-        # than the compile itself, and each retry only ever removes files.
-        if quarantine:
-            stage = script_out / "_batch_src"
-            if not stage.is_dir():
-                stage.mkdir(parents=True, exist_ok=True)
-                for p in psc_files:
-                    shutil.copy2(p, stage / p.name)
-            for name in quarantine:
-                try:
-                    (stage / name).unlink()
-                except FileNotFoundError:
-                    pass
-            in_dir = stage
-        else:
-            in_dir = script_src
-
-        c = [str(compiler), "compile", "-nocache",
-             "-i", str(in_dir), "-o", str(script_out)] + _header_args()
-        try:
-            r = subprocess.run(windows_cmd(c), capture_output=True, text=True,
-                               timeout=1800, cwd=str(SCRIPT_DIR), **_POPEN_FLAGS)
-        except Exception as e:
-            return (False, [f"batch: {e}"], set())
-
-        combined = (r.stdout or "") + (r.stderr or "")
-        bad: set = set()
-        errors: list = []
-        # Error lines look like: <path>\Foo.psc:12:3: Checker error: ...
-        for line in combined.splitlines():
-            m = _PSC_ERR_RE.match(line.strip())
-            if m:
-                bad.add(m.group(1))
-                errors.append(f"{m.group(1)}: {m.group(2).strip()}")
-        ok = not bad and "failed to compile" not in combined
-        if not ok and not bad:
-            # Failed without naming a file — cannot make progress by
-            # quarantining, so let the caller fall back to per-file.
-            errors.append("batch failed without naming a file")
-        return (ok, errors, bad)
-
-    def _compile_one(psc: Path) -> tuple:
-        pex_name = psc.stem + ".pex"
-        pex_path = script_out / pex_name
-        c = [
-            str(compiler), "compile",
-            # papyrus.exe keys its cache on the SOURCE only, not the output path,
-            # so an unchanged .psc is "already compiled": it exits 0 and writes no
-            # .pex at all.  Scripts whose text never varies between runs (the
-            # static TES4_ShowBarterMenu / TES4_ShowTrainingMenu / TES4Polyfill)
-            # therefore silently produced no .pex and were reported as
-            # "exit code 0" failures.  Always ignore the cache.
-            "-nocache",
-            "-i", str(psc),
-            "-o", str(script_out),
-            "-h", str(skyrim_headers),
-            "-h", str(script_src),   # other scripts as headers
-        ]
-        for d in master_src_dirs:
-            c += ["-h", str(d)]     # the masters' converted script types
-        try:
-            r = subprocess.run(windows_cmd(c), capture_output=True, text=True,
-                               timeout=60, cwd=str(SCRIPT_DIR), **_POPEN_FLAGS)
-            if r.returncode == 0 and pex_path.is_file():
-                return (True, "")
-            # Extract first error line
-            combined = (r.stdout or "") + (r.stderr or "")
-            for line in combined.splitlines():
-                if "error" in line.lower():
-                    return (False, line.strip())
-            return (False, f"exit code {r.returncode}")
-        except Exception as e:
-            return (False, str(e))
-
-    all_errors: list[str] = []
-
-    # ── Batch first ──────────────────────────────────────────────────────
-    # One compiler process for the whole directory. Only the files it names as
-    # broken fall back to a per-file compile, so a healthy build never spawns
-    # 15,961 processes and a broken one still produces every good .pex.
-    t_c = time.time()
-    quarantine: set = set()
-    batch_ok = False
-    give_up = False
-    for _attempt in range(_MAX_BATCH_RETRIES):
-        ok, errs, bad = _compile_batch(quarantine)
-        if ok:
-            batch_ok = True
-            break
-        new_bad = bad - quarantine
-        if not new_bad:
-            # No progress possible (unnamed failure, or the same file again).
-            give_up = True
-            break
-        quarantine |= new_bad
-        print(f"  batch: quarantining {len(new_bad)} failing script(s), "
-              f"retrying ({len(quarantine)} total)")
-    else:
-        give_up = True
-
-    shutil.rmtree(script_out / "_batch_src", ignore_errors=True)
-
-    if batch_ok or not give_up:
-        # Every non-quarantined script compiled in the batch pass.
-        ok_count = psc_count - len(quarantine)
-        # Recheck the quarantined ones individually: a file can be dragged into
-        # a batch failure by a *dependency* error, and compiles fine alone.
-        if quarantine:
-            print(f"  batch: {ok_count} compiled; re-checking "
-                  f"{len(quarantine)} quarantined script(s) individually...")
-            for name in sorted(quarantine):
-                psc = script_src / name
-                success_f, msg = _compile_one(psc)
-                if success_f:
-                    ok_count += 1
-                else:
-                    err_count += 1
-                    all_errors.append(f"{name}: {msg}")
-                    if len(err_samples) < 10:
-                        err_samples.append(f"  {name}: {msg}")
-        print(f"  Batch compile: {time.time() - t_c:.1f}s")
-    else:
-        # The batch could not be made to make progress — fall back to the
-        # original per-file path so a pathological case still ships .pex files.
-        print("  batch compile could not isolate the failure; "
-              "falling back to per-file compilation")
-        ok_count = err_count = 0
-        err_samples.clear()
-        all_errors.clear()
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_compile_one, psc): psc for psc in psc_files}
-            for fut in as_completed(futures):
-                success_f, msg = fut.result()
-                if success_f:
-                    ok_count += 1
-                else:
-                    err_count += 1
-                    all_errors.append(f"{futures[fut].name}: {msg}")
-                    if len(err_samples) < 10:
-                        err_samples.append(f"  {futures[fut].name}: {msg}")
-        print(f"  Per-file compile: {time.time() - t_c:.1f}s")
-
-    print(f"[{file_name}] Compilation: {ok_count}/{psc_count} succeeded, "
-          f"{err_count} failed")
-    for sample in err_samples:
-        print(sample)
-    if err_count > 10:
-        print(f"  ... and {err_count - 10} more failures")
-    # The console list is capped at 10, which hid the long tail of real compile
-    # errors.  Always dump the complete list next to the scripts so a failing
-    # build can be worked through in full instead of ten at a time.
-    log_path = script_out / "compile_errors.log"
-    if all_errors:
-        try:
-            log_path.write_text("\n".join(sorted(all_errors)) + "\n",
-                                encoding="utf-8")
-            print(f"  full error list: {log_path}")
-        except OSError:
-            pass
-    else:
-        # A clean build must REMOVE the previous run's log.  Leaving it behind
-        # made a green build look red: the log outlives the failure it describes
-        # and the next reader trusts it over the console summary.
-        try:
-            log_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-    return ok_count > 0
-
-
-# The CK ships the vanilla sources in one of two loose layouts, or not at all
-# (only Data/Scripts.zip).  Checked in this order; Data/Source/Scripts is both
-# the modern layout and where a zip extraction lands.
-_HEADER_DIRS = (("Source", "Scripts"), ("Scripts", "Source"))
-
-
-def _is_header_dir(d: Path) -> bool:
-    """A directory holding the vanilla headers, identified by Debug.psc."""
-    return d.is_dir() and (d / "Debug.psc").is_file()
-
-
-def _extract_scripts_zip(zip_path: Path, data_dir: Path) -> str:
-    """Unpack the Papyrus sources out of Data/Scripts.zip, in place.
-
-    Newer Creation Kit builds ship the vanilla sources ONLY as
-    Data/Scripts.zip and never unpack them, so an install with a perfectly good
-    CK still has no Data/Source/Scripts for the compiler's ``-h`` path.
-
-    The archive's own entries are already rooted at ``Source/Scripts/``, so
-    extracting relative to Data puts every header exactly where the CK itself
-    would have put it -- which is where this project, the CK, and every other
-    Papyrus tool on the machine already look.  Only the compiler's inputs are
-    taken (``.psc`` plus ``TESV_Papyrus_Flags.flg``); the archive also holds
-    DialogueViews XML we have no use for.  Existing files are never
-    overwritten, so a user's own edited header survives.
-
-    Returns the header directory on success, "" on failure.
-    """
-    import zipfile
-    dest = data_dir / "Source" / "Scripts"
-    try:
-        with zipfile.ZipFile(zip_path) as z:
-            members = [n for n in z.namelist()
-                       if n.lower().endswith((".psc", ".flg"))]
-            if not members:
-                return ""
-            dest.mkdir(parents=True, exist_ok=True)
-            for name in members:
-                # Flatten to a basename under dest: the compiler wants a flat
-                # header dir, and this also makes the extraction immune to a
-                # zip rooted differently, and to any "../" traversal entry.
-                base = os.path.basename(name.replace("\\", "/"))
-                if not base or base.startswith("."):
-                    continue
-                out = dest / base
-                if out.exists():
-                    continue
-                with z.open(name) as src, open(out, "wb") as fh:
-                    shutil.copyfileobj(src, fh)
-    except (OSError, zipfile.BadZipFile) as e:
-        # A read-only or UAC-protected install (Program Files) is the likely
-        # cause; say so rather than failing the phase with a bare "not found".
-        print(f"  WARNING: could not unpack {zip_path}: {e}")
-        return ""
-    if not _is_header_dir(dest):
-        return ""
-    return str(dest)
-
-
-def _find_skyrim_source_scripts(config: dict = None) -> str:
-    """Find Skyrim Papyrus source scripts directory (contains Debug.psc etc.).
-
-    Order: the loose CK layouts, then unpacking Data/Scripts.zip in place.
-    Every caller (the compile phase, preflight, the compile-check tools) goes
-    through here, so the dependency check and the phase can never disagree
-    about whether the headers are available.
-    """
-    sse_data = find_game_path("skyrimse", config)
-    if not sse_data:
-        return ""
-    data = Path(sse_data)
-    for parts in _HEADER_DIRS:
-        source_dir = data.joinpath(*parts)
-        if _is_header_dir(source_dir):
-            return str(source_dir)
-
-    zip_path = data / "Scripts.zip"
-    if zip_path.is_file():
-        print(f"  Papyrus headers not unpacked; extracting {zip_path}...")
-        found = _extract_scripts_zip(zip_path, data)
-        if found:
-            n = len(list(Path(found).glob("*.psc")))
-            print(f"  Extracted {n} vanilla .psc headers to {found}")
-            return found
-    return ""
 
 
 # ===========================================================================
@@ -1478,14 +1149,7 @@ def _run_pipeline():
     if args.list_mods or args.import_mod or args.remove_mod:
         return _mod_commands(args, export_dir, tes4_data)
 
-    print("=" * 54)
-    print("  TES4 -> TES5 Conversion Pipeline")
-    print("=" * 54)
-    print(f"  Oblivion data : {tes4_data or '(not found)'}")
-    print(f"  Skyrim SE data: {tes5_data or '(not found)'}")
-    print(f"  Output dir    : {output_dir}")
-    print(f"  {describe_limit()}")
-    print()
+    _print_run_banner(tes4_data, tes5_data, output_dir)
 
     order = _plugins_to_convert(args, config, tes4_data, export_dir)
     if not order and not args.modify_body_meshes:
@@ -1794,6 +1458,29 @@ def _run_pipeline():
         # empty summary that reads like nothing went wrong.
         print("  ERROR SUMMARY: a stage reported failure; see the stage "
               "output above for details.")
+def _owned_by_a_parent_run() -> bool:
+    """Whether a run owner (the GUI) launched us as one step of its run."""
+    return bool(os.environ.get(run_log.RUN_LOG_ENV_VAR))
+
+
+def _print_run_banner(tes4_data, tes5_data, output_dir) -> None:
+    """Print the run's identity and settings.
+
+    A GUI run is one process per step, so the settings -- which cannot change
+    between steps -- print only for the process that owns the whole run.
+    """
+    if _owned_by_a_parent_run():
+        return
+    print("=" * 54)
+    print("  TES4 -> TES5 Conversion Pipeline")
+    print("=" * 54)
+    print(f"  Oblivion data : {tes4_data or '(not found)'}")
+    print(f"  Skyrim SE data: {tes5_data or '(not found)'}")
+    print(f"  Output dir    : {output_dir}")
+    print(f"  {describe_limit()}")
+    print()
+
+
     print("-" * 54)
     print("Pipeline completed with errors.")
     return 1

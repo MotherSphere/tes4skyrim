@@ -22,6 +22,7 @@ declares the block set.
 See: docs/commentary/asset_convert_creature.md#5-key-technical-facts-verified-from-references
 """
 
+from asset_convert.game_paths import current_namespace
 from asset_convert.havok.behavior_clips import (
     build_attack_events,
     cast_phase_defs,
@@ -133,10 +134,11 @@ def movement_type_names(name: str, has_swim: bool = False) -> list:
     graph's `iState_<X>` variables and looking up the MOVT whose MNAM == X.
     A graph with none gives the movement controller ZERO movement types and
     the actor cannot move at all.  There is deliberately NO casting movement
-    type; pinning a caster is bAnimationDriven's job.
+    type; pinning a caster is bAnimationDriven's job.  The game namespace is
+    upper-cased so Oblivion keeps the exact `TES4<name>` spelling it shipped.
     See: docs/commentary/asset_convert_creature.md#7b-ii-casters-slide-while-casting--pinned-with-banimationdriven-2026-08-26
     """
-    base = f'TES4{name.lower()}'
+    base = f'{current_namespace().upper()}{name.lower()}'
     out = [f'{base}Default', f'{base}Run']
     if has_swim:
         out.append(f'{base}Swim')

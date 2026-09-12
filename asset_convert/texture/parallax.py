@@ -37,6 +37,7 @@ The alpha classification here follows the one in the author's own
 TES4AutoParallaxer, whose thresholds were tuned against this very content.
 """
 
+from asset_convert.game_paths import current_namespace
 import math
 import os
 import struct
@@ -662,7 +663,8 @@ def strip_diffuse_alpha(tex_root, keep=()) -> 'tuple[int, int, int, int]':
                 # The mesh stage names textures the way the NIFs do
                 # (`textures\tes4\...`), so compare on that tail.
                 rel = os.path.relpath(path, root).replace('/', '\\').lower()
-                if ('textures\\tes4\\' + rel) in keep or rel in keep:
+                if (('textures\\' + current_namespace() + '\\' + rel)
+                        in keep or rel in keep):
                     kept += 1
                     continue
             try:

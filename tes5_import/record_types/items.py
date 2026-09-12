@@ -1,5 +1,6 @@
 """Item/object converters: STAT, ACTI, MISC, KEYM, DOOR, FLOR, FURN, GRAS, TREE, LIGH, SLGM, ANIO, CONT."""
 
+from asset_convert.game_paths import current_namespace
 import struct
 
 from ..base.constants import LOD_SIZE_THRESHOLD
@@ -582,11 +583,15 @@ def convert_TREE(rec: dict) -> bytes:
     subs += pack_obnd(*bounds)
     model = get_str(rec, 'Model.MODL')
     if model and edid:
-        subs += pack_string_subrecord('MODL', f'tes4\\speedtrees\\{edid.lower()}.nif')
+        subs += pack_string_subrecord(
+            'MODL',
+            f'{current_namespace()}\\speedtrees\\{edid.lower()}.nif')
     elif model:
         import os
         stem = os.path.splitext(os.path.basename(model.replace('\\', '/').lstrip('/')))[0]
-        subs += pack_string_subrecord('MODL', f'tes4\\speedtrees\\{stem.lower()}.nif')
+        subs += pack_string_subrecord(
+            'MODL',
+            f'{current_namespace()}\\speedtrees\\{stem.lower()}.nif')
     subs += pack_subrecord('PFPC', struct.pack('<I', 0))
     subs += pack_subrecord('CNAM', _TREE_CNAM)
     # Same size-derived LOD flags as STAT: trees flow through the standard

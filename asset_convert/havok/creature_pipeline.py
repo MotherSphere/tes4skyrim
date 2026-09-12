@@ -21,8 +21,10 @@ NPCs are NOT processed here: humanoid NPC_ records keep the Skyrim race
 override system. This pipeline is for everything CREA.
 """
 
+from asset_convert.game_paths import current_namespace
 import json
 import os
+from asset_convert.havok.behavior_vocabulary import movement_type_names
 import re
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -482,7 +484,7 @@ def _remove_unnamespaced_projects(meshes_dir: str, log=print) -> None:
     would re-create the very collision the namespace removes the moment the
     whole meshes folder is deployed.
     """
-    root = os.path.join(meshes_dir, 'actors', 'tes4')
+    root = os.path.join(meshes_dir, 'actors', current_namespace())
     if not os.path.isdir(root):
         return
     for d in sorted(os.listdir(root)):
@@ -490,7 +492,7 @@ def _remove_unnamespaced_projects(meshes_dir: str, log=print) -> None:
         if os.path.isfile(os.path.join(p, 'project_manifest.json')):
             shutil.rmtree(p, ignore_errors=True)
             log(f'  [cleanup] removed pre-namespace project tree '
-                f'actors\\tes4\\{d}')
+                f'actors\\{current_namespace()}\\{d}')
 
 
 def manifests_under(meshes_dir: str) -> dict:
@@ -501,7 +503,7 @@ def manifests_under(meshes_dir: str) -> dict:
     two plugins' manifests can never collide (hkx_behavior.project_layout).
     """
     out = {}
-    root = os.path.join(meshes_dir, 'actors', 'tes4')
+    root = os.path.join(meshes_dir, 'actors', current_namespace())
     if not os.path.isdir(root):
         return out
     for ns in sorted(os.listdir(root)):
@@ -686,8 +688,7 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
         # engine movement-type registration contract (iState_* graph vars ↔
         # MOVT MNAM); fallback derives the same names for stale manifests
         'movement_types': m.get('movement_types',
-                                [f'TES4{name.lower()}Default',
-                                 f'TES4{name.lower()}Run']),
+                                movement_type_names(name)),
         # clip root-motion speeds (u/s) → per-creature MOVT SPED columns
         'speeds': m.get('speeds', {}),
         'has_ragdoll': m.get('has_ragdoll', False),

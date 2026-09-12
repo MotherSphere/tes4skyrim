@@ -27,6 +27,7 @@ We render each cell to an RGB image by:
 The result is downsampled per LOD level into the tile diffuse atlas.
 """
 
+from asset_convert.game_paths import current_namespace
 import struct
 from pathlib import Path
 
@@ -44,12 +45,6 @@ QUAD_VERTS = 17            # vertices per quadrant side (33 per cell = 2*17-1)
 # tile atlas; keep modest so a 32x32-cell tile stays a sane texture size.
 CELL_PX = 64
 
-# Engine default for quadrants with no BTXT base layer.  Oblivion renders
-# unpainted land with Landscape\Default.dds; ~23% of Tamriel quadrants
-# (mostly sea floor) have no base layer, and the old grey-128 fallback painted
-# them as huge flat grey areas in the distant LOD.
-DEFAULT_LAND_TEXTURE = 'tes4\\landscape\\default.dds'
-
 # Baked underwater murk.  Vanilla terrain LOD diffuse bakes submerged terrain
 # toward a flat murky color (the LOD water sheet drawn above it is nearly
 # opaque-looking only up close).  Blend by depth below the cell water height.
@@ -61,6 +56,11 @@ MURK_MAX = 0.9             # never fully hide the ground texture
 # ---------------------------------------------------------------------------
 # Output-ESM parsing: LTEX FormID -> diffuse/normal texture path
 # ---------------------------------------------------------------------------
+
+
+def default_land_texture() -> str:
+    """Unpainted-quadrant diffuse, under the ACTIVE game namespace."""
+    return current_namespace() + '\\landscape\\default.dds'
 
 # Keyed on (path, mtime_ns, size) like lod_gen._PARSED_ESM_CACHE. The result is
 # a pure function of the file and carries NO worldspace scoping, yet the terrain
@@ -297,7 +297,8 @@ def composite_cell(layers: dict, colors: np.ndarray, ltex_map: dict,
         # base layer; quadrants with no BTXT use the engine default texture
         base_fid = base.get(quad)
         diff = ltex_map.get(base_fid, {}).get('diffuse', '') if base_fid else ''
-        btile = load_texture_rgb(diff or DEFAULT_LAND_TEXTURE, tex_root, tex_size)
+        btile = load_texture_rgb(diff or default_land_texture(),
+                                 tex_root, tex_size)
         quad_img = _sample_tiled(btile, q_us, q_vs).astype(np.float32)
 
         # alpha layers, in ATXT layer order

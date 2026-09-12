@@ -16,9 +16,67 @@ This lives in its own module rather than in `lod_gen` so that the terrain-LOD,
 grass and _far.nif code can share one implementation without importing a heavy
 sibling module for a three-line path helper.
 """
+import os
 from pathlib import Path
 
-__all__ = ["win_join"]
+__all__ = ["win_join", "DEFAULT_NAMESPACE", "namespace_for",
+           "set_namespace", "current_namespace"]
+
+#: Namespace for Oblivion and everything mastered on it, and the fallback.
+DEFAULT_NAMESPACE = 'tes4'
+
+#: Carries the namespace into spawned workers and child processes.
+NAMESPACE_ENV = 'TESCONV_ASSET_NAMESPACE'
+
+_ACTIVE = {'ns': (os.environ.get(NAMESPACE_ENV) or DEFAULT_NAMESPACE).lower()}
+
+
+def _chain_root(export_dir: Path) -> Path:
+    """The masterless plugin at the root of this plugin's master chain."""
+    from asset_convert.lod.terrain_lod import master_names
+    root = export_dir.parent
+    seen = set()
+    cur = export_dir
+    while cur is not None and cur.name.lower() not in seen:
+        seen.add(cur.name.lower())
+        masters = [m for m in master_names(cur) if m]
+        if not masters:
+            break
+        nxt = next((root / m for m in masters
+                    if (root / m).is_dir() and m.lower() not in seen), None)
+        if nxt is None:
+            return root / masters[0]
+        cur = nxt
+    return cur
+
+
+def namespace_for(export_dir) -> str:
+    """The asset namespace a plugin's converted files belong under.
+
+    Named after the masterless plugin rooting the master chain, so one game's
+    family shares a namespace and unrelated games cannot collide. Oblivion
+    keeps `tes4` so its existing output stays valid.
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+    cur = _chain_root(Path(export_dir))
+    stem = Path(cur.name).stem.lower() if cur is not None else ''
+    if not stem or stem.startswith('oblivion'):
+        return DEFAULT_NAMESPACE
+    return ''.join(c for c in stem if c.isalnum()) or DEFAULT_NAMESPACE
+
+
+def set_namespace(ns: str) -> None:
+    """Make `ns` active here and in every process spawned from here on.
+
+    See: docs/commentary/asset_convert_texture.md#namespace-crosses-process-boundaries
+    """
+    _ACTIVE['ns'] = (ns or DEFAULT_NAMESPACE).lower()
+    os.environ[NAMESPACE_ENV] = _ACTIVE['ns']
+
+
+def current_namespace() -> str:
+    """The namespace in force for the plugin being converted."""
+    return _ACTIVE['ns']
 
 
 def win_join(root, rel: str) -> Path:

@@ -19,6 +19,7 @@ CLI:
     # e.g. python -m asset_convert.texture.landscape_normals \
     #          output/Oblivion.esm/textures/tes4/landscape
 """
+from asset_convert.game_paths import current_namespace
 import os
 import struct
 import sys
@@ -192,22 +193,25 @@ def run(landscape_dir):
 DEFAULT_MASK_ALPHA = 64
 
 
-# Where the shared stand-in normal map lives, and what a mesh names when its
-# own normal does not exist.  ONE file for the whole conversion: a flat normal
-# has no detail to lose, so 32x32 is as good as 2048 and costs ~1.4 KB.
-DEFAULT_NORMAL_REL = r'textures\tes4\default_n.dds'
+def default_normal_rel() -> str:
+    """What a mesh names when its own normal map does not exist."""
+    return 'textures\\' + current_namespace() + '\\default_n.dds'
 
 
 def write_default_normal(textures_root, alpha=None, size=32):
     """Write the shared flat normal (128,128,255) with a constant mask.
 
-    DXT5 rather than the uncompressed form `lod_gen` uses for atlases,
-    because the alpha has to be a REAL specular mask here -- `spec_mask`
-    classifies an uncompressed DDS as 'no_alpha' regardless of its content.
+    `textures_root` is the TEXTURES root; the namespace segment is
+    appended here. Call AFTER normalize_specular_alpha, which would
+    otherwise count this constant-alpha stand-in as one more file it fixed.
+
+    DXT5, not the uncompressed form `lod_gen` uses for atlases: the alpha must
+    be a REAL specular mask, and `spec_mask` reads an uncompressed DDS as
+    'no_alpha' whatever its content.
     """
     if alpha is None:
         alpha = DEFAULT_MASK_ALPHA
-    dest = Path(textures_root) / 'tes4' / 'default_n.dds'
+    dest = Path(textures_root) / current_namespace() / 'default_n.dds'
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     # RGB565 for (128,128,255): R=16, G=32, B=31

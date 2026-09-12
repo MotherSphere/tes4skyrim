@@ -20,7 +20,8 @@ from script_convert import resolve_name as _resolve_name
 from script_convert.constants import (
     ACTOR_VALUE_MAP, ANIM_GROUP_EVENTS, ATTRIBUTE_STUB_VALUE, CASTABLE,
     PLACED_REF_SIGS, TES4_ASSAULT_BOUNTY, TES4_ATTRIBUTES, TES4_MURDER_BOUNTY,
-    TES4_STEAL_BOUNTY, safe_property_name, papyrus_script_name
+    TES4_STEAL_BOUNTY, is_generated_script_type, safe_property_name,
+    papyrus_script_name
 )
 from script_convert.command_rows import (
     COMMAND_ROWS, GMST_TO_ACTOR_VALUE, ACTOR_VALUE_FUNCTIONS,
@@ -535,7 +536,8 @@ def _as_actor(ctx, target: str) -> str:
     """Cast or register `target` so it is Actor-typed at the call site."""
     vtype = ctx.sc.var_types.get(target.lower(), '')
     ptype = ctx.sc.property_refs.get(target, '')
-    if ptype.startswith('TES4_') or 'ObjectReference' in (ptype, vtype):
+    if is_generated_script_type(ptype) \
+            or 'ObjectReference' in (ptype, vtype):
         return f'({target} as Actor)'
     if not ptype and not vtype and target.isidentifier():
         ctx.sc.property_refs[target] = 'Actor'

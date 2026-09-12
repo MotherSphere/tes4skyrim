@@ -28,6 +28,7 @@ Usage (CLI):
     python -m asset_convert.speedtree.spt_converter <src_dir> <dst_dir> [--workers N]
 """
 
+from asset_convert.game_paths import current_namespace, set_namespace
 import io
 import re
 import sys
@@ -65,13 +66,20 @@ NIF_FLAGS = 14
 _GAME_TO_HAVOK = 1.0 / 69.9904
 _SKY_MAT_WOOD = 500811281  # SKY_HAV_MAT_WOOD
 
-BARK_TEX_DIR = 'textures\\tes4\\trees\\branches\\'
-LEAF_TEX_DIR = 'textures\\tes4\\trees\\leaves\\'
-
 
 # ---------------------------------------------------------------------------
 # TREE record manifest (EditorID / ICON / seed per .spt)
 # ---------------------------------------------------------------------------
+
+def bark_tex_dir() -> str:
+    """Bark texture folder under the ACTIVE game namespace."""
+    return 'textures\\' + current_namespace() + '\\trees\\branches\\'
+
+
+def leaf_tex_dir() -> str:
+    """Leaf texture folder under the ACTIVE game namespace."""
+    return 'textures\\' + current_namespace() + '\\trees\\leaves\\'
+
 
 def load_tree_manifest(export_dir: Path) -> dict:
     """{spt_stem_lower: [(editorid, icon, seed), ...]} from TREE.txt."""
@@ -410,7 +418,9 @@ def match_tex_stem(cand: str, tex_idx: dict) -> str | None:
 
 def _leaf_tex_path(stem: str, tex_idx: dict) -> str:
     """Build the output texture path for an already-resolved stem."""
-    return f'textures\\tes4\\trees\\{tex_idx[stem]}\\{stem}.dds'.replace('\\\\', '\\')
+    ns = current_namespace()
+    return (f'textures\\{ns}\\trees\\{tex_idx[stem]}\\{stem}.dds'
+            ).replace('\\\\', '\\')
 
 
 def _resolve_leaf_tex(tree: SptTree, icon: str, tex_idx: dict) -> str:
@@ -450,8 +460,9 @@ def convert_one(spt_path: Path, out_path: Path, icon: str = '',
 
     bark_stem = Path(tree.bark_texture.replace('\\', '/')).stem.lower()
     tex_idx = tex_idx or {}
-    bark_tex = BARK_TEX_DIR + bark_stem + '.dds'
-    bark_norm = BARK_TEX_DIR + bark_stem + '_n.dds' \
+    bark_dir = bark_tex_dir()
+    bark_tex = bark_dir + bark_stem + '.dds'
+    bark_norm = bark_dir + bark_stem + '_n.dds' \
         if (bark_stem + '_n') in tex_idx else ''
     leaf_tex = _resolve_leaf_tex(tree, icon, tex_idx)
 
@@ -575,7 +586,9 @@ def convert_spt_directory(src_dir: Path, dst_dir: Path,
             if err:
                 print(f'  [SPT] ERROR {err}')
     else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
+        with ProcessPoolExecutor(
+                max_workers=workers, initializer=set_namespace,
+                initargs=(current_namespace(),)) as pool:
             for _name, ok, err in pool.map(_convert_job, jobs, chunksize=1):
                 counts['ok' if ok else 'fail'] += 1
                 if err:

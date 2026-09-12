@@ -13,8 +13,8 @@ later phase's state.
 from script_convert.blocks import (BLOCK_MAP, COMBAT_STATE_GUARDS,
                                    block_filter_guard)
 from script_convert.constants import (
-    POLL_BLOCKS, REF_SPECIFICITY, TYPE_MAP, safe_property_name,
-    papyrus_script_name
+    POLL_BLOCKS, REF_SPECIFICITY, TYPE_MAP, is_generated_script_type,
+    safe_property_name, papyrus_script_name
 )
 from script_convert.command_rows import (
     COMMAND_ROWS, ACTOR_ONLY_FUNCTIONS, OBJREF_SHARED_FUNCTIONS
@@ -1039,16 +1039,21 @@ def chargen_latch(conv) -> list:
 
 
 def _specific(a: str, b: str) -> str:
-    """The more specific of two candidate types for one variable."""
+    """The more specific of two candidate types for one variable.
+
+    A generated script type outranks everything: it is what cross-script
+    variable reads through the property need.
+    See: docs/commentary/script_convert.md#generated-script-types
+    """
     if not a:
         return b
     if not b or a == b:
         return a
     if a in REF_SPECIFICITY and b in REF_SPECIFICITY:
         return max(a, b, key=REF_SPECIFICITY.index)
-    # A script type (`TES4_Foo`) is the most specific thing there is: it is
-    # what cross-script variable reads through the property need.
-    return a if a.startswith('TES4_') else (b if b.startswith('TES4_') else a)
+    if is_generated_script_type(a):
+        return a
+    return b if is_generated_script_type(b) else a
 
 
 def _promote_assigned_actors(conv, tree) -> None:

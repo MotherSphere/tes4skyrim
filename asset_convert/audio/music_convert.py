@@ -22,6 +22,7 @@ The manifest this writes (`music_tracks.json`) is what the importer turns into
 MUST/MUSC records; it carries the duration ffmpeg measured, because MUST.FLTV
 is a real float in seconds the engine schedules against.
 """
+from asset_convert.game_paths import current_namespace
 import json
 import os
 import re
@@ -215,7 +216,7 @@ def music_rel_dir(source_name: str) -> str:
     Scoped per plugin because the category folder names collide: Oblivion and
     Nehrim both have Explore/, Dungeon/, Public/, Battle/, Special/.
     """
-    return 'music/tes4/' + source_name
+    return 'music/' + current_namespace() + '/' + source_name
 
 
 def track_entry(rel, source_name, duration=0.0, src_kbps=0, bitrate=0):
@@ -233,8 +234,8 @@ def track_entry(rel, source_name, duration=0.0, src_kbps=0, bitrate=0):
         # Source path as the plugin's own scripts spell it, so a StreamMusic
         # "data\\music\\special\\x.mp3" can be resolved back.
         'source_rel': ('music/' + rel.as_posix()).lower(),
-        'game_path': (BS.join(['Data', 'Music', 'tes4', source_name])
-                      + BS + game_rel),
+        'game_path': (BS.join(['Data', 'Music', current_namespace(),
+                               source_name]) + BS + game_rel),
         'duration': round(duration, 3),
         'stem': rel.stem,
         'source_kbps': src_kbps,

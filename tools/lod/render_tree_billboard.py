@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.subprocess_flags import configure_multiprocessing
 from core.worker_budget import worker_count
 from asset_convert.game_paths import win_join
-from asset_convert.lod.tree_billboard import (BILLBOARD_DIR, BS, render_billboard,
+from asset_convert.lod.tree_billboard import (billboard_dir, BS, render_billboard,
                                           write_dds_rgba)
 
 configure_multiprocessing()
@@ -55,7 +55,7 @@ def has_billboard(stem, tex_roots):
     bare = stem.lstrip('0123456789') or stem
     for cand in {stem, bare}:
         for t in tex_roots:
-            if win_join(t, BILLBOARD_DIR + BS + cand + '.dds').exists():
+            if win_join(t, billboard_dir() + BS + cand + '.dds').exists():
                 return True
     return False
 
@@ -131,7 +131,7 @@ def main():
         if not src.exists():
             nomesh += 1
             continue
-        dst = win_join(base / 'textures', BILLBOARD_DIR + BS + stem + '.dds')
+        dst = win_join(base / 'textures', billboard_dir() + BS + stem + '.dds')
         tasks.append((str(src), str(dst), [str(t) for t in tex_roots], a.size))
 
     print('to render: %d   already had: %d   no mesh shipped: %d'

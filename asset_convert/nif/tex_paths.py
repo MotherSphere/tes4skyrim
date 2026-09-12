@@ -3,6 +3,8 @@
 Both are pure string/slot readers with no NIF state, so they sit below every
 module that needs them.
 """
+from asset_convert.game_paths import current_namespace
+
 
 def bs_pp_texture_slots(prop):
     """Diffuse, normal and glow paths from an FO3/FNV BSShaderPPLightingProperty.
@@ -31,12 +33,16 @@ _IMAGE_EXTS = ('tga', 'bmp')
 
 
 def rewrite_tex_path(raw_bytes):
-    """Prepend tes4\\ to a texture path that doesn't already have it.
+    """Prepend the game's namespace to a texture path that lacks it.
 
     Separators are normalised FIRST; a leading 'data\\' and a 'lowres\\'
-    segment are dropped, and a .tga/.bmp name becomes .dds.
+    segment are dropped, and a .tga/.bmp name becomes .dds. The idempotence
+    check keys on the ACTIVE namespace, so a path already carrying ANOTHER
+    game's prefix is still namespaced rather than passed through unchanged.
     See: docs/commentary/asset_convert_shader.md#rewrite-tex-path
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
     """
+    ns = current_namespace()
     path = raw_bytes.decode('utf-8', errors='replace').replace('/', '\\')
     if path.lower().startswith('data\\'):
         path = path[len('data\\'):]
@@ -50,9 +56,9 @@ def rewrite_tex_path(raw_bytes):
         rest = rest[len('lowres\\'):]
     rest = as_dds(rest)
 
-    if rest.lower().startswith('tes4\\'):
+    if rest.lower().startswith(ns + '\\'):
         return 'Textures\\' + rest
-    return 'Textures\\tes4\\' + rest
+    return 'Textures\\' + ns + '\\' + rest
 
 
 def as_dds(path: str) -> str:
