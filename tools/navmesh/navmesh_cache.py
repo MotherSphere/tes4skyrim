@@ -77,6 +77,8 @@ import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from core.subprocess_flags import POPEN_FLAGS
+
 MANIFEST_NAME = 'navmesh_cache_manifest.json'
 CACHE_DIRNAME = 'navmesh_geom_cache'
 
@@ -367,7 +369,8 @@ def gh_repo() -> list:
     loudly -- which is exactly how a working publish looked broken.
     """
     out = subprocess.run(['git', 'remote', 'get-url', 'origin'],
-                         capture_output=True, text=True, cwd=repo_root())
+                         capture_output=True, text=True, cwd=repo_root(),
+                         **POPEN_FLAGS)
     url = out.stdout.strip() if out.returncode == 0 else ''
     if not url:
         return []
