@@ -29,7 +29,7 @@ from tes5_import.overrides.nested import (DELETED_FLAG, load_master_export,
                                    master_output_formid,
                                    OVERRIDE_UNMAPPABLE_TYPES)
 from tes5_import.overrides.builder import RECONVERT_KEYS, apply_changes
-from tes5_import.base.constants import SKIP_TYPES
+from tes5_import.registry import SKIP_TYPES
 from tes5_import.base.text_reader import (parse_export_directory,
                                      group_records_by_type,
                                      set_formid_index_offset)

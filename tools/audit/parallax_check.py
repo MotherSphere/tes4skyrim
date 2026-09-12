@@ -86,8 +86,8 @@ def scan_source(path):
 
 
 def census(plugin, subdir, mx, workers, show_all):
-    from asset_convert.nif.nif_converter import (resolve_source_texture,
-                                             rewrite_tex_path)
+    from asset_convert.nif.shaders import (resolve_source_texture,
+                                           rewrite_tex_path)
     meshes = Path('export') / plugin / 'meshes'
     if subdir:
         meshes = meshes / subdir

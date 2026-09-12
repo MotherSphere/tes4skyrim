@@ -364,7 +364,7 @@ def _write_base_plugins(export_dir, name, bases):
     """
     if not bases:
         return
-    from asset_convert.nif.nif_converter import BASE_PLUGINS_FILE
+    from asset_convert.nif.shaders import BASE_PLUGINS_FILE
     d = Path(export_dir) / name / '_source'
     d.mkdir(parents=True, exist_ok=True)
     (d / BASE_PLUGINS_FILE).write_text('\n'.join(bases) + '\n',
