@@ -1,15 +1,21 @@
 """End-to-end run-log behaviour of the real convert.py process.
 
-Unit tests cover rotation in isolation; these run the actual entry point,
-because the defect this feature is most likely to grow is a wiring one -- the
-log opening in the wrong place, or every step of a GUI run rotating the file
-so the "last 3 runs" become the last 3 STEPS of one run.
+Unit tests cover naming and retention in isolation; these run the actual entry
+point, because the defect this feature is most likely to grow is a wiring one
+-- the log opening in the wrong place, or every step of a GUI run opening its
+own file so the retained runs become the last N STEPS of one run.
+
+Every test logs into its own directory via TESCONV_LOGS_DIR.  The real logs/
+is never read, written or renamed: a run the user has going owns an open
+handle there, so Windows refuses the rename and the test counts that live log
+as its own.
 """
 
 import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -17,7 +23,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import run_log
+import core.run_log as run_log
 
 
 # A plugin that cannot exist: the export stage fails immediately, so the run
@@ -26,11 +32,12 @@ import run_log
 FAST_RUN = ("-f", "NoSuchPlugin.esm", "--export-only")
 
 
-def _run(tmp_path, env_extra=None, args=FAST_RUN):
-    """Run convert.py with logs/ redirected into tmp_path via a temp config."""
+def _run(logs_dir, env_extra=None, args=FAST_RUN):
+    """Run convert.py with its logs redirected into `logs_dir`."""
     env = dict(os.environ)
     env.pop(run_log.RUN_LOG_ENV_VAR, None)
     env["PYTHONIOENCODING"] = "utf-8"
+    env[run_log.LOGS_DIR_ENV_VAR] = str(logs_dir)
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -39,39 +46,36 @@ def _run(tmp_path, env_extra=None, args=FAST_RUN):
     )
 
 
-@pytest.fixture
-def logs_dir(tmp_path, monkeypatch):
-    """Point convert.py's logs/ at a temp dir by running it from a copy root.
+def _config_with(tmp_path, keep):
+    """A copy of the shipped config with `logRunsKept` set; returns its path."""
+    cfg_path = tmp_path / f"cfg-{keep}.json"
+    base = json.loads((ROOT / "conversion_config.json").read_text(encoding="utf-8"))
+    base["logRunsKept"] = keep
+    cfg_path.write_text(json.dumps(base), encoding="utf-8")
+    return cfg_path
 
-    convert.py writes to SCRIPT_DIR/logs, so instead of relocating the whole
-    project the real logs/ is snapshotted and restored around each test.
-    """
-    real = ROOT / "logs"
-    backup = tmp_path / "backup"
-    if real.exists():
-        real.rename(backup)
-    try:
-        yield real
-    finally:
-        # Remove whatever the test produced, then put the user's logs back.
-        if real.exists():
-            for f in real.glob("*"):
-                try:
-                    f.unlink()
-                except OSError:
-                    pass
-            try:
-                real.rmdir()
-            except OSError:
-                pass
-        if backup.exists():
-            backup.rename(real)
+
+def _names(logs_dir):
+    """Every run-log name currently in `logs_dir`."""
+    return sorted(p.name for p in logs_dir.glob("run-*.log"))
+
+
+def _latest_text(logs_dir):
+    """Contents of the newest run log."""
+    return run_log.latest_log(logs_dir).read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def logs_dir(tmp_path):
+    """A private logs/ for one test."""
+    return tmp_path / "logs"
 
 
 def test_cli_run_writes_a_log(logs_dir):
+    """A standalone run leaves one log, named and framed."""
     r = _run(logs_dir)
-    path = run_log.log_path(logs_dir, 1)
-    assert path.exists(), "a standalone convert.py run must leave a run log"
+    path = run_log.latest_log(logs_dir)
+    assert path is not None, "a standalone convert.py run must leave a run log"
     text = path.read_text(encoding="utf-8")
     assert "# TESRACT run log" in text
     assert "NoSuchPlugin.esm" in text                # header records the argv
@@ -80,68 +84,76 @@ def test_cli_run_writes_a_log(logs_dir):
     assert "Conversion Pipeline" in text             # console output captured
 
 
-def test_informational_run_does_not_rotate(logs_dir):
+def test_log_name_states_the_time_and_the_plugin(logs_dir):
+    """The name alone identifies which build a log belongs to."""
+    _run(logs_dir)
+    name = run_log.latest_log(logs_dir).name
+    assert name.endswith("-NoSuchPlugin.esm.log"), name
+    assert name.split("-")[1] == time.strftime("%Y%m%d"), name
+
+
+def test_each_run_gets_its_own_file(logs_dir):
+    """Two runs leave two logs -- a run never overwrites its predecessor."""
+    _run(logs_dir)
+    first = run_log.latest_log(logs_dir).name
+    _run(logs_dir)
+    names = _names(logs_dir)
+    assert len(names) == 2 and first in names
+
+
+def test_informational_run_writes_no_log(logs_dir):
     """--help/--list-mods convert nothing; they must not evict a real log."""
     _run(logs_dir)                                   # a real run
-    before = run_log.log_path(logs_dir, 1).read_text(encoding="utf-8")
+    before = _latest_text(logs_dir)
     for args in (("--help",), ("--list-mods",)):
         _run(logs_dir, args=args)
-    assert not run_log.log_path(logs_dir, 2).exists()
-    assert run_log.log_path(logs_dir, 1).read_text(encoding="utf-8") == before
+    assert len(_names(logs_dir)) == 1
+    assert _latest_text(logs_dir) == before
 
 
 def test_console_output_is_unchanged_by_teeing(logs_dir):
     """The Tee must not swallow or mangle stdout -- the GUI pipes it."""
     r = _run(logs_dir)
-    body = run_log.log_path(logs_dir, 1).read_text(encoding="utf-8")
+    body = _latest_text(logs_dir)
     for line in (l for l in r.stdout.splitlines() if l.strip()):
         assert line in body, f"console line missing from log: {line!r}"
 
 
-def test_child_process_does_not_rotate(logs_dir):
+def test_child_process_writes_no_log(logs_dir):
     """A GUI child (TESCONV_RUN_LOG set) must not touch logs/ at all.
 
-    This is the whole reason rotation lives with the run's owner: a 7-step GUI
-    run would otherwise rotate seven times.
+    This is the whole reason the owner opens the log: a 7-step GUI run would
+    otherwise leave seven files holding one step each.
     """
-    _run(logs_dir)                                   # run 1 -> creates run-1
-    first = run_log.log_path(logs_dir, 1).read_text(encoding="utf-8")
+    _run(logs_dir)
+    owned = run_log.latest_log(logs_dir)
+    first = owned.read_text(encoding="utf-8")
 
-    owned = str(logs_dir / "run-1.log")
-    _run(logs_dir, {run_log.RUN_LOG_ENV_VAR: owned})
-    assert not run_log.log_path(logs_dir, 2).exists(), "child rotated the logs"
-    assert run_log.log_path(logs_dir, 1).read_text(encoding="utf-8") == first
+    _run(logs_dir, {run_log.RUN_LOG_ENV_VAR: str(owned)})
+    assert len(_names(logs_dir)) == 1, "child opened its own log"
+    assert owned.read_text(encoding="utf-8") == first
 
 
-def test_rotation_keeps_only_configured_count(logs_dir):
-    """Four runs, keep=3 -> the oldest is evicted, newest is run-1."""
+def test_retention_keeps_only_configured_count(logs_dir, tmp_path):
+    """Four runs at keep=3 -> the oldest is evicted, three remain."""
+    cfg_path = _config_with(tmp_path, 3)
     for _ in range(4):
-        _run(logs_dir)
-    kept = sorted(p.name for p in logs_dir.glob("run-*.log"))
-    assert kept == ["run-1.log", "run-2.log", "run-3.log"]
+        _run(logs_dir, args=("--config", str(cfg_path), *FAST_RUN))
+    assert len(_names(logs_dir)) == 3
 
 
 def test_log_runs_kept_zero_disables(logs_dir, tmp_path):
     """`logRunsKept: 0` is an explicit opt-out and must write nothing."""
-    cfg_path = tmp_path / "cfg.json"
-    base = json.loads((ROOT / "conversion_config.json").read_text(encoding="utf-8"))
-    base["logRunsKept"] = 0
-    cfg_path.write_text(json.dumps(base), encoding="utf-8")
-
-    _run(logs_dir, args=("--config", str(cfg_path), *FAST_RUN))
-    assert not run_log.log_path(logs_dir, 1).exists()
+    _run(logs_dir, args=("--config", str(_config_with(tmp_path, 0)), *FAST_RUN))
+    assert _names(logs_dir) == []
 
 
 def test_log_runs_kept_honours_custom_count(logs_dir, tmp_path):
-    cfg_path = tmp_path / "cfg.json"
-    base = json.loads((ROOT / "conversion_config.json").read_text(encoding="utf-8"))
-    base["logRunsKept"] = 2
-    cfg_path.write_text(json.dumps(base), encoding="utf-8")
-
+    """A lowered count is obeyed, not the shipped default."""
+    cfg_path = _config_with(tmp_path, 2)
     for _ in range(4):
         _run(logs_dir, args=("--config", str(cfg_path), *FAST_RUN))
-    kept = sorted(p.name for p in logs_dir.glob("run-*.log"))
-    assert kept == ["run-1.log", "run-2.log"]
+    assert len(_names(logs_dir)) == 2
 
 
 def test_shipped_config_declares_the_key():

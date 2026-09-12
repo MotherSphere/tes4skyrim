@@ -143,29 +143,36 @@ Linux/Mac than on Windows.
 <a id="run-logs"></a>
 ### Run logs
 
-Every run writes its console output to a rotating file in `logs/`, newest
-first, so the record of a run survives closing the GUI (whose scrollback was
-previously the only copy) and starting the next one:
+Every run writes its console output to its own file in `logs/`, so the record
+of a run survives closing the GUI (whose scrollback was previously the only
+copy) and starting the next one. Each name carries the start time and the
+plugin the run converted:
 
 ```
-logs/run-1.log   # most recent
-logs/run-2.log
-logs/run-3.log
+logs/run-20260911-143002-Oblivion.esm.log
+logs/run-20260911-101755-Nehrim.esm.log
+logs/run-20260908-224410-global.log        # a run with no plugin selected
 ```
 
-`logRunsKept` in `conversion_config.json` sets how many are kept (default 3);
-`0` disables run logging entirely. Names are fixed rather than timestamped so
-"the last run" is always `run-1.log` — the wall-clock time, version, and the
-command/steps are in the header inside the file. Tools ▸ Open Logs Folder
-opens the directory, and each run prints its own log path into the log.
+The timestamp leads so a plain lexical sort is chronological, and the plugin is
+in the name so the log for the build you just played is identifiable without
+opening every file. Two runs starting inside the same second get a `-2` suffix
+rather than one overwriting the other. `logRunsKept` in
+`conversion_config.json` sets how many are kept (default 20); `0` disables run
+logging entirely. A new run deletes only the surplus oldest, so an existing
+log's name never changes under a reader. Tools ▸ Open Logs Folder opens the
+directory, and each run prints its own log path into the log.
+`TESCONV_LOGS_DIR` overrides the directory (the test suite uses it so it never
+writes beside a live run).
 
-**The run's OWNER rotates, never each process.** A GUI run is usually several
-`convert.py` invocations (one per step), so rotating per process would leave
-the "last 3 runs" holding the last 3 *steps* of one run. The GUI rotates once,
-writes every line through its own sink, and sets `TESCONV_RUN_LOG` in the child
-environment; a child seeing that variable neither rotates nor writes, so the
-file has exactly one writer. A bare `python convert.py` sees no such variable,
-so there the process is the run and it rotates for itself.
+**The run's OWNER opens the log, never each process.** A GUI run is usually
+several `convert.py` invocations (one per step), so opening one per process
+would leave the retained set holding the last N *steps* of one run. The GUI
+opens one log, writes every line through its own sink, and sets
+`TESCONV_RUN_LOG` in the child environment; a child seeing that variable
+neither prunes nor writes, so the file has exactly one writer. A bare
+`python convert.py` sees no such variable, so there the process is the run and
+it opens one for itself.
 
 Lines are flushed as they are written — a log that only reaches disk on clean
 exit is empty exactly when it matters most. A run that is killed or hangs
@@ -417,7 +424,7 @@ TESConversion/
   conversion_config.json  # file list and settings
 
   core/                   # shared plumbing every stage imports
-    run_log.py            # rotating per-run logs (see Run logs)
+    run_log.py            # per-run logs (see Run logs)
     worker_budget.py      # parallel worker count
     subprocess_flags.py   # POPEN_FLAGS, windows_cmd, run_streamed
     process_job.py        # Win32 Job Object containment
@@ -435,7 +442,7 @@ TESConversion/
       mods.py             # Mods menu
       morrowind.py        # Settings > Morrowind source
 
-  logs/                   # run-1/2/3.log, newest first (gitignored)
+  logs/                   # run-<timestamp>-<plugin>.log (gitignored)
 
   tes4_export/            # TES4 binary -> KEY=VALUE text (pure dump)
     tes4_reader.py        # mmap-based binary reader

@@ -497,7 +497,7 @@ def create_window():
 
     cfg = load_config()
     root = make_root()
-    root.title(f"TES4 Auto-Convert  {version_info.current_version()}")
+    root.title(f"T.E.SR.A.C.T  {version_info.current_version()}")
     root.geometry("1060x1030")
     root.minsize(860, 520)
     root.configure(bg=CLR["bg"])
@@ -721,9 +721,9 @@ def build_title(parent, banner_path) -> None:
         label.image = image
         label.pack(fill=tk.X)
         return
-    ttk.Label(frame, text="TES4 Auto-Convert",
+    ttk.Label(frame, text="TESRACT",
               style="Head.TLabel").pack(anchor="w")
-    ttk.Label(frame, text="Oblivion to Skyrim SE converter",
+    ttk.Label(frame, text="Gamebryo to Skyrim conversion",
               style="PanelSub.TLabel").pack(anchor="w")
 
 # ---------------------------------------------------------------------------

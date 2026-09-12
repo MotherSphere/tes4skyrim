@@ -325,11 +325,11 @@ def _about(app) -> None:
     version = version_info.current_version()
     note = ("  (development build)"
             if version_info.is_dev_version(version) else "")
-    app.info("About TES4 Auto-Convert",
-             f"TES4 Auto-Convert {version}{note}\n\n"
-             "Converts TES4 (Oblivion) master and plugin files into TES5 "
-             "(Skyrim SE) format — records, meshes, textures, collision, "
-             "animations, sounds, dialogue and scripts.\n\n"
+    app.info("About TES Auto-Convert",
+             f"T.E.SR.A.C.T {version}{note}\n\n"
+             "Comprehensively converts Morrowind, Oblivion, Fallout 3, and "
+             "Fallout NV data into TES5 (Skyrim SE) format — including "
+             "plugins, assets, scripts, etc.\n\n"
              "Released under the MIT License. Bethesda game assets are not "
              "redistributed; this tool converts the copies you already own.",
              links=(("GitHub — source, releases and issues",

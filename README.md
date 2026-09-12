@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="TES4 AutoConvert — Oblivion to Skyrim Conversion" width="720">
+  <img src="docs/assets/banner.svg" alt="TES Auto-Convert — Gamebryo to Skyrim Conversion" width="720">
 </p>
 
 <p align="center">

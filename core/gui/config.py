@@ -88,9 +88,9 @@ ICON_HANDLES = []
 #: (key, cli_flag, label, description, default_on, needs_file), in run order.
 STEPS = [
     ("export",             "--export-only",        "1. Export",
-     "Parse TES4 binary into a text cache",          True,  True),
+     "Parse source binary into a text cache",        True,  True),
     ("extract",            "--extract-only",       "2. Extract",
-     "Pull assets from TES4 BSA archives",            True,  True),
+     "Pull assets from source BSA archives",          True,  True),
     ("meshes",             "--meshes-only",        "3. Meshes",
      "Convert standard NIFs and copy textures",                 True,  True),
     ("speedtrees",         "--speedtrees-only",    "4. SpeedTrees",
@@ -102,12 +102,18 @@ STEPS = [
     ("sounds",             "--sounds-only",        "7. Sounds",
      "Convert voice files to XWM and copy sounds",               True,  True),
     ("scripts",            "--scripts-only",       "8. Scripts",
-     "Convert Oblivion scripts to Papyrus",      True,  True),
+     "Convert source scripts to Papyrus",        True,  True),
     ("pack",               "--pack-only",          "9. Pack BSAs",
      "Pack assets into BSA archives",             False, True),
     ("pack_zip",           "--pack-zip-only",      "10. Pack Mod Zip",
      "Zip mod files for installation",   True,  True),
 ]
+
+def step_names(keys) -> str:
+    """`keys` as STEPS labels (no "N. " prefix), comma-separated."""
+    labels = {key: label.split('. ', 1)[-1] for key, _f, label, *_r in STEPS}
+    return ', '.join(labels.get(k, k) for k in keys)
+
 
 #: The packing pair, whose default tick state is a user setting, not a constant.
 PACKING_STEPS = ("pack", "pack_zip")

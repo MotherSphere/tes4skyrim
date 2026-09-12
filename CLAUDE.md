@@ -202,6 +202,9 @@ real data, or a failing-then-passing test.
   real tree. Order: `os.rmdir()` each link, verify each target still has its
   files, then remove. `is_junction()` misses them — track links as you create
   them. Both dirs are gitignored, so nothing restores them.
+- 🛑 **NEVER OVERWRITE AN ARTIFACT TO SET UP AN A/B OR COMPARISON.** Work on
+  scratchpad copies and point the tool at them. Regenerating wastes the user's
+  time, and it destroys the baseline the comparison needed.
 - **NEVER `git stash` / `git stash pop`** in this repository.
 - **NEVER `git commit` or `git push`.** The user commits after in-game testing.
 - **NEVER `git add` / `git rm`** (staging, including staged deletions). Use plain

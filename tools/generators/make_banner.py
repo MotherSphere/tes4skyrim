@@ -1,13 +1,17 @@
-"""Regenerate the GUI banner: TESRACT in the Oblivion font, Dwemer brass.
+"""Regenerate the GUI banner: TES / AUTO-CONVERT in the Oblivion font.
 
 Usage:
-    python tools/generators/make_banner.py [--svg docs/assets/banner.svg] [--png docs/assets/banner.png]
+    python tools/generators/make_banner.py [--svg <path>] [--png <path>]
 
-The title is traced from `references/oblivion-font.ttf` into real SVG outlines
-rather than a `font-family` reference, so the banner renders identically on a
-machine that has never seen the font. The letters carry the same brass ramp
-measured from the vanilla Dwemer puzzle cube that `tools/generators/make_app_icon.py`
-applies to the lexicon cube, so the banner and the app icon read as one set.
+Defaults to docs/assets/banner.{svg,png} -- the pair the GUI loads at runtime.
+
+Both title tiers are traced from `references/oblivion-font.ttf` into real SVG
+outlines rather than a `font-family` reference, so the banner renders
+identically on a machine that has never seen the font. Both carry the brass
+ramp measured from the vanilla Dwemer puzzle cube that
+`tools/generators/make_app_icon.py` applies to the lexicon cube, so the banner
+and the app icon read as one set; the divider, not a color change, is what
+separates the two tiers.
 
 The PNG is rendered FROM the SVG, so the two can never drift.
 """
@@ -24,13 +28,15 @@ from tools.generators import dwemer_palette
 ROOT = Path(__file__).resolve().parent.parent.parent
 FONT = ROOT / "references" / "oblivion-font.ttf"
 
-TITLE = "TESRACT"
-SUBTITLE = "OBLIVION \u2192 SKYRIM CONVERTER"
+TITLE = "TES"
+SUBTITLE = "AUTO-CONVERT"
+TAGLINE = "GAMEBRYO \u2192 SKYRIM CONVERSION"
 
-W, H = 960, 180
+W = 960
 
-# The brass comes from the shared palette, so the banner and the app icon can
-# never drift apart. See tools/generators/dwemer_palette.py for the measurements.
+#: Ink band within the 220-unit layout space, measured from the rendered alpha.
+INK_TOP, INK_BOTTOM = 28.5, 188.0
+
 BRASS = dwemer_palette.BANNER_TITLE_STOPS
 
 
@@ -62,22 +68,39 @@ def gradient_stops(gid, stops):
             f'{body}\n    </linearGradient>')
 
 
-def build_svg():
-    title_size = 116
-    paths, title_w = glyph_paths(TITLE, title_size, letter_spacing=10)
-    tx = (W - title_w) / 2
-    baseline = 90
+def _tier(text, size, spacing, baseline, fill):
+    """One centred title tier as (edge_svg, face_svg).
 
-    # Each glyph is emitted twice: a dark offset copy that reads as the carved
-    # edge, then the brass face over it.
-    face, edge = [], []
+    Each glyph is emitted twice: a dark offset copy that reads as the carved
+    edge, then the lit face over it.
+    """
+    paths, width = glyph_paths(text, size, letter_spacing=spacing)
+    tx = (W - width) / 2
+
+    edge, face = [], []
     for d, x, scale in paths:
         t = (f'translate({tx + x:.2f} {baseline}) '
              f'scale({scale:.5f} {-scale:.5f})')
         edge.append(f'<path transform="{t}" d="{d}"/>')
         face.append(f'<path transform="{t}" d="{d}"/>')
+    return ("".join(edge),
+            f'<g fill="{fill}">{"".join(face)}</g>')
 
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-label="{TITLE}">
+
+def build_svg():
+    """The banner SVG: two brass title tiers, a divider, then the tagline.
+
+    Authored in the full 220-unit space the shipped banner used, so its sizes
+    and baselines carry over unchanged; the viewBox is then cropped to the ink
+    band, because the banner is transparent and an empty margin would become
+    dead padding around the GUI sidebar logo.
+    """
+    top_edge, top_face = _tier(TITLE, 88, 10, 92, "url(#brass)")
+    low_edge, low_face = _tier(SUBTITLE, 43, 6, 156, "url(#brass)")
+
+    crop_h = INK_BOTTOM - INK_TOP
+
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 {INK_TOP} {W} {crop_h}" width="{W}" height="{crop_h:g}" role="img" aria-label="{TITLE} {SUBTITLE}">
   <defs>
 {gradient_stops("brass", BRASS)}
     <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
@@ -93,24 +116,20 @@ def build_svg():
   <!-- No background rect: the banner is transparent so it sits on whatever
        panel color the GUI theme is using, instead of punching a dark hole. -->
 
-  <!-- Title: Oblivion font traced to outlines, Dwemer brass ramp -->
+  <!-- Both tiers: Oblivion font traced to outlines, one Dwemer brass ramp -->
   <g filter="url(#engrave)">
     <g fill="#2a1a08" opacity="0.85" transform="translate(0 2)">
-      {"".join(edge)}
+      {top_edge}{low_edge}
     </g>
-    <g fill="url(#brass)">
-      {"".join(face)}
-    </g>
+    {top_face}
+    {low_face}
   </g>
 
-  <!-- Divider rule -->
-  <rect x="230" y="124" width="500" height="2" fill="url(#rule)"/>
+  <!-- Divider rule, between the two title tiers -->
+  <rect x="230" y="108" width="500" height="2" fill="url(#rule)"/>
 
-  <!-- The GUI scales this 960px banner down to a 350px sidebar column, so the
-       subtitle is sized for that ~0.36 factor: at the old 15px it rendered
-       around 5px tall and was unreadable. -->
-  <text x="{W // 2}" y="174" text-anchor="middle" font-family="Georgia, serif"
-        font-size="27" letter-spacing="4" fill="#b9c3ce">{SUBTITLE}</text>
+  <text x="{W // 2}" y="188" text-anchor="middle" font-family="Georgia, serif"
+        font-size="15" letter-spacing="6" fill="#8f9aa6">{TAGLINE}</text>
 </svg>
 '''
 
@@ -136,13 +155,16 @@ def render_png(svg_path: Path, png_path: Path, scale: int = 2) -> bool:
     if exe is None:
         return False
 
+    out_w = W * scale
+    out_h = round((INK_BOTTOM - INK_TOP) * scale)
+
     # Wrap the SVG in a page sized to the exact output so the screenshot needs
     # no cropping: a bare --screenshot of an .svg letterboxes it in a viewport.
     svg_b64 = base64.b64encode(svg_path.read_bytes()).decode("ascii")
     html = (
         "<!doctype html><html><head><meta charset='utf-8'><style>"
         "html,body{margin:0;padding:0;background:transparent}"
-        f"img{{display:block;width:{W * scale}px;height:{H * scale}px}}"
+        f"img{{display:block;width:{out_w}px;height:{out_h}px}}"
         "</style></head><body>"
         f"<img src='data:image/svg+xml;base64,{svg_b64}'></body></html>"
     )
@@ -155,7 +177,7 @@ def render_png(svg_path: Path, png_path: Path, scale: int = 2) -> bool:
         subprocess.run(
             [exe, "--headless", "--disable-gpu", "--hide-scrollbars",
              f"--screenshot={shot}",
-             f"--window-size={W * scale},{H * scale}",
+             f"--window-size={out_w},{out_h}",
              "--default-background-color=00000000",
              page.as_uri()],
             check=True, capture_output=True, timeout=90)
@@ -171,8 +193,10 @@ def render_png(svg_path: Path, png_path: Path, scale: int = 2) -> bool:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--svg", default=str(ROOT / "docs" / "banner.svg"))
-    ap.add_argument("--png", default=str(ROOT / "docs" / "banner.png"))
+    ap.add_argument("--svg",
+                    default=str(ROOT / "docs" / "assets" / "banner.svg"))
+    ap.add_argument("--png",
+                    default=str(ROOT / "docs" / "assets" / "banner.png"))
     a = ap.parse_args()
 
     svg = build_svg()

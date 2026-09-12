@@ -1,6 +1,7 @@
-"""Tests for run_log: rotation ordering, config clamping, degradation."""
+"""Tests for run_log: naming, retention, config clamping, degradation."""
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -9,89 +10,230 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import core.run_log as run_log
 
-
-def _write(logs, index, text):
-    run_log.log_path(logs, index).write_text(text, encoding="utf-8")
+_WHEN = time.mktime((2026, 9, 11, 14, 30, 2, 0, 0, -1))
 
 
-def _read(logs, index):
-    p = run_log.log_path(logs, index)
-    return p.read_text(encoding="utf-8") if p.exists() else None
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-# ── rotation ──────────────────────────────────────────────────────────────
-
-def test_rotate_shifts_newest_to_oldest(tmp_path):
-    _write(tmp_path, 1, "first")
-    _write(tmp_path, 2, "second")
-    run_log.rotate(tmp_path, keep=3)
-    # run-1 freed for the new run; the others shifted down by one.
-    assert _read(tmp_path, 2) == "first"
-    assert _read(tmp_path, 3) == "second"
+def _write(logs, name, text):
+    """Create one file under `logs` with the given name and contents."""
+    (Path(logs) / name).write_text(text, encoding="utf-8")
 
 
-def test_rotate_descending_never_clobbers(tmp_path):
-    """Five runs: each must evict the oldest, never overwrite a live file."""
-    for run in range(1, 6):
-        run_log.rotate(tmp_path, keep=3)
-        _write(tmp_path, 1, f"run{run}")
-        # Only `keep` files ever exist.
-        assert sorted(p.name for p in tmp_path.glob("run-*.log")) == \
-            sorted(f"run-{i}.log" for i in range(1, min(run, 3) + 1))
-    # After 5 runs the retained set is the last 3, newest first.
-    assert _read(tmp_path, 1) == "run5"
-    assert _read(tmp_path, 2) == "run4"
-    assert _read(tmp_path, 3) == "run3"
+def _run(logs, stamp, plugin="Oblivion.esm", text="x"):
+    """Create a log as a run at `stamp` would have; returns its name."""
+    name = f"run-{stamp}-{plugin}.log"
+    _write(logs, name, text)
+    return name
 
 
-def test_rotate_prunes_when_keep_lowered(tmp_path):
-    for i in range(1, 6):
-        _write(tmp_path, i, f"old{i}")
-    run_log.rotate(tmp_path, keep=2)
-    assert run_log.log_path(tmp_path, 3).exists() is False
-    assert run_log.log_path(tmp_path, 4).exists() is False
-    assert _read(tmp_path, 2) == "old1"
+def _names(logs):
+    """Every run-log name under `logs`, oldest first."""
+    return sorted(p.name for p in Path(logs).glob("run-*.log"))
 
 
-def test_rotate_creates_missing_dir(tmp_path):
+def _path(logs):
+    """A run-log path under `logs` for tests about file contents, not naming."""
+    return Path(logs) / run_log.log_name("Oblivion.esm")
+
+
+# ---------------------------------------------------------------------------
+# Naming
+# ---------------------------------------------------------------------------
+
+def test_log_name_carries_stamp_and_plugin():
+    """The name states when the run happened and what it converted."""
+    assert run_log.log_name("Oblivion.esm", _WHEN) == \
+        "run-20260911-143002-Oblivion.esm.log"
+
+
+def test_log_name_without_plugin_uses_placeholder():
+    """A global action still gets a name, with NO_PLUGIN standing in."""
+    assert run_log.log_name(None, _WHEN) == \
+        f"run-20260911-143002-{run_log.NO_PLUGIN}.log"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Oblivion.esm", "Oblivion.esm"),
+    ("Tamriel Landscape Pack", "Tamriel Landscape Pack"),
+    ("a/b\\c:d*e?f", "a_b_c_d_e_f"),
+    ("", run_log.NO_PLUGIN),
+    (None, run_log.NO_PLUGIN),
+    ("   ", run_log.NO_PLUGIN),
+    ("...", run_log.NO_PLUGIN),
+])
+def test_plugin_label(raw, expected):
+    """Path and glob characters are neutralised; nothing yields a dotfile."""
+    assert run_log.plugin_label(raw) == expected
+
+
+def test_free_log_path_never_overwrites_the_same_second(tmp_path):
+    """Two fast runs inside one second must not collapse into one file."""
+    first = run_log.free_log_path(tmp_path, "Oblivion.esm")
+    first.write_text("first", encoding="utf-8")
+    second = run_log.free_log_path(tmp_path, "Oblivion.esm")
+    assert second != first
+    second.write_text("second", encoding="utf-8")
+    assert first.read_text(encoding="utf-8") == "first"
+
+
+def test_free_log_path_is_plain_when_the_second_is_free(tmp_path):
+    """The suffix appears only on a collision, never on a normal run."""
+    assert run_log.free_log_path(tmp_path, "Oblivion.esm").name == \
+        run_log.log_name("Oblivion.esm")
+
+
+def test_log_name_is_openable_for_a_hostile_plugin(tmp_path):
+    """A mod title with a colon and a slash must still open."""
+    path = tmp_path / run_log.log_name("Mod: v2/beta")
+    run_log.RunLog(path, {}).close()
+    assert path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Ordering
+# ---------------------------------------------------------------------------
+
+def test_existing_logs_is_newest_first(tmp_path):
+    """Listing order is chronological regardless of creation order."""
+    _run(tmp_path, "20260901-120000")
+    _run(tmp_path, "20260911-090000")
+    _run(tmp_path, "20260905-235959")
+    assert [p.name.split("-")[1] for p in run_log.existing_logs(tmp_path)] == \
+        ["20260911", "20260905", "20260901"]
+
+
+def test_latest_log_picks_the_newest_whatever_the_plugin(tmp_path):
+    """Recency wins: the plugin name must not influence the ordering."""
+    _run(tmp_path, "20260911-090000", "Zzz.esm")
+    newest = _run(tmp_path, "20260911-100000", "Aaa.esm")
+    assert run_log.latest_log(tmp_path).name == newest
+
+
+def test_latest_log_when_empty(tmp_path):
+    """No logs yet is None, not a crash."""
+    assert run_log.latest_log(tmp_path) is None
+
+
+def test_existing_logs_ignores_foreign_files(tmp_path):
+    """Only run logs count -- logs/ holds other files too."""
+    _write(tmp_path, "notes.txt", "x")
+    _write(tmp_path, "compile_errors.log", "x")
+    kept = _run(tmp_path, "20260911-090000")
+    assert [p.name for p in run_log.existing_logs(tmp_path)] == [kept]
+
+
+# ---------------------------------------------------------------------------
+# Retention
+# ---------------------------------------------------------------------------
+
+def test_prune_leaves_room_for_the_new_run(tmp_path):
+    """keep=3 means 3 on disk AFTER the run, so 2 survive the prune."""
+    for day in range(1, 4):
+        _run(tmp_path, f"202609{day:02d}-120000")
+    assert run_log.prune(tmp_path, keep=3) is True
+    assert _names(tmp_path) == ["run-20260902-120000-Oblivion.esm.log",
+                                "run-20260903-120000-Oblivion.esm.log"]
+
+
+def test_prune_evicts_only_the_oldest(tmp_path):
+    """Twenty-five runs at keep=20: the retained set is the newest 20."""
+    for day in range(1, 26):
+        run_log.prune(tmp_path, keep=20)
+        _run(tmp_path, f"202609{day:02d}-120000")
+        assert len(_names(tmp_path)) == min(day, 20)
+    kept = _names(tmp_path)
+    assert kept[0] == "run-20260906-120000-Oblivion.esm.log"
+    assert kept[-1] == "run-20260925-120000-Oblivion.esm.log"
+
+
+def test_prune_keeps_names_stable(tmp_path):
+    """A surviving log keeps its name -- a reader's path stays valid."""
+    survivor = _run(tmp_path, "20260911-120000", text="survivor")
+    _run(tmp_path, "20260901-120000", text="evicted")
+    run_log.prune(tmp_path, keep=2)
+    assert (tmp_path / survivor).read_text(encoding="utf-8") == "survivor"
+
+
+def test_prune_when_keep_lowered(tmp_path):
+    """Lowering logRunsKept prunes the surplus instead of orphaning it."""
+    for day in range(1, 6):
+        _run(tmp_path, f"202609{day:02d}-120000")
+    run_log.prune(tmp_path, keep=2)
+    assert _names(tmp_path) == ["run-20260905-120000-Oblivion.esm.log"]
+
+
+def test_prune_creates_missing_dir(tmp_path):
+    """The first ever run creates logs/."""
     logs = tmp_path / "logs"
-    assert run_log.rotate(logs, keep=3) is True
+    assert run_log.prune(logs, keep=3) is True
     assert logs.is_dir()
 
 
-def test_rotate_disabled_when_keep_zero(tmp_path):
-    assert run_log.rotate(tmp_path, keep=0) is False
+def test_prune_disabled_when_keep_zero(tmp_path):
+    """The opt-out declines the run; it must never delete what is there."""
+    kept = _run(tmp_path, "20260911-120000")
+    assert run_log.prune(tmp_path, keep=0) is False
+    assert _names(tmp_path) == [kept]
 
 
-def test_rotate_tolerates_gaps(tmp_path):
-    """A missing run-1 (deleted by hand) must not abort the shift."""
-    _write(tmp_path, 2, "second")
-    run_log.rotate(tmp_path, keep=3)
-    assert _read(tmp_path, 3) == "second"
+def test_prune_of_empty_dir(tmp_path):
+    """Nothing to prune still authorises the new log."""
+    assert run_log.prune(tmp_path, keep=3) is True
 
 
-# ── configuration ─────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Plugin from argv
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("argv,expected", [
+    (["-f", "Oblivion.esm", "--export-only"], "Oblivion.esm"),
+    (["--file", "Nehrim.esm"], "Nehrim.esm"),
+    (["--file=Nehrim.esm"], "Nehrim.esm"),
+    (["-f=Nehrim.esm"], "Nehrim.esm"),
+    (["--meshes-only"], None),
+    (["-f"], None),
+    ([], None),
+])
+def test_plugin_from_argv(argv, expected):
+    """A dangling -f with no value names no plugin rather than crashing."""
+    assert run_log.plugin_from_argv(argv) == expected
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+_DEFAULT = run_log.DEFAULT_RUNS_KEPT
+
 
 @pytest.mark.parametrize("cfg,expected", [
-    (None, 3),
-    ({}, 3),
+    (None, _DEFAULT),
+    ({}, _DEFAULT),
     ({"logRunsKept": 5}, 5),
-    ({"logRunsKept": 0}, 0),          # explicit opt-out is honoured
-    ({"logRunsKept": "7"}, 7),        # JSON string coerces
-    ({"logRunsKept": -1}, 3),         # out of range -> default
-    ({"logRunsKept": 500}, 3),        # absurd -> default, never hoard
-    ({"logRunsKept": "abc"}, 3),      # malformed -> default
-    ({"logRunsKept": None}, 3),
-    ({"logRunsKept": True}, 3),       # bool is not a count
+    ({"logRunsKept": 0}, 0),               # explicit opt-out is honoured
+    ({"logRunsKept": "7"}, 7),             # JSON string coerces
+    ({"logRunsKept": 200}, 200),           # the ceiling itself is allowed
+    ({"logRunsKept": -1}, _DEFAULT),       # out of range -> default
+    ({"logRunsKept": 5000}, _DEFAULT),     # absurd -> default, never hoard
+    ({"logRunsKept": "abc"}, _DEFAULT),    # malformed -> default
+    ({"logRunsKept": None}, _DEFAULT),
+    ({"logRunsKept": True}, _DEFAULT),     # bool is not a count
 ])
 def test_runs_kept(cfg, expected):
+    """A bad value falls back rather than costing the user their logs."""
     assert run_log.runs_kept(cfg) == expected
 
 
-# ── file contents ─────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# File contents
+# ---------------------------------------------------------------------------
 
 def test_header_footer_roundtrip(tmp_path):
-    path = run_log.log_path(tmp_path, 1)
+    path = _path(tmp_path)
     log = run_log.RunLog(path, {"Command": "Pipeline run", "Steps": "export"})
     log.write_line("hello")
     log.write_line("world")
@@ -108,7 +250,7 @@ def test_header_footer_roundtrip(tmp_path):
 
 def test_lines_written_before_close(tmp_path):
     """A hung or killed run must still have its lines on disk."""
-    path = run_log.log_path(tmp_path, 1)
+    path = _path(tmp_path)
     log = run_log.RunLog(path, {})
     log.write_line("partial progress")
     # Deliberately not closed -- simulates a kill.
@@ -118,7 +260,7 @@ def test_lines_written_before_close(tmp_path):
 
 
 def test_empty_header_values_skipped(tmp_path):
-    path = run_log.log_path(tmp_path, 1)
+    path = _path(tmp_path)
     run_log.RunLog(path, {"Command": "x", "Output": "", "Version": None}).close()
     text = path.read_text(encoding="utf-8")
     assert "Output" not in text and "Version" not in text
@@ -126,7 +268,7 @@ def test_empty_header_values_skipped(tmp_path):
 
 def test_write_after_failure_is_silent(tmp_path):
     """A dead handle degrades to no-op; it must never raise into a run."""
-    log = run_log.RunLog(run_log.log_path(tmp_path, 1), {})
+    log = run_log.RunLog(_path(tmp_path), {})
     log._fh.close()          # simulate the handle dying mid-run
     log.write_line("still fine")   # must not raise
     log.close()
@@ -143,7 +285,9 @@ def test_unwritable_path_degrades(tmp_path):
     log.close("EXIT: OK")
 
 
-# ── tee ───────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Tee
+# ---------------------------------------------------------------------------
 
 class _FakeStream:
     def __init__(self):
@@ -158,7 +302,7 @@ class _FakeStream:
 
 
 def test_tee_mirrors_and_passes_through(tmp_path):
-    path = run_log.log_path(tmp_path, 1)
+    path = _path(tmp_path)
     log = run_log.RunLog(path, {})
     stream = _FakeStream()
     tee = run_log.Tee(stream, log)
@@ -172,7 +316,7 @@ def test_tee_mirrors_and_passes_through(tmp_path):
 
 def test_tee_buffers_partial_lines(tmp_path):
     """print(..., end="") fragments must land as ONE log line."""
-    path = run_log.log_path(tmp_path, 1)
+    path = _path(tmp_path)
     log = run_log.RunLog(path, {})
     tee = run_log.Tee(_FakeStream(), log)
 
@@ -185,7 +329,7 @@ def test_tee_buffers_partial_lines(tmp_path):
 
 
 def test_tee_flushes_trailing_partial_on_finish(tmp_path):
-    path = run_log.log_path(tmp_path, 1)
+    path = _path(tmp_path)
     log = run_log.RunLog(path, {})
     real_out = sys.stdout
     sys.stdout = run_log.Tee(_FakeStream(), log)
@@ -203,7 +347,9 @@ def test_tee_forwards_unknown_attributes():
     assert run_log.Tee(stream, None).encoding == "utf-8"
 
 
-# ── ownership ─────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Ownership
+# ---------------------------------------------------------------------------
 
 def test_child_process_does_not_open_its_own_log(tmp_path, monkeypatch):
     """TESCONV_RUN_LOG set => a parent owns the run; the child must not write."""
@@ -212,9 +358,11 @@ def test_child_process_does_not_open_its_own_log(tmp_path, monkeypatch):
     assert list(tmp_path.glob("run-*.log")) == []
 
 
-def test_start_cli_run_rotates_and_tees(tmp_path, monkeypatch):
+def test_start_cli_run_opens_and_tees(tmp_path, monkeypatch):
+    """The new log is named from argv's -f, and the prior run survives."""
     monkeypatch.delenv(run_log.RUN_LOG_ENV_VAR, raising=False)
-    _write(tmp_path, 1, "previous run")
+    monkeypatch.setattr(sys, "argv", ["convert.py", "-f", "Nehrim.esm"])
+    previous = _run(tmp_path, "20260101-120000", text="previous run")
     real_out, real_err = sys.stdout, sys.stderr
     try:
         log = run_log.start_cli_run(tmp_path, {"logRunsKept": 3},
@@ -227,11 +375,26 @@ def test_start_cli_run_rotates_and_tees(tmp_path, monkeypatch):
         sys.stdout, sys.stderr = real_out, real_err
 
     assert sys.stdout is real_out                     # streams restored
-    assert _read(tmp_path, 2) == "previous run"       # prior run preserved
-    assert "captured line" in _read(tmp_path, 1)
+    assert log.path.name.endswith("-Nehrim.esm.log")
+    assert (tmp_path / previous).read_text(encoding="utf-8") == "previous run"
+    assert "captured line" in log.path.read_text(encoding="utf-8")
+
+
+def test_start_cli_run_names_a_pluginless_run(tmp_path, monkeypatch):
+    """A global run (no -f in argv) still gets a log."""
+    monkeypatch.delenv(run_log.RUN_LOG_ENV_VAR, raising=False)
+    monkeypatch.setattr(sys, "argv", ["convert.py", "--lod-only"])
+    real_out, real_err = sys.stdout, sys.stderr
+    try:
+        log = run_log.start_cli_run(tmp_path, {"logRunsKept": 3})
+        run_log.finish_cli_run(log, "EXIT: OK")
+    finally:
+        sys.stdout, sys.stderr = real_out, real_err
+    assert log.path.name.endswith(f"-{run_log.NO_PLUGIN}.log")
 
 
 def test_start_cli_run_disabled_returns_none(tmp_path, monkeypatch):
+    """`logRunsKept: 0` opts out without teeing the streams."""
     monkeypatch.delenv(run_log.RUN_LOG_ENV_VAR, raising=False)
     assert run_log.start_cli_run(tmp_path, {"logRunsKept": 0}) is None
     assert not isinstance(sys.stdout, run_log.Tee)
@@ -241,7 +404,9 @@ def test_finish_cli_run_accepts_none():
     run_log.finish_cli_run(None)  # must not raise
 
 
-# ── formatting ────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Formatting
+# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("secs,expected", [
     (0, "0s"), (9, "9s"), (61, "1m 01s"), (3600, "1h 00m 00s"),

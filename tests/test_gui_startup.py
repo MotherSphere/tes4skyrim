@@ -108,6 +108,117 @@ def test_a_broken_tkdnd_runtime_also_falls_back(display, monkeypatch):
         root.destroy()
 
 
+# ---------------------------------------------------------------------------
+# Output log autoscroll
+# ---------------------------------------------------------------------------
+
+
+class _QuietSink:
+    """A RunLogSink that records nothing, for driving `bind` in a test."""
+
+    def __init__(self):
+        self.banner = [None]
+
+    def record_error(self, line, tag):
+        """Error bookkeeping is not what these tests measure."""
+
+    def write(self, line):
+        """The run-log mirror is not what these tests measure."""
+
+
+def _log_pane(root):
+    """A realized, disabled Text wired to `app.log`, plus its drain pump.
+
+    The pane is updated before returning so it is laid out: an empty realized
+    pane reads (0.0, 1.0), which is the bottom, while an unrealized one
+    reports a stale fraction.
+    """
+    import queue
+    import threading
+    import tkinter as tk
+
+    from core.gui import runner
+
+    text = tk.Text(root, state=tk.DISABLED, height=10)
+    text.pack(fill=tk.BOTH, expand=True)
+    app = type("App", (), {})()
+    app.root, app.log_text = root, text
+    app.running = threading.Event()
+    app.running.set()
+    runner.bind(app, _QuietSink(), text)
+    q = queue.Queue()
+    drain = runner.make_drain(app, q, [False], lambda ws: None)
+    root.update()
+
+    def burst(lines):
+        """Queue `lines` and pump them, the way a live run delivers output."""
+        for line in lines:
+            q.put(line)
+        drain()
+        root.update()
+
+    return text, burst
+
+
+def test_log_follows_the_tail_when_at_the_bottom(display):
+    """The default: new output scrolls into view."""
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.geometry("600x200")
+    try:
+        text, burst = _log_pane(root)
+        burst([f"line {i}" for i in range(200)])
+        assert text.get("end-2l", "end-1c").strip() == "line 199"
+    finally:
+        root.destroy()
+
+
+def test_scrolling_up_is_not_yanked_back_down(display):
+    """Reading back through a live run must not fight the incoming lines.
+
+    Asserts on the top visible LINE, not the scrollbar fraction: appending
+    grows the document, so the same line sits at an ever-smaller fraction
+    without anything having scrolled.
+    """
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.geometry("600x200")
+    try:
+        text, burst = _log_pane(root)
+        burst([f"line {i}" for i in range(200)])
+
+        text.yview_moveto(0.2)
+        root.update()
+        parked = text.index("@0,0")
+        burst([f"line {i}" for i in range(200, 400)])
+        assert text.index("@0,0") == parked
+    finally:
+        root.destroy()
+
+
+def test_returning_to_the_bottom_resumes_following(display):
+    """Scrolling back down re-arms autoscroll."""
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.geometry("600x200")
+    try:
+        text, burst = _log_pane(root)
+        burst([f"line {i}" for i in range(200)])
+        text.yview_moveto(0.2)
+        root.update()
+        burst([f"line {i}" for i in range(200, 400)])
+
+        text.yview_moveto(1.0)
+        root.update()
+        burst([f"line {i}" for i in range(400, 500)])
+        assert text.get("end-2l", "end-1c").strip() == "line 499"
+    finally:
+        root.destroy()
+
+
 class TestCollisionWindingSetting:
     """Settings ▸ Fix collision winding must preserve the per-plugin defaults.
 

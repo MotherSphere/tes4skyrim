@@ -67,6 +67,7 @@ from core.gui.config import (
     default_on_steps,
     load_config,
     run_process,
+    step_names,
 )
 
 # ---------------------------------------------------------------------------
@@ -246,7 +247,11 @@ class RunLogSink:
         self.banner = [None]
 
     def begin(self, header: dict, logs_dir) -> None:
-        """Rotate and open this run's log. Never fails a run."""
+        """Prune old logs and open this run's, named for the header's File.
+
+        A global action has no File, so its log is named for NO_PLUGIN.
+        Never fails a run.
+        """
         self.end()
         try:
             keep = run_log.runs_kept(load_config())
@@ -255,11 +260,13 @@ class RunLogSink:
         if keep <= 0:
             return
         try:
-            if not run_log.rotate(logs_dir, keep):
+            logs_dir = run_log.logs_root(logs_dir)
+            if not run_log.prune(logs_dir, keep):
                 return
             full = {"Version": version_info.current_version()}
             full.update(header)
-            log = run_log.RunLog(run_log.log_path(logs_dir, 1), full)
+            path = run_log.free_log_path(logs_dir, header.get("File"))
+            log = run_log.RunLog(path, full)
             if log.active:
                 self.log = log
         except Exception:
@@ -356,16 +363,39 @@ def error_summary(sink, emit) -> None:
     emit(_RULE)
 
 
+#: Slack in the scrollbar fraction that still counts as "at the bottom".
+_BOTTOM_EPSILON = 0.0001
+
+
+def _is_at_bottom(log_text) -> bool:
+    """Whether the pane is scrolled to the end, so new lines should follow.
+
+    Read BEFORE the insert: afterwards the fraction has already moved.  A
+    pane too short to scroll yields (0.0, 1.0), which counts as the bottom.
+    """
+    try:
+        return log_text.yview()[1] >= 1.0 - _BOTTOM_EPSILON
+    except Exception:
+        return True
+
+
 def bind(app, sink, log_text) -> None:
     """Bind `app.log` and `app.clear_log` onto the carrier."""
-    def _log(line: str):
-        """Colour one line into the pane and mirror it to the run log."""
+    def _log(line: str, follow: bool = None):
+        """Colour one line into the pane and mirror it to the run log.
+
+        `follow` is the caller's already-made decision for a whole burst of
+        lines; None means decide for this line alone.
+        """
+        if follow is None:
+            follow = _is_at_bottom(log_text)
         log_text.configure(state="normal")
         tag = classify(sink.banner, line)
         sink.record_error(line, tag)
         log_text.insert("end", line + "\n", tag) if tag else \
             log_text.insert("end", line + "\n")
-        log_text.see("end")
+        if follow:
+            log_text.see("end")
         log_text.configure(state="disabled")
         sink.write(line)
 
@@ -923,7 +953,7 @@ def log_run_header(app, fname, steps, out_dir, subdirs) -> None:
     """Echo the run's settings into the log, before anything starts."""
     log = app.log
     log(f"File: {fname or '(none)'}")
-    log(f"Steps: {', '.join(steps)}")
+    log(f"Steps: {step_names(steps)}")
     log(f"Output: {out_dir}")
     log(f"Workers: {app.get_workers()} (of {app.cpu_max})")
     if subdirs:
@@ -990,12 +1020,20 @@ def make_drain(app, q, want_summary, on_idle):
     empty, so every error line has been through the log and recorded.
     """
     def _drain():
-        """Log whatever is queued, then reschedule or finish."""
+        """Log whatever is queued, then reschedule or finish.
+
+        Whether to follow the tail is decided ONCE per burst: Tk does not
+        recompute the scroll fraction until idle, so a per-line check reads a
+        stale value mid-burst and the pane stops following.
+        """
+        follow = _is_at_bottom(app.log_text)
         try:
             while True:
-                app.log(q.get_nowait())
+                app.log(q.get_nowait(), follow=follow)
         except queue.Empty:
             pass
+        if follow:
+            app.log_text.see("end")
         if app.running.is_set():
             app.root.after(50, _drain)
             return
@@ -1116,8 +1154,8 @@ def run_clicked(app, missing_dep) -> None:
     fname, out_dir, steps, subdirs = got
 
     _begin_run(app, {"Command": "Pipeline run",
-                     "File": fname or "(none)",
-                     "Steps": ", ".join(steps),
+                     "File": fname,
+                     "Steps": step_names(steps),
                      "Output": out_dir,
                      "Workers": str(app.get_workers())})
     log_run_header(app, fname, steps, out_dir, subdirs)

@@ -3,28 +3,35 @@
 Linked from [CLAUDE.md](../../CLAUDE.md). Command reference for the pipeline's
 Python modules and `tools/` debug utilities.
 
-## run_log.py (rotating run logs)
+## core/run_log.py (per-run logs)
 
-Library, not a CLI. Every run's console output is mirrored to `logs/run-1.log`
-(most recent) through `run-N.log`; `logRunsKept` in `conversion_config.json`
-sets N (default 3, `0` disables). Full contract:
+Library, not a CLI. Every run's console output is mirrored to its own
+`logs/run-<timestamp>-<plugin>.log`; `logRunsKept` in `conversion_config.json`
+sets how many are kept (default 20, `0` disables). Full contract:
 [pipeline.md](pipeline.md#run-logs).
 
 - `runs_kept(config)` — the configured count, clamped; malformed values fall
   back to the default rather than silently disabling logging
-- `rotate(logs_dir, keep)` — shift `run-N.log` down one, freeing `run-1.log`.
-  Renames **descending** (ascending would clobber) and prunes past `keep`, so
-  lowering the setting removes the surplus instead of orphaning it
+- `log_name(plugin, when)` / `plugin_label(name)` — the name for a run, with
+  the plugin reduced to filename-safe characters (`global` when there is none)
+- `free_log_path(logs_dir, plugin)` — that name, suffixed `-2`, `-3`… if two
+  runs start inside the same second, so neither overwrites the other
+- `existing_logs(logs_dir)` / `latest_log(logs_dir)` — every log newest-first,
+  and the newest one
+- `prune(logs_dir, keep)` — delete all but the `keep - 1` newest, making room
+  for the run about to start; survivors keep their names
+- `logs_root(default)` — honours `TESCONV_LOGS_DIR` (`LOGS_DIR_ENV_VAR`)
+- `plugin_from_argv(argv)` — the plugin `-f`/`--file` names, for the CLI's name
 - `RunLog(path, header)` — header/verbatim-lines/footer, flushed per line so a
   killed or hung run keeps its output (and has no `# Finished:` footer)
 - `Tee(stream, run_log)` — mirrors `sys.stdout`/`stderr` for the CLI path,
   buffering partial writes so `print(..., end="")` fragments land as one line
 - `start_cli_run` / `finish_cli_run` — the `convert.py` entry points
 
-**Only a run's OWNER rotates.** The GUI rotates once per run and sets
+**Only a run's OWNER opens a log.** The GUI opens one per run and sets
 `TESCONV_RUN_LOG` (`RUN_LOG_ENV_VAR`) for its children, which then neither
-rotate nor write — a GUI run is several `convert.py` processes, so per-process
-rotation would leave the "last 3 runs" holding the last 3 *steps* of one run.
+prune nor write — a GUI run is several `convert.py` processes, so one log per
+process would leave the retained set holding the last N *steps* of one run.
 
 ## preflight.py (dependency gate)
 
