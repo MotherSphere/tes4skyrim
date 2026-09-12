@@ -73,6 +73,7 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [ck_reference_init_hang.md](commentary/ck_reference_init_hang.md) | tes5_import/base/writer.py - the CK reference-init hang |
 | [ck_vs_game_missing_objects.md](commentary/ck_vs_game_missing_objects.md) | tes5_import/ - objects in the CK, missing in game |
 | [ck_warnings.md](commentary/ck_warnings.md) | tes5_import/ - what the CK complains about |
+| [core_run_log.md](commentary/core_run_log.md) | core/run_log.py - per-run logs and their profiling timestamps |
 | [ingame_testing.md](commentary/ingame_testing.md) | tools/dialog/ - in-game test methodology |
 | [performance.md](commentary/performance.md) | the whole pipeline - performance and parallelism |
 | [script_convert.md](commentary/script_convert.md) | script_convert/ - TES4 script to Papyrus |

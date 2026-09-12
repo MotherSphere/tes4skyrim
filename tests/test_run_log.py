@@ -244,7 +244,7 @@ def test_header_footer_roundtrip(tmp_path):
     assert "# Started:" in text
     assert "Command:  Pipeline run" in text
     assert "Steps:    export" in text
-    assert "\nhello\nworld\n" in text
+    assert "] hello\n" in text and "] world\n" in text
     assert "# Finished:" in text and "EXIT: OK" in text
 
 
@@ -414,6 +414,62 @@ def test_finish_cli_run_accepts_none():
 ])
 def test_format_elapsed(secs, expected):
     assert run_log.format_elapsed(secs) == expected
+
+
+@pytest.mark.parametrize("elapsed,delta,expected", [
+    (0.0, 0.0, "[   0:00.0    +0.0 ] "),
+    (12.66, 12.62, "[   0:12.6   +12.6*] "),
+    (60.0, 0.1, "[   1:00.0    +0.1 ] "),
+    (3601.2, 0.3, "[  60:01.2    +0.3 ] "),
+    (-1.0, -1.0, "[   0:00.0    +0.0 ] "),
+])
+def test_format_stamp(elapsed, delta, expected):
+    """The prefix renders as `[elapsed +gap]`, clamping negatives to zero."""
+    assert run_log.format_stamp(elapsed, delta) == expected
+
+
+def test_format_stamp_columns_align():
+    """Every stamp is the same width, or the log's columns do not line up."""
+    widths = {len(run_log.format_stamp(e, d))
+              for e, d in [(0, 0), (9.9, 9.9), (599.5, 539.5), (7200, 3600),
+                           (86400, 7200)]}
+    assert len(widths) == 1
+
+
+def test_slow_gap_marked_at_threshold():
+    """The mark is what makes slow steps greppable, so the boundary matters."""
+    assert run_log.SLOW_MARK in run_log.format_stamp(99, run_log.SLOW_GAP_SECONDS)
+    assert run_log.SLOW_MARK not in \
+        run_log.format_stamp(99, run_log.SLOW_GAP_SECONDS - 0.1)
+
+
+def test_write_line_stamps_each_line_and_keeps_text(tmp_path):
+    """Stamps are added; the line's own text is otherwise untouched."""
+    path = _path(tmp_path)
+    log = run_log.RunLog(path, {})
+    log.write_line("  ACHR: 2190 records [CONVERT]")
+    log.close()
+    body = [ln for ln in path.read_text(encoding="utf-8").splitlines()
+            if "ACHR" in ln]
+    assert len(body) == 1
+    assert body[0].endswith("  ACHR: 2190 records [CONVERT]")
+    assert body[0].startswith("[")
+
+
+def test_gap_measures_since_previous_line(monkeypatch):
+    """The gap is line-to-line, not since the run began -- that is the point."""
+    clock = [1000.0]
+    monkeypatch.setattr(run_log.time, "time", lambda: clock[0])
+    stamps = []
+    monkeypatch.setattr(run_log.RunLog, "_raw",
+                        lambda self, text: stamps.append(text))
+    log = run_log.RunLog.__new__(run_log.RunLog)
+    log._fh, log._start, log._last = object(), clock[0], clock[0]
+    for advance in (5.0, 2.0):
+        clock[0] += advance
+        log.write_line("x")
+    assert "+5.0" in stamps[0] and "+2.0" in stamps[1]
+    assert "0:05" in stamps[0] and "0:07" in stamps[1]
 
 
 def test_format_size():

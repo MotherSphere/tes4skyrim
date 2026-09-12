@@ -64,6 +64,32 @@ _RULE = "-" * 60
 _STAMP_FORMAT = "%Y%m%d-%H%M%S"
 _NAME_GLOB = "run-*.log"
 
+#: A gap at or above this many seconds is marked, so a slow step is greppable.
+SLOW_GAP_SECONDS = 10.0
+
+#: Marks a line whose gap reached SLOW_GAP_SECONDS.
+SLOW_MARK = "*"
+
+_ELAPSED_WIDTH = 9
+
+#: Fits "+3600.0" -- a gap longer than an hour is one stage, not a column bug.
+_DELTA_WIDTH = 7
+
+
+def format_stamp(elapsed: float, delta: float) -> str:
+    """The `[elapsed +gap]` profiling prefix for one logged line.
+
+    `elapsed` is seconds since the run began, `delta` the gap since the
+    previous line; a gap of at least SLOW_GAP_SECONDS carries SLOW_MARK.
+
+    See: docs/commentary/core_run_log.md#profiling-timestamps
+    """
+    total = max(0.0, elapsed)
+    clock = f"{int(total) // 60}:{int(total) % 60:02d}.{int(total * 10) % 10}"
+    gap = f"+{max(0.0, delta):.1f}"
+    mark = SLOW_MARK if delta >= SLOW_GAP_SECONDS else " "
+    return f"[{clock:>{_ELAPSED_WIDTH}} {gap:>{_DELTA_WIDTH}}{mark}] "
+
 
 def runs_kept(config: dict | None) -> int:
     """How many run logs to keep, from `logRunsKept`, clamped to sane bounds.
@@ -185,6 +211,7 @@ class RunLog:
         self.path = Path(path)
         self._fh = None
         self._start = time.time()
+        self._last = self._start
         try:
             self._fh = open(self.path, "w", encoding="utf-8",
                             errors="replace", newline="\n")
@@ -219,12 +246,21 @@ class RunLog:
             if value in (None, ""):
                 continue
             lines.append(f"# {key + ':':9} {value}")
+        lines.append(f"# {'Columns:':9} [elapsed +gap] -- "
+                     f"{SLOW_MARK} marks a gap over {SLOW_GAP_SECONDS:.0f}s")
         lines.append(_RULE)
         self._raw("\n".join(lines) + "\n")
 
     def write_line(self, line: str):
-        """Append one line verbatim (no styling -- tags are presentation)."""
-        self._raw(line.rstrip("\r\n") + "\n")
+        """Append one line, prefixed with its elapsed/gap profiling stamp.
+
+        The text is otherwise verbatim -- tags are presentation, and only the
+        stamp is added, so the log stays a faithful record of the run's output.
+        """
+        now = time.time()
+        stamp = format_stamp(now - self._start, now - self._last)
+        self._last = now
+        self._raw(stamp + line.rstrip("\r\n") + "\n")
 
     def close(self, status: str | None = None):
         """Write the footer and close.
