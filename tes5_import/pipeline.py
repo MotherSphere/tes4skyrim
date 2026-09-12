@@ -1151,7 +1151,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
 
     _prescan_outfits_hair_skin(by_type, ctx, export_dir)
 
-    _phase_done('phase 0 pre-scans')
+    _phase_done('pre-scans')
 
     _prescan_music_records(by_type, writer, export_dir,
                            plugin_out_dir, output_path)

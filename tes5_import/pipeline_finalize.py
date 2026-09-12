@@ -220,7 +220,7 @@ def run_finalize_phases(st, export_dir: str, phase_done,
     _write_voice_map(st.output_path, voice_map)
     from .dialogue.converter import get_lip_texts
     _write_lip_text(st.output_path, get_lip_texts())
-    phase_done('phase 5 DIAL/INFO groups')
+    phase_done('DIAL/INFO groups')
 
     if st.ctx:
         st.ctx.report()

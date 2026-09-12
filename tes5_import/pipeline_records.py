@@ -153,7 +153,7 @@ def _phase1_simple_records(st, export_dir: str, phase_done, skip_types) -> None:
             print(f"  ERROR converting {sig} '{edid}': {e}")
             st.errors += 1
     write_falloutnv_sidecars(st.by_type, st.writer, st.output_path)
-    phase_done(f'phase 1 simple records ({len(work_items)})')
+    phase_done(f'simple records ({len(work_items)})')
 
 
 def _convert_ltex(st, export_dir: str, phase_done, skip_types) -> None:
@@ -296,7 +296,7 @@ def _convert_pack(st, export_dir: str, phase_done, skip_types) -> None:
                       f"'{get_str(rec, 'EditorID', '?')}': {e}")
                 st.errors += 1
 
-    phase_done('phases 2-3 LTEX/SOUN/QUST/PACK')
+    phase_done('LTEX/SOUN/QUST/PACK')
 
 
 def _phases23_records(st, export_dir: str, phase_done,
@@ -381,7 +381,7 @@ def _phase4a_navmesh(st, export_dir: str, phase_done, skip_types) -> None:
     set_door_navmesh_links(door_xndp)
     print(f"  Navmesh door links: {len(door_xndp)} doors bound to a "
           f"navmesh triangle (XNDP)")
-    phase_done('phase 4a navmesh generation')
+    phase_done('navmesh generation')
 
 
 def run_record_phases(st, export_dir: str, phase_done,
@@ -396,7 +396,7 @@ def run_record_phases(st, export_dir: str, phase_done,
         st.ctx.land_cache = land_cache
         st.ctx.navm_cache = st.navm_cache
         st.ctx.navm_metas = st.navm_metas
-    phase_done('phase 4b LAND conversion')
+    phase_done('LAND conversion')
 
     world_sigs = ('CELL', 'WRLD', 'REFR', 'ACHR', 'ACRE', 'LAND', 'PGRD')
 
@@ -414,7 +414,7 @@ def run_record_phases(st, export_dir: str, phase_done,
     if st.ctx:
         unattached = build_nested_overrides(
             st.by_type, world_sigs, st.ctx, st.writer, 'CELL/WRLD/REFR')
-        phase_done('phase 4c/4d CELL+WRLD overrides')
+        phase_done('CELL+WRLD overrides')
 
         if unattached:
             own = defaultdict(list)
@@ -426,17 +426,17 @@ def run_record_phases(st, export_dir: str, phase_done,
                               if own.get(s)) + ")")
             _build_cell_groups(own, st.writer, st.navm_metas, st.base_model_by_fid,
                                st.door_fids, st.navm_cache, land_cache)
-            phase_done('phase 4c own CELL groups')
+            phase_done('own CELL groups')
             _build_world_groups(own, st.writer, st.navm_metas, st.base_model_by_fid,
                                 st.door_fids, st.navm_cache, land_cache, ctx=st.ctx)
-            phase_done('phase 4d own WRLD groups')
+            phase_done('own WRLD groups')
     else:
         _build_cell_groups(st.by_type, st.writer, st.navm_metas, st.base_model_by_fid,
                            st.door_fids, st.navm_cache, land_cache)
-        phase_done('phase 4c CELL groups')
+        phase_done('CELL groups')
         _build_world_groups(st.by_type, st.writer, st.navm_metas, st.base_model_by_fid,
                             st.door_fids, st.navm_cache, land_cache)
-        phase_done('phase 4d WRLD groups')
+        phase_done('WRLD groups')
 
     if st.navm_metas:
         n_edge = sum(len(m.get('edge_link_fids') or ()) for m in st.navm_metas)
