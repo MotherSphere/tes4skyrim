@@ -200,6 +200,9 @@ _BSA_SPECS: 'list[tuple[list[str], str, bool]]' = [
     (['textures'], 'Textures', False),
 ]
 
+#: Loose-only: SKSE sees no archived file. See: docs/reference/tes_runtime_fragments.md#never-packed
+LOOSE_ONLY_DIRS: frozenset = frozenset(['skse'])
+
 # Directory names already claimed by an explicit BSA spec, plus 'meshes' (which
 # is added to the main spec by hand).  Everything else in the plugin output dir
 # — sound/, scripts/, etc. — is auto-discovered as a misc dir and packed into
@@ -208,7 +211,7 @@ _KNOWN_DIRS: frozenset = frozenset(
     n.lower()
     for spec in _BSA_SPECS
     for n in spec[0]
-) | frozenset(['meshes'])
+) | frozenset(['meshes']) | LOOSE_ONLY_DIRS
 
 
 def loader_stem(plugin_stem: str, index: int) -> str:

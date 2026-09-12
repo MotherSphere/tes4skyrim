@@ -19,6 +19,25 @@ insensitive), so composition is deterministic. One fragment per contributing
 mod is the convention; the converter names it after the plugin
 (`Oblivion.esm.json` → `Oblivion.json`).
 
+## <a id="never-packed"></a>Fragments ship LOOSE, never in a BSA
+
+The DLL discovers fragments by listing the folder above with `FindFirstFileA`,
+which sees loose files only. A fragment packed into a BSA is therefore
+invisible, and the mod registers nothing: its creatures keep their meshes,
+skeletons and behavior graphs but have no clips, so they stand still. The
+symptom in `TESRuntime.log` is `compose: 0 fragment(s)`.
+
+Listing the directory is the only workable discovery method, because the whole
+point of a fragment is that any number of unknown mods can each ship one — so
+there is no fixed path to open and no name to derive. The engine's resource
+layer resolves a path but cannot enumerate a directory, which rules out asking
+it instead.
+
+So `SKSE/` is excluded from BSA packing (`bsa_pack.LOOSE_ONLY_DIRS`) and stays
+loose in the packaged mod, next to `TESRuntime.dll` — which SKSE already
+requires to be loose for the same reason. Everything else a plugin converts is
+packed as usual.
+
 ## Schema (version 1)
 
 ```json
@@ -105,9 +124,10 @@ removed once this was read; appending is correct.
 ## <a id="the-runtime-composer"></a>The runtime composer
 
 `tes_runtime/build.bat` builds `tes_runtime/TESRuntime.dll` (standalone MSVC,
-no SKSE source tree). The converter copies it to
-`output\<plugin>\SKSE\Plugins\` beside the fragment; it is never packed into
-a BSA because SKSE loads DLLs from loose files only. It resolves every engine
+no SKSE source tree). One copy serves every converted mod, so it ships as its
+own SKSE mod (`tools/release/package_runtime_dll.py`) rather than per plugin;
+it is never packed into a BSA because SKSE loads DLLs from loose files only —
+the same constraint that keeps fragments loose ([never packed](#never-packed)). It resolves every engine
 address through the Address Library (`versionlib-*.bin`) and refuses to hook
 when a stable ID is missing, so a game update degrades to "no TES4 projects
 registered" rather than a crash. Its log is

@@ -939,12 +939,15 @@ def phase_pack(file_name: str, config: dict, output_dir: str = None):
 # ===========================================================================
 
 def phase_pack_zip(file_name: str, config: dict, output_dir: str = None):
-    """Zip the converted plugin (.esm/.esl/.esp) and .bsa files for distribution.
+    """Zip the converted plugin (.esm/.esl/.esp), .bsa and loose-only files.
 
     The zip lands in output_dir/"Finished Mods"/ — with every other installable
-    artefact — and is named "<file_name>.zip".
+    artefact — and is named "<file_name>.zip". `bsa_pack.LOOSE_ONLY_DIRS` are
+    kept loose in the archive, at their paths relative to the mod root.
+    See: docs/reference/tes_runtime_fragments.md#never-packed
     """
     import zipfile
+    from asset_convert.sources.bsa_pack import LOOSE_ONLY_DIRS
     from output_layout import finished_dir
 
     out_root = Path(output_dir) if output_dir else SCRIPT_DIR / "output"
@@ -953,6 +956,18 @@ def phase_pack_zip(file_name: str, config: dict, output_dir: str = None):
     if not src_root.is_dir():
         print(f"[{file_name}] Source not found: {src_root}, skipping zip pack")
         return False
+
+    def _loose_files():
+        """Every file under a directory the BSA never packs, kept loose.
+
+        Matched against the tree's OWN casing, so the arcname keeps the case
+        a case-sensitive extractor needs.
+        """
+        for d in sorted(src_root.iterdir()):
+            if d.is_dir() and d.name.lower() in LOOSE_ONLY_DIRS:
+                for src in sorted(d.rglob("*")):
+                    if src.is_file():
+                        yield src
 
     # ONE mod in, ONE mod out: the folder holds every plugin of an imported
     # mod, so the zip is named for the MOD. Naming it after whichever plugin
@@ -966,6 +981,9 @@ def phase_pack_zip(file_name: str, config: dict, output_dir: str = None):
             for src in sorted(src_root.glob(ext)):
                 zf.write(src, arcname=src.name)
                 packed += 1
+        for src in _loose_files():
+            zf.write(src, arcname=str(src.relative_to(src_root)))
+            packed += 1
 
     if packed == 0:
         zip_path.unlink(missing_ok=True)
