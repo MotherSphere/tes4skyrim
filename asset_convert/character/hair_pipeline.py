@@ -621,18 +621,63 @@ def build_hair_plan(export_dir) -> dict:
     return plan
 
 
+def morph_applies(src_nif_path, src_tri_path) -> bool:
+    """Whether the sibling .tri's HairMorph can reach this mesh's geometry.
+
+    The bake pairs morph to geometry by VERTEX COUNT (see bake_hair_variant),
+    so a .tri matching no shape -- or absent, as on every Fallout NV hair --
+    leaves every length bucket baking byte-identical output.
+    """
+    if not src_tri_path:
+        return False
+    from asset_convert.nif.pyffi_monkey_patch import apply_patches
+    apply_patches()
+    from pyffi.formats.nif import NifFormat
+    import io
+
+    try:
+        with open(src_tri_path, 'rb') as fh:
+            deltas = TriFile.from_bytes(fh.read()).hair_morph()
+    except (TriError, OSError):
+        return False
+    if deltas is None:
+        return False
+    try:
+        data = NifFormat.Data()
+        with open(src_nif_path, 'rb') as fh:
+            data.read(io.BytesIO(fh.read()))
+    except Exception:
+        return False
+    for root in data.roots:
+        if root is None:
+            continue
+        for block in root.tree():
+            if not isinstance(block, (NifFormat.NiTriShape,
+                                      NifFormat.NiTriStrips)):
+                continue
+            gd = block.data
+            if gd is not None and gd.num_vertices == len(deltas):
+                return True
+    return False
+
+
 def _bake_one(job):
-    """Bake + convert ONE hair variant.  Runs in a pool worker process.
+    """Bake + convert one hair variant, writing every name that shares it.
+
+    A job carries EVERY out_stem whose bake inputs are identical; the extra
+    names are copies, byte-exact because convert_nif and _retype_hair_shader
+    are functions of the baked BYTES alone.  `written`/`tinted` count every
+    name, so the stage's totals do not change.
 
     Returns (out_stem, written, tinted, error) -- errors come back as data
-    rather than raising so one bad mesh cannot kill the pool, matching the
-    old loop's per-variant try/except.
+    so one bad mesh cannot kill the pool.
     """
     import tempfile
     from asset_convert.nif.nif_converter import convert_nif
 
-    (rel, src_nif_path, src_tri_path, weight, female, race, group, out_stem,
+    (rel, src_nif_path, src_tri_path, weight, female, race, group, out_stems,
      out_dir, src_root, src_tex_root) = job
+    out_stem = out_stems[0]
 
     # THE JOB CARRIES PATHS, NOT BYTES.  One HAIR record becomes many
     # variants (bucket x gender x race group), and embedding the mesh bytes
@@ -648,14 +693,33 @@ def _bake_one(job):
             with open(src_tri_path, 'rb') as fh:
                 tri_bytes = fh.read()
     except OSError as exc:
-        return out_stem, False, 0, 'source unreadable: %s' % exc
+        return out_stem, 0, 0, 'source unreadable: %s' % exc
 
     try:
         baked_nif, baked_tri = bake_hair_variant(
             nif_bytes, tri_bytes, weight, female, race=race, group=group)
     except Exception as exc:
-        return out_stem, False, 0, 'bake failed: %s' % exc
+        return out_stem, 0, 0, 'bake failed: %s' % exc
 
+    return _emit_variant(baked_nif, baked_tri, rel, out_stems, out_dir,
+                         src_root, src_tex_root)
+
+
+def _emit_variant(baked_nif, baked_tri, rel, out_stems, out_dir, src_root,
+                  src_tex_root):
+    """Convert one baked mesh and write every out_stem that shares it.
+
+    The names after the first are COPIES: convert_nif and _retype_hair_shader
+    read only the baked bytes, so a copy is byte-identical to re-running them
+    under the other name.  A name REPEATED in `out_stems` is one file on disk
+    (several records can ask for the same variant) but still counts once
+    each, so the stage reports the variants the plugin asked for.
+    """
+    import shutil
+    import tempfile
+    from asset_convert.nif.nif_converter import convert_nif
+
+    out_stem = out_stems[0]
     # convert_nif works on paths, so stage the baked mesh.  It is written
     # under the source tree's basename so the converter's own path-derived
     # decisions (texture namespacing) see a hair path.
@@ -668,9 +732,9 @@ def _bake_one(job):
         result = convert_nif(staged, dst_nif, src_meshes_dir=src_root,
                              hair=True)
         if result.get('error'):
-            return out_stem, False, 0, 'convert failed: %s' % result['error']
+            return out_stem, 0, 0, 'convert failed: %s' % result['error']
         if not os.path.isfile(dst_nif):
-            return out_stem, False, 0, 'convert produced no file'
+            return out_stem, 0, 0, 'convert produced no file'
     finally:
         _rmtree_quiet(tmp_dir)
 
@@ -679,8 +743,9 @@ def _bake_one(job):
     # BSLightingShaderProperty; doing it earlier would just be overwritten.
     tinted = _retype_hair_shader(dst_nif, src_tex_root)
 
+    dst_tri = os.path.join(out_dir, out_stem + '.tri')
     if baked_tri:
-        with open(os.path.join(out_dir, out_stem + '.tri'), 'wb') as fh:
+        with open(dst_tri, 'wb') as fh:
             fh.write(baked_tri)
     for stem in dict.fromkeys(out_stems[1:]):
         if stem == out_stem:
@@ -833,12 +898,20 @@ def run(export_dir, out_meshes_dir, *, verbose: bool = True) -> dict:
     # dropped, and `chunksize` keeps the queue from being filled with all
     # 721 tuples at once.
     def _iter_results():
+        """Yield each bake's result as it lands, holding none of them.
+
+        `list(...)` around pool.map holds every finished result alongside
+        every pending job, and a worker killed there surfaces only as an
+        opaque BrokenProcessPool naming no mesh.  chunksize 1 because jobs
+        are ordered longest-first and span an order of magnitude in cost:
+        batching them re-strands the long ones.
+        """
         if workers <= 1:
             for job in jobs:
                 yield _bake_one(job)
             return
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            yield from pool.map(_bake_one, jobs, chunksize=4)
+            yield from pool.map(_bake_one, jobs, chunksize=1)
 
     for out_stem, written, tinted, error in _iter_results():
         if error:

@@ -79,6 +79,42 @@ again, once the vertex positions are in Skyrim skeleton space — the section
 bounding boxes must localise the armour hole in post-retarget coordinates,
 including arm openings that shift ~20 z units.
 
+## One bake per distinct input, not one per output name
+<a id="hair-bake-sharing"></a>
+
+**Code:** `_plan_jobs`, `_record_variants`, `_emit_variant`, `morph_applies` in
+`asset_convert/character/hair_pipeline.py`
+
+The head fit is ~90% of a hair variant's cost: one bake of a 1.6k-vert style
+solves 2,480,807 closest points, 1,214,100 of them in the triangle pass alone
+(`head_fit._fit_core`, which runs its full `TRI_PASS_ITERS` budget and does not
+converge early). One HAIR record expands to bucket x gender x race group, so
+Fallout NV asked for 1,164 variants from 61 source meshes — 19 bakes per mesh.
+
+A bake depends only on `(mesh, weight, gender, race, group)`, and on `weight`
+only when the sibling .tri's HairMorph can actually reach the geometry. The
+bake pairs morph to geometry by VERTEX COUNT, so a .tri matching no shape — or
+absent — leaves every length bucket baking byte-identical output. All 61 NV
+hair meshes ship no .tri, so its nine buckets collapse to one bake; Oblivion's
+morphs apply on 54 of 57 meshes, so its buckets stay distinct and hair length
+is never flattened. Measured: NV 1,164 variants -> 183 bakes, Nehrim 1,559 ->
+1,346, Oblivion 721 -> 659.
+
+Names after the first are COPIES of the produced pair. `convert_nif` and
+`_retype_hair_shader` read only the baked BYTES — the output path never feeds
+back into their result (verified: identical digests under two different output
+names) — so a copy is byte-identical to re-running them. A name REPEATED in
+`out_stems` is one file on disk (several records can ask for the same variant,
+90 of NV's 1,164) but still counts once each, so the reported totals are the
+variants the plugin asked for, not the bakes.
+
+Jobs are ordered LONGEST FIRST and dispatched at `chunksize=1`: bake cost spans
+0.6-6.6s, and in plan order a slow mesh could start with nothing left to
+overlap it, which measured 2.6x off ideal across the pool.
+
+Measured on FalloutNV, 29 workers: **251.1s -> 46.4s (5.41x)**, output
+byte-identical (2,148 files, same SHA-256).
+
 ## Prn attachment: shields, torches and weapons
 <a id="shield-attachment"></a>
 
