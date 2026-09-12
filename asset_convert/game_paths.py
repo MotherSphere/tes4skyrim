@@ -25,6 +25,9 @@ __all__ = ["win_join", "DEFAULT_NAMESPACE", "namespace_for",
 #: Namespace for Oblivion and everything mastered on it, and the fallback.
 DEFAULT_NAMESPACE = 'tes4'
 
+#: Masterless plugins that are a generated COMPANION to a family, not a game root.
+COMPANION_ROOTS = ('morrowind-morroblivion-compatibility',)
+
 #: Carries the namespace into spawned workers and child processes.
 NAMESPACE_ENV = 'TESCONV_ASSET_NAMESPACE'
 
@@ -32,8 +35,15 @@ _ACTIVE = {'ns': (os.environ.get(NAMESPACE_ENV) or DEFAULT_NAMESPACE).lower()}
 
 
 def _chain_root(export_dir: Path) -> Path:
-    """The masterless plugin at the root of this plugin's master chain."""
+    """The masterless plugin at the root of this plugin's master chain.
+
+    A master is resolved through `record_dir`, never by joining its name onto
+    the export root: an imported mod's plugins share ONE folder named for the
+    MOD, so the plain join misses them and the walk stops at the wrong plugin.
+    Both imports are local because each module reaches back into this package.
+    """
     from asset_convert.lod.terrain_lod import master_names
+    from output_layout import record_dir
     root = export_dir.parent
     seen = set()
     cur = export_dir
@@ -42,10 +52,11 @@ def _chain_root(export_dir: Path) -> Path:
         masters = [m for m in master_names(cur) if m]
         if not masters:
             break
-        nxt = next((root / m for m in masters
-                    if (root / m).is_dir() and m.lower() not in seen), None)
+        dirs = [Path(record_dir(str(root), m)) for m in masters]
+        nxt = next((d for d in dirs
+                    if d.is_dir() and d.name.lower() not in seen), None)
         if nxt is None:
-            return root / masters[0]
+            return dirs[0]
         cur = nxt
     return cur
 
@@ -55,12 +66,13 @@ def namespace_for(export_dir) -> str:
 
     Named after the masterless plugin rooting the master chain, so one game's
     family shares a namespace and unrelated games cannot collide. Oblivion
-    keeps `tes4` so its existing output stays valid.
+    keeps `tes4` so its existing output stays valid, and a `COMPANION_ROOTS`
+    plugin joins that family rather than claiming one of its own.
     See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
     """
     cur = _chain_root(Path(export_dir))
     stem = Path(cur.name).stem.lower() if cur is not None else ''
-    if not stem or stem.startswith('oblivion'):
+    if not stem or stem.startswith('oblivion') or stem in COMPANION_ROOTS:
         return DEFAULT_NAMESPACE
     return ''.join(c for c in stem if c.isalnum()) or DEFAULT_NAMESPACE
 

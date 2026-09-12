@@ -44,12 +44,22 @@ def names_for(own_dir):
 
 
 def export_dirs(own_dir):
-    """Sibling export trees for the bases of `own_dir`, that exist."""
+    """Sibling export trees for the bases of `own_dir`, that exist.
+
+    Resolved through `record_dir`: an imported mod's plugins share ONE folder
+    named for the MOD, so joining the master's own name onto the export root
+    misses it and the base is silently lost (`Tamriel_Data.esm` lives in
+    `Tamriel Data (HD)`).
+
+    `output_layout` is imported here, not at module scope: it reaches back into
+    this package for `source_registry`, so a top-level import is a cycle.
+    """
+    from output_layout import record_dir
     own_dir = os.path.abspath(str(own_dir))
     export_root = os.path.dirname(own_dir)
     out = []
     for n in names_for(own_dir):
-        p = os.path.join(export_root, n)
+        p = str(record_dir(export_root, n))
         if os.path.isdir(p) and p not in out:
             out.append(p)
     return out

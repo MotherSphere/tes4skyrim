@@ -7,7 +7,9 @@
 - [Oblivion parallax → Skyrim height maps (asset_convert/texture/parallax.py, opt-in, 2026-08-15)](#oblivion-parallax-skyrim-height-maps)
 - [Landscape normal maps: DXT1 = shiny ground (2026-07-09)](#landscape-normal-maps-dxt1-shiny)
 - [Dependents borrow a master's textures](#dependents-borrow-a-masters-textures)
+  - [A generated companion joins its family's namespace](#borrowing-across-a-namespace-boundary)
 - [Per-game asset namespace](#per-game-asset-namespace)
+  - [A master is resolved by `record_dir`, never by joining its name](#master-resolved-by-record-dir)
 - [Tree billboards are named, never written down](#tree-billboards-are-named-never-written-down)
 
 ## Oblivion parallax → Skyrim height maps (`asset_convert/texture/parallax.py`, opt-in, 2026-08-15)
@@ -678,6 +680,39 @@ from `_HEADER.txt` via `master_names`: a sibling export dir counts only when it
 declares this plugin as a master. Never a filesystem sweep of `output/*`, which
 would keep unrelated plugins' art and defeat the prune.
 
+### A generated companion joins its family's namespace
+<a id="borrowing-across-a-namespace-boundary"></a>
+
+**Code:** `COMPANION_ROOTS` in `asset_convert/game_paths.py`
+
+Sharing above works because supplier and borrower write the SAME namespace, so
+the master's shipped path is the one the dependent's records and meshes name.
+A master in a DIFFERENT namespace silently breaks that:
+`resolve_source_texture` still finds the file in the master's EXPORT tree, so
+conversion succeeds and nothing warns, but the borrower emits its OWN namespace
+while the only shipped copy sits under the master's. Purple at runtime.
+
+`Morrowind-Morroblivion-Compatibility.esp` was the case that exists. It is
+built standalone from the vanilla Morrowind ESMs and so declares NO master —
+nothing to declare — which made `namespace_for` read it as a game root and give
+it a namespace of its own. Everything that borrows from it (`Tamriel_Data.esm`,
+Tamriel Rebuilt) roots at Oblivion through `Morrowind_ob.esm` and writes
+`tes4`. Measured on the built output: 4,783 patch textures and 552 meshes, and
+of 2,043 distinct refs in Tamriel_Data's first 3,000 meshes, **440 resolved to
+nothing; 437 of those the patch ships**. Tamriel Rebuilt, which ships no art at
+all, lost **92 of its 297 LTEX land textures** the same way.
+
+The patch is not a game — it is a generated COMPANION to the Morroblivion load
+order, where **Oblivion is the root master**, so the whole family shares one
+namespace. Listing it in `COMPANION_ROOTS` makes it resolve to
+`DEFAULT_NAMESPACE`, and every borrower's existing `tes4\` path then names
+exactly where the patch already ships.
+
+🛑 **Nothing is copied.** Textures are REFERENCED from the master that ships
+them — see [dependents borrow a master's textures](#dependents-borrow-a-masters-textures).
+Copying a borrowed tree into each dependent duplicates art the masters already
+provide and throws away the 828-file/165 MB saving that rule exists to protect.
+
 ## Per-game asset namespace
 <a id="per-game-asset-namespace"></a>
 
@@ -730,6 +765,28 @@ claiming its own.
 namespace into MODL paths; if the asset copy and the record writer disagree,
 every converted record points at a path no BSA provides. That is total purple,
 far worse than the handful of missing textures this fixes.
+
+### A master is resolved by `record_dir`, never by joining its name
+<a id="master-resolved-by-record-dir"></a>
+
+**Code:** `_chain_root` in `asset_convert/game_paths.py`, `export_dirs` in
+`asset_convert/sources/base_plugins.py`
+
+An imported mod's plugins share ONE folder named for the MOD, so `export_root /
+<master name>` does not exist for them and the master is silently dropped — no
+warning, the walk simply stops at the wrong plugin. `Tamriel_Data.esm` lives in
+`export/Tamriel Data (HD)/`, and the plain join found nothing:
+
+| plugin | masters declared | resolved before | resolved now |
+|---|---|---|---|
+| Tamriel Rebuilt | Morrowind_ob, compat patch, **Tamriel_Data** | 2 of 3 | 3 of 3 |
+
+Tamriel Rebuilt therefore lost the master holding the art it places, from every
+texture and asset fallback. `tests/test_plugin_path_resolution.py` fails the
+build on a bare join for exactly this reason; it caught all three sites
+(`_chain_root` twice, `overrides/manifest.py` once). `record_dir` already falls
+back to `<root>/<name>` when no registry claims the plugin, so it is always the
+correct call — an `os.path.join` fallback behind it only reintroduces the bug.
 
 ## The namespace crosses process boundaries through the environment
 <a id="namespace-crosses-process-boundaries"></a>

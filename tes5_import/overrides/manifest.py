@@ -28,7 +28,7 @@ override's source id directly.
 
 import json
 import os
-from output_layout import paths
+from output_layout import paths, record_dir
 
 MANIFEST_VERSION = 1
 
@@ -71,20 +71,8 @@ def master_names(export_dir: str) -> list:
 
 
 def _master_export_dir(export_root, name: str) -> str:
-    """Where master `name`'s exported records live under `export_root`.
-
-    Masters used to resolve as siblings of the export root. An imported mod's
-    plugins are nested inside their mod's shared folder, so the plain join
-    misses them entirely.
-    """
-    try:
-        from output_layout import record_dir
-        got = record_dir(export_root, name)
-        if os.path.isdir(got):
-            return str(got)
-    except ImportError:
-        pass
-    return os.path.join(export_root, name)
+    """Where master `name`'s exported records live under `export_root`."""
+    return str(record_dir(export_root, name))
 
 
 def _index_map(export_root: str, name: str, slot: int, slot_of: dict,
