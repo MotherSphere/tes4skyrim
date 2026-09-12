@@ -2234,3 +2234,50 @@ The furniture-marker carry, superseded-marker drop and PRN conversion ran
 inside the NiNode-to-BSFadeNode root swap, so a source whose root is already a
 BSFadeNode (every FO3/FNV mesh) skipped all three. `_normalise_fade_root`
 applies the same passes to such a root.
+
+## <a id="pyffi-log-capture"></a>PyFFI log capture: the toaster resets the level
+
+**Code:** `_PyFFICapture` / `pyffi_capture_init` in `asset_convert/nif/nif_batch.py`,
+`_add_tangent_space` in `asset_convert/nif/nif_converter.py`
+
+A full Oblivion.esm mesh run captured **188,858** messages, of which **183,929
+(97.4%)** were PyFFI progress chatter and only **4,929 (2.6%)** were real.
+
+The chatter is emitted at INFO, not WARNING. It reached a handler installed at
+WARNING because `Toaster.__init__` calls `_update_options`, which with the
+default `verbose=1` mutates the **shared** logger:
+
+```python
+# pyffi/spells/__init__.py
+elif self.options["verbose"] == 1:
+    logging.getLogger("pyffi").setLevel(logging.INFO)
+```
+
+`_add_tangent_space` builds a toaster per NIF, so every mesh silently undid the
+`setLevel(WARNING)` that `pyffi_capture_init` had just set. Measured against
+the real call path:
+
+```
+after pyffi_capture_init: pyffi.level = 30 (WARNING)
+after _NifToaster():      pyffi.level = 20 (INFO)
+```
+
+`Toaster.msg()` logs via `logger.info`, and `msgblockbegin` brackets every
+visited branch in `~~~ ... ~~~`, which is why `type_~~~` (93,992) and
+`type_adding` (47,777) dominated the pile: they are recursion markers from
+`SpellAddTangentSpace.recurse()`, not diagnostics.
+
+Two defences, both applied: the toaster is constructed with `verbose=0`, and
+`_PyFFICapture` carries its own WARNING level so no future PyFFI call can let
+INFO records through by lowering the logger.
+
+Consequently the categoriser only ever sees WARNING and above. The
+`spell_marker_*`, `tangent_space_added` and six `skin_part_*` categories keyed
+off INFO-only strings and were removed. `nan_in_vertices` required both `nan`
+and `vert` in one message; the only NaN sources are the three `float_to_int
+converted ...` lines in `pyffi/utils/mathutils.py`, none of which say "vert",
+so every NaN lands in `nan_generic` and the unreachable bucket was removed.
+
+Note that `block_size_check` and `End of file not reached` are emitted at
+ERROR, not WARNING -- they are the highest-signal messages for `nif.xml`
+mismatches, and they are captured because ERROR outranks WARNING.

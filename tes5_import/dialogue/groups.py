@@ -369,8 +369,8 @@ def build_dialog_groups(by_type: dict, writer, npc_to_vtyp: dict,
     _strip_dead_tclt(infos, skipped_fids)
     n_conv = sum(1 for d in dials if is_npc_to_npc_conversation(d))
     n_chains = len(conv_plan['chains']) if conv_plan else 0
-    print(f"    NPC-to-NPC conversation topics dropped: {n_conv} "
-          f"(TODO.txt #16); quest-advancing chains restored: {n_chains}")
+    print(f"    NPC-to-NPC conversation topics dropped: {n_conv}; "
+          f"quest-advancing chains restored: {n_chains}")
 
     sge_quest_fids = _scan_startable_quests(by_type)
 

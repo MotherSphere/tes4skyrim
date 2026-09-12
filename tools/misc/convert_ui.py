@@ -98,7 +98,7 @@ def find_data_dirs(oblivion=None, skyrim=None):
             config = json.loads(config_path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             config = {}
-    from convert import find_game_path
+    from source_paths import find_game_path
     ob = oblivion or find_game_path('oblivion', config)
     sk = skyrim or find_game_path('skyrimse', config)
     return (Path(ob) if ob else None), (Path(sk) if sk else None)

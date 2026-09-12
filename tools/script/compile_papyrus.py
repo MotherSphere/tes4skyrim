@@ -35,12 +35,13 @@ def find_skyrim_headers():
     resolves the install from conversion_config.json's tes5DataPath instead.
     """
     sys.path.insert(0, str(_PROJECT_ROOT))
-    from convert import _find_skyrim_source_scripts, load_config
+    from convert import load_config
+    from papyrus_compile import find_skyrim_source_scripts
     try:
         cfg = load_config()
     except (FileNotFoundError, OSError):
         cfg = {}
-    headers = _find_skyrim_source_scripts(cfg)
+    headers = find_skyrim_source_scripts(cfg)
     if headers:
         return headers
     # Fallback for a non-registry (manually copied) install.

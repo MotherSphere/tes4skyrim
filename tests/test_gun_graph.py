@@ -8,7 +8,8 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from asset_convert.havok.gun_anim_falloutnv import classify_stem
+from asset_convert.havok.gun_anim_falloutnv import (classify_stem,
+                                                    gun_layout)
 from asset_convert.havok.gun_graph_falloutnv import (
     GUN_EVENTS, GUN_HAND_TYPE, GUN_VARIABLES, GunClips, GunGraphBuilder,
     class_selector, clip_speed, fire_machine, loco_machine, ready_machine,
@@ -59,7 +60,7 @@ def _manifest():
         '2hrfastleft': _entry('2hrfastleft', 0.8),
     }
     return {'clips': list(stems.values()),
-            'anim_dir': 'meshes\actors\character\animations\tes4guns',
+            'anim_dir': gun_layout('OUT')['anim_dir'],
             'classes': {s: classify_stem(s) for s in stems}}
 
 

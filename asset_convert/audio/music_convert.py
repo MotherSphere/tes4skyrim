@@ -385,8 +385,6 @@ def convert_music(
 
     import collections
     spread = collections.Counter(t['bitrate'] // 1000 for t in tracks)
-    print('  Music: %d converted, %d cached, %d failed; manifest has %d tracks.'
-          % (stats['converted'], stats['cached'], stats['failed'], len(tracks)))
     if spread:
         print('    bitrates: ' + ', '.join(
             '%d kbps x%d' % (k, n) for k, n in sorted(spread.items())))

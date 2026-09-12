@@ -35,9 +35,7 @@ Usage:
 
 import argparse
 import io
-import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +68,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()  # TESConversion root
 # pathlib, so this is safe at module scope despite convert.py being the entry
 # point every package imports from.
 from output_layout import record_dir, plugin_out_root
+from papyrus_compile import phase_compile
 from tes4_export.tes3_reader import is_tes3
 from core.plugin_masters import get_masters_from_binary, topological_order
 import core.run_log as run_log
@@ -79,13 +78,10 @@ import core.run_log as run_log
 # papyrus.exe looks like:  <path>\Foo.psc:12:3: Checker error: <message>
 # The compiler aborts the whole batch on the first bad file, so each failing
 # script is quarantined and the batch retried; this bounds that loop.
-_PSC_ERR_RE = re.compile(r'^.*?([^\\/:]+\.psc):\d+:\d+:\s*(.*)$')
-_MAX_BATCH_RETRIES = 25
 
 from core.subprocess_flags import (POPEN_FLAGS as _POPEN_FLAGS,
-                              configure_multiprocessing, windows_cmd)
+                              configure_multiprocessing)
 from core.process_job import create_pool_job, describe_limit
-from core.worker_budget import worker_count
 from core.collision_options import (
     WINDING_FIX_DEFAULT_PLUGINS,
     WINDING_FIX_ENV_VAR,
@@ -104,7 +100,7 @@ configure_multiprocessing()
 # subprocess is created; no-ops off Windows and never raises.
 create_pool_job()
 
-from source_paths import (find_game_path, get_paths, is_asset_only,
+from source_paths import (get_paths, is_asset_only,
                           load_config, resolve_plugin_path)
 
 
@@ -539,6 +535,10 @@ def _plugin_data_dir(file_name: str, tes4_data: str, export_dir: str) -> str:
     beside itself, not in the Oblivion Data directory.
     """
     source = resolve_plugin_path(file_name, tes4_data, export_dir)
+    if os.path.isfile(source):
+        return os.path.dirname(source)
+    return tes4_data
+
 def _use_plugin_namespace(file_name: str) -> str:
     """Install `file_name`'s asset namespace for the phase about to run.
 
@@ -553,10 +553,6 @@ def _use_plugin_namespace(file_name: str) -> str:
     return ns
 
 
-    if os.path.isfile(source):
-        return os.path.dirname(source)
-    return tes4_data
-
 # ===========================================================================
 # Phase 3: CONVERT MESHES AND TEXTURES
 # ===========================================================================
@@ -567,11 +563,11 @@ def phase_assets(file_name: str, config: dict, output_dir: str = None,
     """Convert extracted NIF assets and copy textures to output (meshes only).
 
     `winding_fix` tri-states the collision winding repair: True/False force it,
-    _use_plugin_namespace(file_name)
     None takes the per-plugin default for `file_name`.  The decision is pinned
     into the environment because the repair runs inside multiprocessing mesh
     workers, which inherit the environment but not this call's arguments.
     """
+    _use_plugin_namespace(file_name)
     from asset_convert.asset_pipeline import convert_meshes
 
     extract_dir = str(SCRIPT_DIR / "export")
@@ -583,11 +579,8 @@ def phase_assets(file_name: str, config: dict, output_dir: str = None,
     else:
         origin = "requested"
     os.environ[WINDING_FIX_ENV_VAR] = "1" if winding_fix else "0"
-    # The authored-normal repair always runs; only the inferred steps are
-    # switchable, so say which one this line is about.
-    print(f"[{file_name}] Inferred collision winding steps: "
-          f"{'ON' if winding_fix else 'OFF'} ({origin}); "
-          f"authored-normal repair: always on")
+    print(f"[{file_name}] Collision winding fix: "
+          f"{'on' if winding_fix else 'off'} ({origin})")
 
     print(f"[{file_name}] Converting meshes (NIFs + textures)...")
     stats = convert_meshes(
@@ -629,7 +622,6 @@ def phase_assets(file_name: str, config: dict, output_dir: str = None,
     print(f"[{file_name}] Book INAM complete: ok={bstats['ok']} "
           f"skip={bstats['skip']} fail={bstats['fail']}")
     return True
-    _use_plugin_namespace(file_name)
 
 # ===========================================================================
 # Phase 4: CONVERT SPEEDTREES
@@ -637,6 +629,7 @@ def phase_assets(file_name: str, config: dict, output_dir: str = None,
 
 def phase_speedtrees(file_name: str, config: dict, output_dir: str = None):
     """Convert SpeedTree `.spt` files into NIFs (separate step)."""
+    _use_plugin_namespace(file_name)
     from asset_convert.asset_pipeline import convert_speedtrees
 
     extract_dir = str(SCRIPT_DIR / "export")
@@ -670,7 +663,6 @@ def phase_speedtrees(file_name: str, config: dict, output_dir: str = None):
 def phase_creatures(file_name: str, tes5_data: str, config: dict,
                     output_dir: str = None):
     """Convert creatures: generated behavior projects (skeleton.hkx,
-    _use_plugin_namespace(file_name)
     animations, behavior graph), skeleton/body NIF conversion, and
     registration in the merged animation singlefiles.
 
@@ -678,6 +670,7 @@ def phase_creatures(file_name: str, tes5_data: str, config: dict,
     export/<name>/creature_projects.json to generate RACE/ARMA/ARMO chains.
     NPC_ humanoids are unaffected (they keep the Skyrim race overrides).
     """
+    _use_plugin_namespace(file_name)
     from asset_convert.havok.creature_pipeline import convert_creatures
 
     export_root = str(SCRIPT_DIR / "export")
@@ -695,7 +688,6 @@ def phase_creatures(file_name: str, tes5_data: str, config: dict,
           f"({len(res['projects'])} projects, {len(res['errors'])} errors)")
     return not res['errors']
 
-    _use_plugin_namespace(file_name)
 # ===========================================================================
 # Phase 6: BUILD TES5 PLUGIN
 # ===========================================================================
@@ -703,6 +695,7 @@ def phase_creatures(file_name: str, tes5_data: str, config: dict,
 def phase_import(file_name: str, tes4_data: str, tes5_data: str,
                  export_dir: str, config: dict, output_dir: str = None):
     """Import using the Python tes5_import package."""
+    _use_plugin_namespace(file_name)
     from tes5_import.pipeline import import_plugin
     from tes5_import.overrides.master_index import MissingMasterOutputError
     from tes5_import.base.artifact_schema import StaleArtifactError
@@ -767,7 +760,6 @@ def phase_import(file_name: str, tes4_data: str, tes5_data: str,
         return False
 
     return errors == 0
-    _use_plugin_namespace(file_name)
 
 # ===========================================================================
 # Phase 7: CONVERT SOUNDS
@@ -775,6 +767,7 @@ def phase_import(file_name: str, tes4_data: str, tes5_data: str,
 
 def phase_sounds(file_name: str, config: dict, output_dir: str = None):
     """Convert extracted sound files from BSA to XWM format in output."""
+    _use_plugin_namespace(file_name)
     from asset_convert.asset_pipeline import convert_sounds
 
     extract_dir = str(SCRIPT_DIR / "export")
@@ -810,7 +803,6 @@ def phase_sounds(file_name: str, config: dict, output_dir: str = None):
           f"{mstats.get('tracks', 0)} tracks)")
     return True
 
-    _use_plugin_namespace(file_name)
 
 # ===========================================================================
 # Phase 8: CONVERT SCRIPTS
@@ -818,6 +810,7 @@ def phase_sounds(file_name: str, config: dict, output_dir: str = None):
 
 def phase_scripts(file_name: str, config: dict, output_dir: str = None):
     """Convert TES4 scripts to Papyrus .psc source files."""
+    _use_plugin_namespace(file_name)
     from script_convert.pipeline import convert_all_scripts
     from tes5_import.base.artifact_schema import StaleArtifactError
 
@@ -1162,8 +1155,9 @@ def _run_pipeline():
         # one by hand).  The GUI then re-ticked the box on every check.
         print("No files to process.")
         return 0
-    print(f"  Files: {', '.join(order) if order else '(none needed)'}")
-    print()
+    if not _owned_by_a_parent_run():
+        print(f"  Files: {', '.join(order) if order else '(none needed)'}")
+        print()
 
     # ── Determine which steps to run ──────────────────────────────────────
     _any_only = any([
@@ -1433,7 +1427,8 @@ def _run_pipeline():
         print(f"Note: could not record conversion state ({exc}).")
 
     if success:
-        print("Pipeline complete.")
+        if not _owned_by_a_parent_run():
+            print("Pipeline complete.")
         return 0
 
     # A failed run ends with thousands of lines of stage output above it, so
@@ -1458,6 +1453,11 @@ def _run_pipeline():
         # empty summary that reads like nothing went wrong.
         print("  ERROR SUMMARY: a stage reported failure; see the stage "
               "output above for details.")
+    print("-" * 54)
+    print("Pipeline completed with errors.")
+    return 1
+
+
 def _owned_by_a_parent_run() -> bool:
     """Whether a run owner (the GUI) launched us as one step of its run."""
     return bool(os.environ.get(run_log.RUN_LOG_ENV_VAR))
@@ -1481,19 +1481,14 @@ def _print_run_banner(tes4_data, tes5_data, output_dir) -> None:
     print()
 
 
-    print("-" * 54)
-    print("Pipeline completed with errors.")
-    return 1
-
-
 def main():
     """Own the run log for a standalone CLI run, then run the pipeline.
 
-    Only a run's OWNER rotates.  When the GUI launched us it has already
-    opened the log for the whole run (several convert.py invocations, one per
-    step) and set TESCONV_RUN_LOG, so `start_cli_run` returns None here and we
-    neither rotate nor write -- otherwise a 7-step run would rotate 7 times and
-    the retained logs would be the last 3 STEPS of one run.
+    Only a run's OWNER opens a log.  When the GUI launched us it has already
+    opened one for the whole run (several convert.py invocations, one per step)
+    and set TESCONV_RUN_LOG, so `start_cli_run` returns None here and we
+    neither prune nor write -- otherwise a 7-step run would leave seven logs
+    holding one step each.
     """
     try:
         config = load_config(_config_path_from_argv())
@@ -1503,8 +1498,6 @@ def main():
         "Version": _version_string(),
         "Command": " ".join(["convert.py"] + sys.argv[1:]),
     }
-    # `--help`/`--list-mods`-style invocations convert nothing; letting them
-    # rotate would push a real run's log out of the retained set for free.
     log = (None if _is_informational_argv()
            else run_log.start_cli_run(SCRIPT_DIR / "logs", config, header))
     code = 1
@@ -1520,13 +1513,12 @@ def main():
         run_log.finish_cli_run(log, f"EXIT: {code}")
 
 
-# Flags that print something and exit without converting anything.  A run log
-# exists to explain a CONVERSION; spending a rotation slot on `--help` would
-# evict a real run's log.
+#: Flags that print and exit; logging one would evict a real run's log.
 _INFORMATIONAL_FLAGS = {"-h", "--help", "--list-mods"}
 
 
 def _is_informational_argv() -> bool:
+    """Whether argv only asks for information, so no run log is opened."""
     return any(a in _INFORMATIONAL_FLAGS for a in sys.argv[1:])
 
 

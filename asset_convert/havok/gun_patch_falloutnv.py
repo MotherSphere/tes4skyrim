@@ -212,14 +212,16 @@ def patch_behaviors(clips: GunClips, char_out: str, work_dir: str,
         if g is None:
             raise FileNotFoundError(f'vanilla {rel_dir}\\{stem}.hkx is not '
                                     'available')
-        gens = _PATCHERS[stem](g, clips, os.path.join(out_dir, f'{stem}.hkx'))
-        generators += gens
-        log(f'  [gun graph] {rel_dir}\\{stem}: {len(gens)} clip generators')
+        generators += _PATCHERS[stem](g, clips,
+                                      os.path.join(out_dir, f'{stem}.hkx'))
+    cloned = 0
     for stem in CLONED:
         g = _load(f'{rel_dir}\\{stem}.hkx', work_dir, prefix + stem)
         if g is not None and clone_slots(g, os.path.join(out_dir,
                                                          f'{stem}.hkx')):
-            log(f'  [gun graph] {rel_dir}\\{stem}: type slots copied')
+            cloned += 1
+    log(f'  Gun graph: patched {len(PATCHED)} {rel_dir} files '
+        f'({len(generators)} clip generators), {cloned} cloned')
     return generators
 
 
@@ -299,6 +301,6 @@ def build_gun_graphs(manifest: dict, out_meshes_dir: str, work_dir: str,
         got = register_clips(clips, generators, char_out, work_dir, view)
         for k in appends:
             appends[k] += got[k]
-        log(f'  [gun graph] {len(generators)} {view[0] or "3rd-person"} clip '
-            f'generators registered in {len(got["animdata_append"])} projects')
+        log(f'  Gun graph: {len(generators)} {view[0] or "3rd-person"} clips '
+            f'registered in {len(got["animdata_append"])} projects')
     return appends if appends['animdata_append'] else {}

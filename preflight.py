@@ -251,7 +251,7 @@ def _load_config() -> dict:
     winreg is Windows-only, so registry-based game-path detection returns
     nothing off Windows; conversion_config.json's tes4DataPath/tes5DataPath
     are the Linux/Mac equivalent. Reading it here lets these preflight checks
-    match what convert.py's own find_game_path() would resolve, instead of
+    match what source_paths.find_game_path() would resolve, instead of
     reporting Skyrim SE as missing when the user has simply pointed the config
     at it.
     """
@@ -271,9 +271,10 @@ def _papyrus_headers() -> 'Missing | None':
     means the (one-time) extraction happens during preflight rather than in the
     middle of the Scripts phase.
     """
-    from convert import _find_skyrim_source_scripts, find_game_path
+    from source_paths import find_game_path
+    from papyrus_compile import find_skyrim_source_scripts
     config = _load_config()
-    if _find_skyrim_source_scripts(config):
+    if find_skyrim_source_scripts(config):
         return None
     data = find_game_path('skyrimse', config)
     return Missing(

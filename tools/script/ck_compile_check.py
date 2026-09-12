@@ -73,8 +73,9 @@ def _ensure_vanilla_src():
         return
     sys.path.insert(0, ROOT)
     try:
-        from convert import _find_skyrim_source_scripts
-        _find_skyrim_source_scripts()
+        from convert import load_config
+        from papyrus_compile import find_skyrim_source_scripts
+        find_skyrim_source_scripts(load_config())
     except Exception as e:
         print(f'  WARNING: could not unpack vanilla headers: {e}')
 

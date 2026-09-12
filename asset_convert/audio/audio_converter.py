@@ -46,10 +46,12 @@ from output_layout import (asset_root as _asset_root, plugin_out_root,
 from asset_convert.game_paths import namespace_for
 from asset_convert import paths
 
+#: Assumed when a caller omits extract_dir; the source registry lives here.
 _DEFAULT_EXPORT = paths.EXPORT
 
 
 def _out_root(output_dir, source_name, extract_dir=None):
+    """This plugin's output folder (shared-folder rules: output_layout)."""
     return plugin_out_root(output_dir, source_name,
                            str(extract_dir or _DEFAULT_EXPORT))
 
@@ -951,8 +953,7 @@ def organize_voice_files(
         for exe in lip_exes:
             lip_pool.put(exe)
         if len(lip_exes) > 1:
-            print(f'  LipGenerator pool: {len(lip_exes)} mutex-patched copies '
-                  f'(bypasses Fonix machine-wide serialization)')
+            print(f'  LipGenerator: {len(lip_exes)} parallel copies')
         else:
             print('  WARNING: unrecognised LipGenerator.exe layout -- running '
                   'unpatched; lip generation serializes at ~8 lips/s')

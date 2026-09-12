@@ -11,7 +11,7 @@ named the same way.
 
 Every selected clip is retargeted (clip_retarget) onto the humanoid
 skeleton.hkx bone order and written 64-bit under the plugin-independent
-`meshes\\actors\\character\\animations\\tes4guns\\` (one corpus, one
+`meshes\\actors\\character\\animations\\<game>guns\\` (one corpus, one
 humanoid graph), with a `guns_manifest.json` beside them for the graph and
 cache stages (gun_graph_falloutnv).
 See: docs/commentary/asset_convert_falloutnv.md#gun-animations
@@ -345,8 +345,8 @@ def gun_layout(out_meshes_dir: str, sub: str = '') -> dict:
     names resolve relative to its own folder.
     See: docs/commentary/asset_convert_falloutnv.md#first-person-rig
     """
-    leaf = current_namespace() + 'guns'
     project = ['actors', 'character'] + ([sub] if sub else [])
+    leaf = current_namespace() + 'guns'
     return {'dir': os.path.join(out_meshes_dir, *project, 'animations',
                                 leaf),
             'anim_dir': '\\'.join(['meshes', *project, 'animations', leaf])}

@@ -625,7 +625,8 @@ class _ShaderInputs:
     __slots__ = ('diffuse_path', 'glow_path', 'authored_normal', 'has_double_sided',
                  'alpha_prop', 'tex_apply_mode', 'emissive_r', 'emissive_g',
                  'emissive_b', 'material_alpha', 'emissive_animated',
-                 'vertex_lighting_mode', 'flip_ctrl', 'tex_transforms')
+                 'vertex_lighting_mode', 'flip_ctrl', 'tex_transforms',
+                 'shader_declared_unlit')
 
     def __init__(self, tex_transforms):
         """Start from the no-properties defaults, carrying the UV transforms in."""
@@ -643,6 +644,7 @@ class _ShaderInputs:
         self.vertex_lighting_mode = 1
         self.flip_ctrl = None
         self.tex_transforms = tex_transforms
+        self.shader_declared_unlit = False
 
 
 def _harvest_texturing(prop, out):
@@ -666,8 +668,8 @@ def collect_shader_inputs(src, uv_transforms):
 
     Oblivion keeps them on NiTexturingProperty and friends; FO3/FNV keep their
     texture paths in a BSShaderTextureSet on BSShaderPPLightingProperty, or as
-    the single File Name of TallGrassShaderProperty (all 17 FNV grass models).
-    All are read here.
+    the single File Name of TallGrassShaderProperty and
+    BSShaderNoLightingProperty. All are read here.
 
     See: docs/commentary/asset_convert_nif.md#fo3fnv-shader-properties
     """
@@ -688,6 +690,10 @@ def collect_shader_inputs(src, uv_transforms):
             continue
         if isinstance(prop, NifFormat.TallGrassShaderProperty):
             out.diffuse_path = prop.file_name or out.diffuse_path
+            continue
+        if isinstance(prop, NifFormat.BSShaderNoLightingProperty):
+            out.diffuse_path = prop.file_name or out.diffuse_path
+            out.shader_declared_unlit = True
             continue
         if isinstance(prop, NifFormat.NiVertexColorProperty):
             out.vertex_lighting_mode = int(prop.lighting_mode)

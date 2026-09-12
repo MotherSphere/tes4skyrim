@@ -1,11 +1,12 @@
 """Batch NIF conversion: the worker pool, its progress and its report.
 
 Also owns the PyFFI warning capture, because a converted mesh's warnings are
-only ever read in aggregate at the end of a run: PyFFI logs progress chatter at
-WARNING level, so the handler swallows every message and the categoriser turns
-the pile into per-cause counts.
+only ever read in aggregate at the end of a run: the handler swallows every
+WARNING and ERROR record, and the categoriser turns the pile into per-cause
+counts. PyFFI's INFO progress chatter is not captured.
 
 See: docs/commentary/performance.md
+See: docs/commentary/asset_convert_nif.md#pyffi-log-capture
 """
 
 import argparse
@@ -80,19 +81,9 @@ def pyffi_capture_init(namespace: str = None) -> None:
 
 
 _WARN_CATEGORIES = {
-    'spell_marker_tilde':          lambda m: m.startswith('~~~'),
-    'spell_marker_dash':           lambda m: m.startswith('---'),
-    'tangent_space_added':         lambda m: m.startswith('adding'),
-    'skin_part_optimizing':        lambda m: m.startswith('optimizing'),
-    'skin_part_imposing':          lambda m: m.startswith('imposing'),
-    'skin_part_counted':           lambda m: m.startswith('counted'),
-    'skin_part_creating':          lambda m: m.startswith('creating'),
-    'skin_part_created':           lambda m: m.startswith('created'),
-    'skin_part_merging':           lambda m: m.startswith('merging'),
-    'skin_part_progress':          lambda m: m.startswith('skin '),
     'improper_geometry':           lambda m: m.startswith('improper'),
     'block_size_check':            lambda m: 'block size check' in m,
-    'nan_in_vertices':             lambda m: 'nan' in m and 'vert' in m,
+    'end_of_file_not_reached':     lambda m: 'end of file not reached' in m,
     'nan_generic':                 lambda m: 'nan' in m,
     'mopp_read_fail':              lambda m: 'bhkmoppbvtreeshape' in m or ('mopp' in m and ('fail' in m or 'error' in m)),
     'havok_block_invalid':         lambda m: 'bhk' in m and ('invalid' in m or 'not in nif' in m),
@@ -280,17 +271,14 @@ def _report_glow(stats):
             if k.startswith('glow_')}
     if not glow:
         return
-    print(f"\nGlow: {glow.get('applied', 0)} shapes carry Oblivion's authored "
-          f'glow map into slot {GLOW_SLOT} (shader type '
-          f'{SHADER_TYPE_GLOWMAP})')
+    if glow.get('applied'):
+        print(f"\nGlow maps: {glow['applied']} shapes")
     if glow.get('unresolved'):
-        print(f"  {glow['unresolved']} named a glow texture that does not "
-              f'exist -- left unlit rather than guessed')
+        print(f"  WARNING: {glow['unresolved']} shapes reference a missing "
+              f'glow texture -- left unlit')
     pg = stats['parallax'].get('parallax_skipped_glow', 0)
     if pg:
-        print(f'  {pg} of them also asked for parallax; glow wins (one shader '
-              f'type, and the glow map is authored while the height map is '
-              f'derived)')
+        print(f'  {pg} also asked for parallax -- glow used instead')
 
 
 def _report_specular(stats):
@@ -337,9 +325,9 @@ def _report_batch(stats, skipped_list, total, parallax):
         _report_parallax(stats)
     _report_glow(stats)
     _report_specular(stats)
-    print(f'\nDetailed stats: Strips->Shape={stats["strips"]}, '
-          f'Properties={stats["properties"]}, Roots={stats["roots"]}, '
-          f'Rotations baked={stats["rotations"]}')
+    print(f'\nGeometry: strips->shapes={stats["strips"]}, '
+          f'properties={stats["properties"]}, roots={stats["roots"]}, '
+          f'rotations baked={stats["rotations"]}')
 
 
 def batch_convert(mesh_dir, output_dir, *, fix_textures=True,

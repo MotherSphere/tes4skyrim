@@ -357,8 +357,7 @@ def _prescan_npc_voice_map(by_type: dict, ctx, writer, num_new_masters: int, _st
     from .base.conditions import set_speak_as_topics
     _speak_as = scan_speak_as_topics(by_type)
     set_speak_as_topics(_speak_as)
-    print(f"  {len(_speak_as)} speak-as topics "
-          f"(non-actor speaker: actor-identity gates fail open)")
+    print(f"  Speak-as topics: {len(_speak_as)} (spoken by a non-actor)")
 
     from .dialogue.speak_as import build_speaker_activators, reset as _spk_reset
     _spk_reset()
@@ -856,8 +855,7 @@ def _apply_dobj_battle_override(battle, writer) -> None:
         _dobj = build_DOBJ_override(battle, _esm)
         if _dobj:
             writer.add_record('DOBJ', _dobj[1])
-            print('  Music: DOBJ BTMS -> our Battle music '
-                  '(combat music was otherwise unreachable)')
+            print('  Music: combat music bound to the converted Battle track')
         else:
             print('  WARNING: master DOBJ has no BTMS entry; '
                   'combat music stays vanilla.')
@@ -1048,7 +1046,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
     def _phase_done(label: str):
         nonlocal _phase_t
         now = time.time()
-        print(f"  [phase] {label}: {now - _phase_t:.1f}s")
+        print(f"  Phase: {label} ({now - _phase_t:.1f}s)")
         _phase_t = now
 
     _step_t = time.time()
@@ -1057,7 +1055,7 @@ def import_plugin(export_dir: str, output_path: str, masters: list = None,
         nonlocal _step_t
         now = time.time()
         if now - _step_t >= 1.0:
-            print(f"    [phase0] {label}: {now - _step_t:.1f}s")
+            print(f"    Phase: {label} ({now - _step_t:.1f}s)")
         _step_t = now
 
     tes4_master_names = masters_from_export_header(export_dir)

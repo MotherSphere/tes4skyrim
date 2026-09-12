@@ -643,9 +643,9 @@ character file (`_1stperson\characters\firstperson.hkx`, rig
 drawn gun showed the vanilla crossbow arms. Now the four patched graphs and
 the registration run once per view over a per-view clip set. The
 first-person clips come from `characters\_1stperson` and land under
-`_1stperson\animations\tes4guns`: **a project's animation names resolve
+`_1stperson\animations\<game>guns`: **a project's animation names resolve
 relative to the project's own folder** (vanilla keeps `1HM_1stP_Run.hkx`
-under `_1stperson\animations`), so the same `Animations\TES4Guns\<stem>`
+under `_1stperson\animations`), so the same `Animations\<GAME>Guns\<stem>`
 name serves both projects. Written under the third-person folder instead,
 the first-person graph reached our states (live: both graphs at
 `iRightHandType` 13 with the gun variables) but every bone sat at the bind

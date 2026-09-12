@@ -166,7 +166,6 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
         'other_copied': 0,
     }
 
-    plugin_dir = _out_root(output_dir, source_name, extract_dir)
     # Build bookkeeping, not a shipped asset -- see texture_prune.MANIFEST_NAME.
     # Tracks the SHARED asset tree, so it belongs beside the assets.
     mesh_manifest_dir = asset_dir
@@ -230,8 +229,7 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
             rec_dir, plugin_dir / 'meshes')
         stats['grass_profile'] = {
             'processed': processed, 'modified': modified, 'missing': missing}
-        print(f"  Grass models: {processed} placed under landscape\\grass, "
-              f"{modified} profiled"
+        print(f"  Grass models: {processed} placed under landscape\\grass"
               + (f", {missing} missing" if missing else ""))
 
     # -----------------------------------------------------------------------
@@ -241,6 +239,21 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("Copy Textures to Output")
     print("=" * 60)
 
+    _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats)
+    return stats
+
+
+def _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats):
+    """Copy the texture tree, then repair what Skyrim reads differently.
+
+    L8 glow maps become BGRA (Skyrim samples slot 2 as plain RGB, so an L8
+    glow renders pure red), DXT1 landscape normals gain a real alpha mask,
+    and a diffuse whose alpha became a `_p` height map drops to DXT1. Every
+    pass runs AFTER the copy, so a re-copy cannot resurrect the originals and
+    re-running is a no-op.
+    See: docs/commentary/asset_convert_texture.md#landscape-normal-maps-dxt1-shiny
+    """
+    from asset_convert.texture import parallax as _parallax
     tex_src = asset_dir / 'textures'
     if not tex_src.exists():
         return
@@ -278,7 +291,6 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
               + (f", {_kept} kept (read as opacity)" if _kept else "")
               + (f", {_skip} already stripped" if _skip else ""))
 
-    return stats
 
 def convert_speedtrees(source_file, extract_dir='export', output_dir='output',
                        use_engine=True):

@@ -348,8 +348,8 @@ topic binding is patched in after Phase 5. Read the phase comments in
 
 Every converted script compiles against Bethesda's own `.psc` sources, passed
 to the compiler as `-h`. The CK ships them one of three ways, and
-`convert._find_skyrim_source_scripts()` is the single lookup every caller uses
-(the Scripts phase, `preflight._papyrus_headers`, `tools/script/ck_compile_check.py`,
+`papyrus_compile.find_skyrim_source_scripts()` is the single lookup every caller
+uses (the Scripts phase, `preflight._papyrus_headers`, `tools/script/ck_compile_check.py`,
 `tools/script/compile_papyrus.py`) so the dependency check can never pass while the
 phase then fails to find them:
 
@@ -489,7 +489,7 @@ TESConversion/
     <plugin>/             #   one folder per converted plugin...
       SKSE/Plugins/TESRuntime/           # <plugin>.bodyparts.json / .guns.json, loose (never in a BSA)
       SKSE/Plugins/TESRuntime/animation/ #   the plugin's animation cache fragment
-      meshes/actors/character/           # FO3/FNV only: patched humanoid behaviors + animations/tes4guns/
+      meshes/actors/character/           # FO3/FNV only: patched humanoid behaviors + animations/<game>guns/
     <Mod Label>/          #   ...or one per imported mod (mirrors export/)
     AutoConvertLOD/       #   the baked LOD mod (tools/release/create_lod.py)
     Finished Mods/        #   everything the user INSTALLS -- see below

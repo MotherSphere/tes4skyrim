@@ -391,6 +391,67 @@ Audited output carries only 2 `;TODO:` markers across 18,566 scripts, so marker
 counts measure honesty, not correctness — never treat a clean output scan as
 evidence the conversion is complete.
 
+### <a id="generated-script-types"></a>🔴 A generated script type is recognized by PREFIX, and the prefix is per-game
+
+**`is_generated_script_type()` in `script_convert/constants.py` is the ONLY way
+to ask "did this pipeline emit that class". Never test `startswith('TES4_')`.**
+
+The prefix comes from `script_prefix()`, which is `current_namespace().upper()`
+— `TES4_` for Oblivion/Nehrim but `FALLOUTNV_` for FalloutNV.esm. A generated
+class is the carrier of the source script's variable table, so the prefix test
+is what these passes key on:
+
+| Site | Answers False → |
+|---|---|
+| `converter.remote_type_of` | `Owner.Var` member type unresolved; no `as Int` cast on a `GetValue()` |
+| `assemble._specific` | script type stops winning type inference |
+| `emit/expr._is_form` | form-vs-number pun undetected |
+| `blocks._rebind_existing` | two script classes compared directly |
+| `constants.wants_placed_reference` | VMAD binds the BASE, property reads None |
+| `commands._as_actor` | missing `as Actor` cast |
+
+13 sites hardcoded `'TES4_'`. Under the FalloutNV namespace every one answered
+False and **67 FalloutNV scripts stopped compiling** — `Float cannot be assigned
+to Int` (the `remote_type_of` family), `field or property not found`, and
+`you can't compare type X with type Y`. Oblivion was unaffected throughout,
+which is exactly how a namespace-scoped regression hides.
+
+`TES4_SecondsPassed`, `TES4_LastTick`, `TES4_pendingRelock`, `TES4_MsgButton`
+and friends are generated LOCAL VARIABLE names, not script classes. They are
+internal to one emitted script and never namespaced — leave them alone.
+
+#### <a id="stem-a-script-type-via-script-edid-for"></a>Stem a script type with `_script_edid_for`, never by slicing
+
+A longer prefix makes names truncate that never truncated before.
+`GomorrahCasinoEnterTriggerScript` fits under `TES4_` (37 chars) but not under
+`FALLOUTNV_`, so it becomes `FALLOUTNV_GomorrahCasinoEnterTrig_B9F2`. Slicing
+the prefix off yields `gomorrahcasinoentertrig_b9f2`, which matches no
+EditorID in `script_all_vars`.
+
+`generated_script_stem()` is the plain slice and is only safe when the caller
+does not need to hit `script_all_vars`. `_script_edid_for()` falls back to a
+reverse map built from `papyrus_script_name(edid)`, so it recovers the real
+EditorID through the truncation hash. **Any lookup keyed by script EditorID
+must use it.** `_owning_scripts` and `_dangling_cross_script_target` both
+sliced, so under FalloutNV their owner silently read as "unresolved" — which
+in the dangling check means "don't fire", letting a genuinely bad cross-script
+access through to the compiler.
+
+#### <a id="dangling-cross-script-read"></a>A dangling cross-script access is AUTHORED, not a conversion bug
+
+`GomorrahHotelDoorScript` writes `GomorrahCasinoEnterTriggerREF.Follower1`,
+but that script declares only `Companion1REF`/`Companion2REF` — `Follower1` is
+a variable of the CALLING script that the author also used as if it were the
+target's. TES4 silently ignored the write; Papyrus rejects it at compile time.
+The same area's `NVCCPlayerStorageActivatorScript` carries
+`showWarning "Add Lily's ref ID to GomorrahCasinoEnterTriggerScript"`, so this
+corner shipped unfinished.
+
+`_dangling_cross_script_target` exists to convert these to a `;NE:` marker
+rather than emit an access that cannot compile. It fires ONLY when the owner
+resolves to a script whose variable table is KNOWN and lacks the name — an
+unresolved owner is left alone, so it never suppresses a legitimate access.
+
 ### 🔴 An `as Actor` cast on a non-actor INVERTS every guard around it (2026-08-09)
 
 **`(Self as Actor)` on an ObjectReference is `None` at runtime — and Papyrus
@@ -1264,7 +1325,7 @@ an inert comment. `ModDisposition` (414) is a genuine engine removal, with the
   body is routinely the only thing that ever calls `Enable()` on that same
   reference. See "The self-enable deadlock" below.
 
-### Say() timers — `TES4Polyfill.SayLine` (2026-08-16)
+### <a id="polled-conversations"></a>Say() timers — `TES4Polyfill.SayLine` (2026-08-16)
 
 **The single design fact.** TES4's `Say`/`SayTo` were **synchronous**: the
 engine picked the INFO, started the audio and **returned its length before the
@@ -1425,6 +1486,92 @@ CharGen `- .4`, one `= 1`, one unrelated `timer = 0`).
   SayLine would wait on the busy flag (bounded) before Saying — no repeat is
   possible because the state has advanced by then, but the pause would show.
   Raise `SAY_TAIL` in `TES4Polyfill.psc` if that is ever observed.
+
+#### <a id="sequenced-fragment-surgery"></a>Sequenced fragment surgery — `conversation_sequence.py`
+
+**Code:** `script_convert/conversation_sequence.py`, consumed only by
+`pipeline._info_batch`.
+
+A polled conversation is a **sequencer**: each INFO is gated on an exact
+counter (`GetQuestVariable CharacterGen.convCount == 8`) and its result script
+steps that counter to hand the turn to the next line. Because TES4's `Say` was
+synchronous the whole body ran in the frame the line STARTED; running the same
+body at OnEnd breaks it four different ways, each fixed by one helper.
+
+- <a id="sequence-gate"></a>**`sequence_gate` — the counter is re-seeded
+  out-of-band.** Quest stages re-seed it ("make sure we're at the right spot",
+  10 of them in CharacterGen alone) and those stages fire off *package
+  completion*, which lands whenever the actor arrives, not when the line ends.
+  A re-seed landing mid-line makes the in-flight line's `+1` overshoot:
+  CharacterGen stage 12 sets `convCount=8` for "What's this prisoner doing
+  here?" while line 7 is still audible, line 7's fragment makes it 9, and the
+  cell-door exchange never plays (runtime trace: `FRAG 00032B0A cnt=8` →
+  `cnt=9 spk=0`). Gating the fragment on the counter the INFO itself requires
+  makes the re-seed authoritative. Applied **only** when the body actually
+  steps that counter — a line the quest script advances for is not a sequencer
+  and must never be gated.
+
+- <a id="turn-handoff"></a>**`split_turn_handoff` — the handoff cannot wait for
+  OnEnd.** In TES4 the result script set `convCount`/`speaker` and charged
+  `convTimer` in the frame the line started, so the next speaker's guard
+  (`speaker == N && convTimer <= 0`) was already open and only the timer paced
+  him. Emitting the handoff at OnEnd makes every line pay a serial round trip
+  (measured, `temp/chargen_rec_5.log`):
+
+  ```
+  79.11  LineBegan Renault len=2.06     <- line starts
+  81.54  LineEnded Renault              <- 2.43s later
+  81.57  request   Baurus ("Yessir.")   <- only now does he ask
+  ```
+
+  Only the counter step and `speaker`/`target` literal writes move to OnBegin.
+  Stage advances, AddTopic unlocks and item/faction changes stay in OnEnd:
+  those are consequences of the line having been DELIVERED, not of whose turn
+  it is.
+
+- <a id="stepped-gate"></a>**`stepped_gate` — OnEnd must test the STEPPED
+  value.** Once OnBegin performs the handoff the counter has already moved, so
+  the original `convCount == 8` is false by OnEnd and the rest of the body —
+  item grants, faction changes, the author's other writes — would be silently
+  dropped. The compared value is shifted by the same delta the step applies.
+
+- <a id="stage-advances-survive"></a>**`split_stage_advances` — a stage advance
+  must survive a REJECTED turn.** The gate originally swallowed the fragment's
+  `SetStage` too, and that line is frequently the only path to the next quest
+  beat: a package-completion re-seed landed while CharacterGen line 11 was
+  still audible, line 11's End fragment was rejected, its `SetStage(13)` never
+  ran, and the quest stalled forever — the Emperor greeted generically and
+  offered only 'Rumors', with nothing in the Papyrus log because a rejected
+  gate is silent by design. Advances are lifted OUTSIDE the gate behind a
+  monotonic guard, which is safe because TES4 stages are flags and `GetStage`
+  returns the highest set: past N already → skipped; turn rejected but the
+  advance still owed → it runs. Only TOP-LEVEL
+  `<quest>.SetStage(<literal>)` lines are lifted.
+
+- <a id="writes-before-setstage"></a>**`state_writes_before_setstage` —
+  `SetStage` runs its fragment INLINE.** Those fragments call
+  `EvaluatePackage()`, and the engine arbitrates packages against whatever
+  state is committed at that instant, so a `speaker`/`convCount` write placed
+  after the SetStage is invisible to it. CharacterGen stage 18 showed it
+  directly: the package was selected then kicked back within the same second
+  (`PKGSTART 04D84D` → `PKGCHANGE` back to `032B14`), and whether it stuck
+  varied run to run purely on engine latency. Only literal assignments are
+  hoisted, and only from a FLAT tail — a nested block after the SetStage may
+  depend on what the stage did, and `classify` is the shared barrier (it also
+  stops on a `Return`, which this pass's own regex did not; measured: no
+  fragment body has one in the tail, 0 of 75,170). Hoisting a write above the
+  SetStage can strand it below a `Start()` on the same quest, the one
+  reordering that silently destroys it — Skyrim's `Start()` resets every Auto
+  property, losing the seeded value (`ArenaICGrandChampion`'s `CrazyIdea`, 2
+  sites) — so `hoist_quest_start_above_writes` re-establishes that invariant on
+  the reordered result. That is a fixup of this pass's own output, not a second
+  pass over the script.
+
+The two narrow regexes exist for the same reason. `_STATE_WRITE_RE` matches a
+bare literal assignment or a counter step on ITSELF — no calls, nothing whose
+value depends on anything a `SetStage` could change, because 13 CharacterGen
+stage fragments re-seed `convCount`. `_HANDOFF_WRITE_RE` matches a bare literal
+assignment to a field whose name says it selects the next talker.
 
 ## Magic / condition helpers
 <a id="magic-condition-helpers"></a>
@@ -4350,6 +4497,49 @@ vs. an unset `armorFinishDay` of 0 that is immediately true.
 The converter now wraps the OnUpdate body of any `extends Quest` script in
 `If (!IsRunning()) … Return`, re-arming the poll while stopped so it resumes on its own
 once the quest legitimately starts (211 quest scripts affected).
+
+### <a id="batch-compilation"></a>Batch compilation, and why a failure is quarantined
+
+**Code:** `papyrus_compile.py`.
+
+`papyrus.exe` parses the ~3,000 Skyrim headers once **per invocation**, so
+compiling per file paid that cost 15,961 times — ~82 ms each, about 22 minutes
+of serial CPU, which is what a 4-core machine actually experiences. Batch mode
+is ~2.4 ms/script marginal: the whole plugin in ~40 s in a single process, with
+no dependence on core count at all.
+
+The catch, and why this is not a plain swap: **the compiler ABORTS the run on
+the first bad file and writes NO `.pex` at all** (measured: 1 broken script of
+201 → 0 `.pex`). So a failing file must be quarantined and the batch retried.
+Scanner and parser errors surface one file at a time; checker errors surface
+for every bad file at once. Either way each error line names its file, so the
+quarantine set grows by at least one entry per pass and the loop terminates
+(capped at `_MAX_BATCH_RETRIES`).
+
+A quarantined file has to leave the input directory, so once anything fails the
+batch runs against a **staging copy**, built once and then maintained
+incrementally — re-copying ~16k scripts on every retry costs far more than the
+compile, and each retry only ever removes files.
+
+Quarantined scripts are then re-checked **individually**, because a file is
+frequently dragged into a batch failure by a *dependency's* error and compiles
+perfectly well alone. Only a batch that cannot name any new failing file gives
+up and falls back to the per-file path.
+
+### <a id="vanilla-headers"></a>Where the vanilla headers come from
+
+The CK ships the vanilla `.psc` sources in one of two loose layouts —
+`Data/Source/Scripts` (modern) or `Data/Scripts/Source` — or not at all, as
+just `Data/Scripts.zip` on a fresh install. That archive is unpacked in place
+into `Data/Source/Scripts`, which is also where the loose search looks first.
+Without these headers nothing compiles: they carry the native type definitions.
+
+An override plugin additionally needs its **masters'** converted sources on the
+header path. Its scripts declare properties typed as the master's converted
+scripts (`TES4_NQ16Script Property …`) because the record they name carries
+that master's SCRI, and those `.psc` live in the master's own output — 198 of
+Translation.esp's scripts fail with "undefined type" without them. They are
+headers only; the master's own run compiles and ships the `.pex`.
 
 ## The Say fallback line length
 <a id="say-line-fallback-duration"></a>

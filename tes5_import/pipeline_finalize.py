@@ -130,12 +130,15 @@ def _patch_sounds(st) -> None:
         return 0
 
     from .record_types.items import patch_sound_descriptor_slots
+    bound = []
     for _sig, _label in (('ACTI', 'activators'), ('CONT', 'containers'),
                          ('DOOR', 'doors'), ('LIGH', 'lights')):
         _n = patch_sound_descriptor_slots(
             st.writer, _sig, _own_souns, _master_sound_descriptor)
         if _n:
-            print(f"  Sound descriptors bound: {_n} {_label}")
+            bound.append(f"{_n} {_label}")
+    if bound:
+        print(f"  Sound descriptors bound: {', '.join(bound)}")
     from .record_types.weather import patch_weather_sounds
     n_wsnd = patch_weather_sounds(st.writer, _own_souns)
     if n_wsnd:
@@ -338,7 +341,7 @@ def _write_lava_mesh(plugin_out_dir: str, by_type: dict) -> None:
     sibling lava record does name, so a stub record cannot leave the plane
     untextured.
     """
-    from .actors.lava_placement import (LAVA_MESH_REL, collect_lava_water_fids,
+    from .actors.lava_placement import (lava_mesh_rel, collect_lava_water_fids,
                                  scroll_for)
     from .record_types.common import prefix_path
 
@@ -367,7 +370,8 @@ def _write_lava_mesh(plugin_out_dir: str, by_type: dict) -> None:
         print(f'    Lava surface: generator unavailable ({exc})')
         return
 
-    dst = os.path.join(plugin_out_dir, 'meshes', *LAVA_MESH_REL.split('\\'))
+    dst = os.path.join(plugin_out_dir, 'meshes',
+                       *lava_mesh_rel().split('\\'))
     if write_lava_nif(dst, 'textures\\' + texture,
                       scroll_x=scroll_x, scroll_y=scroll_y):
         print(f'    Lava surface mesh: {dst} (texture {texture}, '

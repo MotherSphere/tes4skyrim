@@ -306,13 +306,12 @@ def job_env() -> dict:
 def describe_limit() -> str:
     """Human-readable summary of the active containment, for the console."""
     if not _IS_WIN or _JOB_HANDLE is None:
-        return "process containment: inactive"
+        return "Process containment: off"
     limit = os.environ.get(JOB_LIMIT_ENV_VAR, "")
     if limit:
         try:
-            gb = int(limit) / 1024 ** 3
-            return ("process containment: active "
-                    "(workers die with parent; memory ceiling %.1f GB)" % gb)
+            return "Process containment: on (memory limit %.1f GB)" % (
+                int(limit) / 1024 ** 3)
         except ValueError:
             pass
-    return "process containment: active (workers die with parent; no memory cap)"
+    return "Process containment: on"

@@ -399,12 +399,13 @@ def write_seq(outdir: str):
 def compile_scripts(outdir: str) -> bool:
     """Compile both plugin scripts against the Skyrim SE headers."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from convert import _find_skyrim_source_scripts, load_config
+    from convert import load_config
+    from papyrus_compile import find_skyrim_source_scripts
     try:
         cfg = load_config()
     except (FileNotFoundError, OSError):
         cfg = {}
-    headers = _find_skyrim_source_scripts(cfg)
+    headers = find_skyrim_source_scripts(cfg)
     if not headers:
         print('  ERROR: Skyrim Papyrus source headers not found '
               '(<Skyrim SE>\\Data\\Source\\Scripts)')
@@ -438,6 +439,43 @@ def compile_scripts(outdir: str) -> bool:
     return ok
 
 
+def resolve_skyrim_esm(explicit: str = None) -> str:
+    """The Skyrim.esm whose MQ101 is overridden, or '' when none is found.
+
+    Falls back to the installed game's Data folder when no path is given.
+    """
+    if not explicit:
+        from convert import load_config
+        from source_paths import find_game_path
+        try:
+            cfg = load_config()
+        except (FileNotFoundError, OSError):
+            cfg = {}
+        data_path = find_game_path('skyrimse', cfg)
+        if not data_path:
+            print('  ERROR: Skyrim SE install not found; pass --skyrim-esm')
+            return ''
+        explicit = os.path.join(data_path, 'Skyrim.esm')
+    if not os.path.isfile(explicit):
+        print(f'  ERROR: Skyrim.esm not found at {explicit}')
+        return ''
+    return explicit
+
+
+def stage_sources(root: str, outdir: str) -> None:
+    """Copy the hand-written .psc sources into the shipped Data folder.
+
+    The shipped folder is a complete, self-contained Data folder.
+    """
+    src_dir = os.path.join(outdir, 'scripts', 'source')
+    os.makedirs(src_dir, exist_ok=True)
+    for name in (SCRIPT_NAME, MQ101_SCRIPT_NAME):
+        shutil.copyfile(
+            os.path.join(root, 'TESGameSelect', 'scripts', 'source',
+                         name + '.psc'),
+            os.path.join(src_dir, name + '.psc'))
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -456,31 +494,11 @@ def main():
     outdir = args.outdir if os.path.isabs(args.outdir) else os.path.join(root, args.outdir)
     os.makedirs(outdir, exist_ok=True)
 
-    skyrim_esm = args.skyrim_esm
+    skyrim_esm = resolve_skyrim_esm(args.skyrim_esm)
     if not skyrim_esm:
-        from convert import find_game_path, load_config
-        try:
-            cfg = load_config()
-        except (FileNotFoundError, OSError):
-            cfg = {}
-        data_path = find_game_path('skyrimse', cfg)
-        if not data_path:
-            print('  ERROR: Skyrim SE install not found; pass --skyrim-esm')
-            return 1
-        skyrim_esm = os.path.join(data_path, 'Skyrim.esm')
-    if not os.path.isfile(skyrim_esm):
-        print(f'  ERROR: Skyrim.esm not found at {skyrim_esm}')
         return 1
 
-    # Stage the hand-written script sources into the output tree so the shipped
-    # folder is a complete, self-contained Data folder.
-    src_dir = os.path.join(outdir, 'scripts', 'source')
-    os.makedirs(src_dir, exist_ok=True)
-    for name in (SCRIPT_NAME, MQ101_SCRIPT_NAME):
-        shutil.copyfile(
-            os.path.join(root, 'TESGameSelect', 'scripts', 'source',
-                         name + '.psc'),
-            os.path.join(src_dir, name + '.psc'))
+    stage_sources(root, outdir)
 
     print(f'Reading MQ101 from {skyrim_esm} ...')
     data, count = build_plugin(skyrim_esm)

@@ -1435,11 +1435,15 @@ def _add_tangent_space(data):
 
     Missing tangents light normal maps wrongly in Skyrim -- the "rainbow
     shaders" on architecture.
+
+    verbose=0 stops the toaster lowering the shared 'pyffi' logger to INFO.
+    See: docs/commentary/asset_convert_nif.md#pyffi-log-capture
     """
     if not _TANGENT_SPELL:
         return
     try:
-        spell = _SpellAddTangentSpace(data=data, toaster=_NifToaster())
+        toaster = _NifToaster(options=dict(verbose=0))
+        spell = _SpellAddTangentSpace(data=data, toaster=toaster)
         spell.recurse()
     except Exception:
         pass

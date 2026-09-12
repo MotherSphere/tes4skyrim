@@ -305,8 +305,15 @@ def _is_additive(alpha_prop):
         ((flags >> ALPHA_DST_SHIFT) & 0xF) == ALPHA_DST_ONE)
 
 
-def _is_fx_surface(alpha_prop, vertex_lighting_mode):
-    """Whether a shape belongs on the Effect shader rather than Lighting."""
+def _is_fx_surface(alpha_prop, vertex_lighting_mode, shader_declared_unlit=False):
+    """Whether a shape belongs on the Effect shader rather than Lighting.
+
+    FO3/FNV state it outright with BSShaderNoLightingProperty; Oblivion has no
+    such block and is read from its lighting mode and blend instead.
+    See: docs/commentary/asset_convert_shader.md#fx-shader-discriminator
+    """
+    if shader_declared_unlit:
+        return True
     if vertex_lighting_mode == LIGHTING_EMISSIVE_ONLY:
         return True
     return _is_additive(alpha_prop)
@@ -580,7 +587,8 @@ def process_geometry(strips_or_shape, fix_textures, stats=None, sky_type=None,
 
     shader = _build_lighting_shader(ts, tex_set, si, si.has_double_sided)
     is_static_fx = (si.flip_ctrl is None and si.diffuse_path
-                    and _is_fx_surface(si.alpha_prop, si.vertex_lighting_mode))
+                    and _is_fx_surface(si.alpha_prop, si.vertex_lighting_mode,
+                                       si.shader_declared_unlit))
     if si.flip_ctrl is not None or is_static_fx:
         ts.bs_properties[0] = _build_effect_shader(
             ts, tex_set, si, si.flip_ctrl, si.diffuse_path,
