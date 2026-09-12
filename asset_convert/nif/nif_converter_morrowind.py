@@ -21,6 +21,7 @@ from pyffi.formats.nif import NifFormat
 from asset_convert.collision.cms_builder import build_cms_collision
 from asset_convert.collision.collision import GAME_UNITS_PER_HAVOK
 from asset_convert.nif.nif_passes import add_bsx_flags
+from asset_convert.nif.particles_morrowind import upgrade_legacy_particles
 
 #: Render units to Skyrim havok units; Morrowind authors collision in render units.
 _HAVOK_SCALE = 1.0 / GAME_UNITS_PER_HAVOK
@@ -38,7 +39,11 @@ _HELPER_TYPES = ('AvoidNode',)
 _FIRST_CHILD_ONLY = ('NiSwitchNode', 'NiFltAnimationNode')
 
 #: Legacy nodes Skyrim has no RTTI for, rewritten as a plain NiNode.
-_REWRITE_AS_NINODE = ('NiBSAnimationNode', 'NiBSParticleNode')
+_REWRITE_AS_NINODE = ('NiBSAnimationNode', 'NiBSParticleNode',
+                      'NiCollisionSwitch')
+
+#: Subtree collides only when this NiAVObject flag is set on a collision switch.
+_ACTIVE_COLLISION_FLAG = 0x0020
 
 #: Legacy LOD selector; child 0 is the nearest level and the one kept.
 _LOD_NODE = 'NiLODNode'
@@ -128,11 +133,12 @@ def collision_source(root) -> tuple:
 def _collision_shapes(node, skip_markers: bool):
     """The render shapes under `node` the engine builds collision from.
 
-    AvoidNode subtrees are AI hints, skinned shapes are actors, and a
-    switch node contributes its first child only
-    (`bulletnifloader.cpp:handleNode`).
+    AvoidNode subtrees are AI hints, skinned shapes are actors, a node an
+    inactive NiCollisionSwitch became prunes its whole subtree, and a switch
+    node contributes its first child only (`bulletnifloader.cpp:handleNode`).
     """
-    if type(node).__name__ in _HELPER_TYPES:
+    type_name = type(node).__name__
+    if type_name in _HELPER_TYPES or getattr(node, '_mw_no_collision', False):
         return
     if isinstance(node, NifFormat.NiTriBasedGeom):
         marker = skip_markers and _text(node.name).startswith(
@@ -142,7 +148,7 @@ def _collision_shapes(node, skip_markers: bool):
         return
     children = [c for c in (getattr(node, 'children', None) or [])
                 if c is not None]
-    if type(node).__name__ in _FIRST_CHILD_ONLY:
+    if type_name in _FIRST_CHILD_ONLY:
         children = children[:1]
     for child in children:
         yield from _collision_shapes(child, skip_markers)
@@ -336,6 +342,8 @@ def convert_legacy_nodes(data, stats=None) -> int:
     A block type the engine cannot instantiate rejects the whole file, so the
     mesh renders as the missing-model red triangle. NiSwitchNode is the
     control: same family, 88 vanilla Skyrim meshes, and it is left alone.
+    An inactive NiCollisionSwitch carries its "no collision" meaning in its
+    TYPE, which the rewrite erases, so the decision is marked here instead.
     See: docs/commentary/asset_convert_nif.md#morrowind-legacy-node-types
     """
     replaced = {}
@@ -344,7 +352,11 @@ def convert_legacy_nodes(data, stats=None) -> int:
         if name == _LOD_NODE:
             _keep_nearest_lod(block)
         if name in _REWRITE_AS_NINODE or name == _LOD_NODE:
-            replaced[id(block)] = (block, _as_ni_node(block))
+            node = _as_ni_node(block)
+            if (name == 'NiCollisionSwitch'
+                    and not block.flags & _ACTIVE_COLLISION_FLAG):
+                node._mw_no_collision = True
+            replaced[id(block)] = (block, node)
     if not replaced:
         return 0
     holders = list(data.blocks) + [new for _, new in replaced.values()]
@@ -460,6 +472,7 @@ def disable_specular(data, stats=None) -> int:
 def run_morrowind_fixups(data, stats=None) -> None:
     """Apply the Morrowind-only repairs that must precede the version upgrade."""
     raise_triangle_flags(data, stats)
+    upgrade_legacy_particles(data, stats)
     convert_legacy_nodes(data, stats)
     for root in data.roots:
         if hasattr(root, 'children'):

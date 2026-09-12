@@ -26,7 +26,8 @@ from asset_convert.nif.shaders import (ALPHA_BLEND_ENABLED, ALPHA_DST_ONE,
                                        resolve_normal_for)
 from asset_convert.nif.nif_flags import NIF_FLAGS
 from asset_convert.nif.tex_paths import rewrite_tex_path
-from asset_convert.nif.tri_reconstruct import (clear_match_groups,
+from asset_convert.nif.tri_reconstruct import (UnreconstructibleGeometry,
+                                               clear_match_groups,
                                                fix_missing_triangles)
 
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
@@ -570,6 +571,8 @@ def process_geometry(strips_or_shape, fix_textures, stats=None, sky_type=None,
     NiUVController lives on the chain that strip removes.
     See: docs/commentary/asset_convert_nif.md#geometry-preparation
     """
+    if strips_or_shape.data is None:
+        raise UnreconstructibleGeometry('shape carries a null data reference')
     uv_transforms = collect_uv_ctrls(strips_or_shape)
     _strip_dead_geometry_controllers(strips_or_shape)
     ts, src = _as_tri_shape(strips_or_shape)

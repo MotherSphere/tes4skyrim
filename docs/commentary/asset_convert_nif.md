@@ -26,6 +26,8 @@
 - [bhkPackedNiTriStripsShape reaching the output — the 2 GB memcpy / heap-wide 0x100000001 (SOLVED 2026-08-22, confirmed in-game)](#bhkpackednitristripsshape-reaching-output-2-gb)
 - [NiBlendInterpolator: the manager-controlled flag and the Vilverin CTD](#blend-interp-flags)
 - [NiFlipController → frame-strip atlas](#niflipcontroller-atlas)
+- [Morrowind-era legacy block types](#legacy-block-types)
+- [Morrowind legacy particle emitters](#morrowind-particle-systems)
 
 Linked from [CLAUDE.md](../../CLAUDE.md). Deep narrative notes from debugging the
 Oblivion→Skyrim mesh/collision/particle/animation pipeline. For creature-specific
@@ -367,6 +369,29 @@ Oblivion's BSAs contain dev-era leftovers in older NIF versions that PyFFI 2.2.3
 - ≤10.0.1.2: extra uint after bhkWorldObject.Shape and at the start of HavokMaterial; bhkRigidBody CInfo lacks the 16-byte filter-copy header and max-velocity trio; bhkMoppBvTreeShape lacks the offset vector; bhkNiTriStripsShape lacks the scale Vector4; 10.0.1.0 mopp data is FULL size (pyffi's "size-1" convention is pre-Bethesda).
 - 10.1.0.106: NiSingleInterpController.Interpolator exists since 10.1.0.104 (pyffi said 10.2); NiInterpController has a Manager Controlled byte (10.1.0.104-108); NiPSysEmitterCtlr.VisibilityInterpolator since 10.1.0.104; NiBlendInterpolator uses the full runtime-state layout (item array + per-subclass value snapshot: Transform 35B, Point3 12B) — hand-rolled consume-only reader.
 - `bhkConvexSweepShape` (10.0.1.0 clutter) registered as a class at runtime; `_convert_shape` unwraps it to its inner shape (Skyrim never ships it).
+
+## Morrowind legacy particle emitters — the red-triangle candles/torches/fires (SOLVED 2026-09-12)
+<a id="morrowind-particle-systems"></a>
+**Code:** `asset_convert/nif/particles_morrowind.py`
+
+Morrowind predates the `NiPSys*` vocabulary entirely. An emitter is a `NiParticles` subclass — `NiRotatingParticles` (165 files) or `NiAutoNormalParticles` (9) — driven by a `NiParticleSystemController`, with affectors on that controller's `particle_extra` linked list rather than in a modifier array. Skyrim has RTTI for none of them: **0 occurrences across 17,216 vanilla meshes**, against 599 files using `NiPSysData`. The engine rejects the file and draws the missing-model red triangle. 174 meshes in Tamriel Data / Tamriel Rebuilt are affected — every candle, torch, brazier and fire.
+
+The blocks READ fine (they inherit `NiParticles` → `NiGeometry`, so PyFFI parses them), and the geometry walk never touched them because it dispatches on `NiTriShape`/`NiTriStrips`. So they passed straight through conversion into the output unchanged — a file that converts "successfully" and still cannot load.
+
+- `upgrade_legacy_particles` runs in the Morrowind pre-pass (`run_morrowind_fixups`), BEFORE the version upgrade and the geometry walk. It rewrites each legacy emitter as a `NiParticleSystem`, so the normal Oblivion path (`particles.py: convert_particle_system`) then finishes the job unchanged — no parallel conversion path.
+- Every emission parameter is AUTHORED on the controller and is mapped verbatim: `speed`/`speed_random` → speed, `vertical_angle` → declination_variation, `horizontal_angle` → planar_angle_variation, `lifetime`/`lifetime_random` → life_span, `size` → initial_radius, `emitter` → emitter_object, and `emit_rate` → the `NiPSysEmitterCtlr`'s NiFloatInterpolator value (birth rate lives on the CONTROLLER in Skyrim, not on the emitter).
+- The `particle_extra` chain maps to the modifier array: `NiParticleGrowFade` (139 files) → `NiPSysGrowFadeModifier`, `NiGravity` (4) → `NiPSysGravityModifier`, `NiParticleRotation` (1) → `NiPSysRotationModifier`. `NiParticleColorModifier` (3) is left to the Oblivion path, which builds `BSPSysSimpleColorModifier` from the authored material.
+- **A freshly built controller MUST carry `target`, or the game crashes.** `NiTimeController::m_pTarget` (x64 offset 0x38) is loaded and dereferenced with NO null check: `mov rax,[rcx+0x38]` then `mov rbx,[rax+0x18]` (stable ID 74716 +0x3c; 1.6.659 RVA 0xd517fc) — the engine then walks `[rbx+0x40]` down the target's children calling a vtable method, so it wants the owning NiParticleSystem. A null there is an instant EXCEPTION_ACCESS_VIOLATION reading 0x18 the moment the system updates. This shipped once and crashed on a Morrowind candle; the Oblivion path never hit it because authored sources already carry `target`, and it is invisible to every structural check. Both controllers get `target = psys`, and `visibility_interpolator` gets a true NiBoolInterpolator (40/40 vanilla emitter controllers carry one; 0 are null). Update-controller flags are 0x4c, not the emitter's 0x48.
+- Modifier `order` is not set here: `_skyrimize_modifiers` sorts and stamps the whole chain against `_PSYS_ORDER` on the second pass, which is the single source of that vocabulary.
+- The parent `NiBSParticleNode` and `NiLODNode` are separately handled by `_REWRITE_AS_NINODE` — see [legacy block types](#legacy-block-types); an emitter fix alone is not enough for these files.
+- Vanilla Skyrim candles use a `BSValueNode`/AddonNode pointing at a shared flame effect instead of an in-mesh system. That was rejected: it needs new ADDN records and would DISCARD the authored rate/cone/lifetime each mesh carries. In-mesh `NiParticleSystem` is equally vanilla-legal (599 files).
+
+## Morrowind-era legacy block types — the [RD] "Unknown block type" failures (SOLVED 2026-09-12)
+<a id="legacy-block-types"></a>
+PyFFI creates a block with `getattr(NifFormat, block_type)` and raises `ValueError: Unknown block type` for any name its 0.7.1.1 nif.xml never declared, failing the **whole file** on the first occurrence. Tamriel Data (Morrowind-port assets, all version 4.0.0.2) uses `NiCollisionSwitch`, which PyFFI omits even though it ships every other Morrowind legacy node (`AvoidNode`, `RootCollisionNode`, `NiBSParticleNode`). This cost 42 of the 43 mesh failures on `tamriel_data.esm` — every TR water plane, window, fountain, ship interior and incense burner.
+- `_install_legacy_block_types` (patch 15) registers each name in `_LEGACY_NINODE_BLOCKS` as a runtime `NiNode` subclass. Both `references/nif 0.10.0.0.xml` and `references/nif 0.9.2.0.xml` declare it `<niobject name="NiCollisionSwitch" inherit="NiNode">` with **no fields of its own**, so the NiNode layout reads it byte-for-byte; OpenMW agrees (`niffile.cpp`: `construct<NiNode, RC_NiCollisionSwitch>`).
+- The node's purpose — toggling collision on its subtree — rides in the standard NiNode flags (bit 0x20 = collision disabled), so nothing extra is parsed. It converts as the NiNode it is; Skyrim takes collision from the bhk tree, not from this node.
+- Add a name to the tuple, not a new function, when another bare-NiNode legacy type turns up.
 
 ## Orphaned blocks in `data.roots` — the [EXC] `'<block>' object has no attribute 'controller'` failures (SOLVED 2026-07-20)
 <a id="orphaned-blocks-dataroots-exc-block"></a>

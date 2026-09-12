@@ -145,6 +145,15 @@ def _apply_nifformat_patches(NifFormat):
     # ------------------------------------------------------------------
     _install_morrowind_layouts(NifFormat)
 
+    # ------------------------------------------------------------------
+    # Patch 15: legacy block types PyFFI 2.2.3 never declared
+    # ------------------------------------------------------------------
+    _install_legacy_block_types(NifFormat)
+
+
+#: Block types that are a bare NiNode with no extra fields (nif.xml 0.9/0.10).
+_LEGACY_NINODE_BLOCKS = ('NiCollisionSwitch',)
+
 
 # ---------------------------------------------------------------------------
 # Patches 5-7: early-Oblivion NIF layout support
@@ -502,6 +511,16 @@ def _install_morrowind_layouts(NifFormat):
     for attr in declarations:
         attr.type_ = shared
     _refresh_attribute_caches(NifFormat, (geometry,))
+
+
+def _install_legacy_block_types(NifFormat):
+    """Declare pre-Oblivion NiNode-alias blocks missing from PyFFI's nif.xml.
+
+    See: docs/commentary/asset_convert_nif.md#legacy-block-types
+    """
+    for name in _LEGACY_NINODE_BLOCKS:
+        if not hasattr(NifFormat, name):
+            setattr(NifFormat, name, type(name, (NifFormat.NiNode,), {}))
 
 
 def _num_uv_sets_type(base):
