@@ -43,14 +43,20 @@ NIF_FLAGS = 14  # Standard Skyrim NiAVObject flags (SelectiveUpdate bits 1-3)
 # ---------------------------------------------------------------------------
 
 def _triangulate_strips(strips_data):
-    """Convert NiTriStripsData strip indices to a list of (a, b, c) triangles."""
+    """Convert NiTriStripsData strip indices to a list of (a, b, c) triangles.
+
+    Triangles indexing past the vertex array are dropped: some third-party
+    meshes carry strip points beyond num_vertices, which would otherwise
+    raise IndexError in every consumer.
+    """
     triangles = []
+    nv = len(strips_data.vertices)
     for strip in strips_data.points:
         pts = list(strip)
         flip = False
         for i in range(2, len(pts)):
             a, b, c = pts[i-2], pts[i-1], pts[i]
-            if a != b and b != c and c != a:
+            if a != b and b != c and c != a and max(a, b, c) < nv:
                 if not flip:
                     triangles.append((a, b, c))
                 else:
