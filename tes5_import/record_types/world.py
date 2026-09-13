@@ -17,6 +17,7 @@ from .items import get_base_origin_shift
 from ..base.text_reader import remap_formid
 from .common import (
     TES4_DEFAULT_MUSIC_ENUM,
+    landscape_texture_path,
     prefix_path,
     get_float,
     get_formid,
@@ -276,7 +277,7 @@ def convert_LTEX(rec: dict, writer=None) -> tuple:
         txst_edid = f"TES4_{edid}_TXST" if edid else f"TES4_LTEX_{get_formid(rec, 'FormID'):08X}_TXST"
         txst_subs += pack_string_subrecord('EDID', txst_edid)
         txst_subs += pack_obnd()
-        diffuse = prefix_path(_landscape_icon(icon_path))
+        diffuse = landscape_texture_path(icon_path)
         base_no_ext = diffuse.rsplit('.', 1)[0] if '.' in diffuse else diffuse
         txst_subs += pack_string_subrecord('TX00', diffuse)
         # Normal map (TX01): derive from diffuse with _n suffix
@@ -1196,24 +1197,6 @@ def build_land_layers(rec: dict) -> bytes:
                 subs += pack_subrecord('VTXT', bytes(vtxt_data))
 
     return subs
-
-
-# ---------------------------------------------------------------------------
-# LTEX diffuse path
-# ---------------------------------------------------------------------------
-def _landscape_icon(icon_path: str) -> str:
-    """An LTEX ICON made relative to Textures\\, whatever the source game.
-
-    Oblivion names a bare file relative to Textures\\Landscape\\, so the
-    folder is prepended. Morrowind's is already a full path under Textures\\
-    and must be left alone -- prefixing it invented a landscape\\ folder that
-    does not exist, and all 107 terrain textures resolved to nothing.
-    See: docs/commentary/tes4_export_morrowind.md#land-terrain
-    """
-    lowered = icon_path.lower().replace('/', '\\')
-    if lowered.startswith('textures\\') or lowered.startswith('landscape\\'):
-        return icon_path
-    return 'landscape\\' + icon_path
 
 
 # ---------------------------------------------------------------------------

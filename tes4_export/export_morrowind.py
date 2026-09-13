@@ -27,10 +27,14 @@ from .morrowind_ids import (IdIndex, exterior_key, interior_key, land_key,
                             load_index, marker_formid)
 from .morrowind_markers import MarkerBuilder, marker_lines
 from .morrowind_patch import PATCH_NAME
-from .morrowind_land import (TES4_TEX_SIZE, decode_heights, decode_textures,
-                             encode_heights, layer_lines, ltex_index,
+from .morrowind_grass import (GrassTally, grass_records, is_grass_model,
+                              ltex_grass_lines, master_ltex_fields,
+                              master_texture_grid)
+from .morrowind_land import (MAX_QUAD_LAYERS, decode_heights,
+                             decode_textures, encode_heights, inner_patch,
+                             layer_lines, ltex_index, pad_grid,
                              quadrant_normals, quadrant_textures,
-                             shift_textures)
+                             shift_textures, sub_patch)
 from .morrowind_world import (TES4_CELL_SIZE, WORLDSPACE_EDID, cell_editor_id,
                               cell_grid, tes3_cell_quadrants)
 from .record_types.morrowind import (MORROWIND_ITEM_EXPORTERS, emit_ref,
@@ -125,6 +129,14 @@ class MorrowindContext:
         self.gap_ids = {}
         self.unlinked_doors = 0
         self.vtex_by_cell = {}
+        self.master_dirs = []
+        self.grass = None
+        self.grass_models = {}
+        self.grass_ltex = {}
+
+    def grass_id(self, record_id: str, texture: str) -> str:
+        """The FormID of the GRAS one static becomes on one land texture."""
+        return self.derive('gras:' + record_id.lower() + ':' + texture.upper())
 
     def register_ltex(self, index: int, form_id: str) -> None:
         """Note the FormID a LAND's VTEX index resolves to."""
@@ -335,6 +347,7 @@ def load_context(export_root: str, masters=()) -> MorrowindContext:
     slot_of = {n.lower(): i for i, n in enumerate(_master_list(masters))}
     index = IdIndex()
     master_doors = []
+    master_remaps = []
     for slot, path in enumerate(paths):
         own = masters_from_export_header(path)
         remap = {len(own): slot}
@@ -344,11 +357,13 @@ def load_context(export_root: str, masters=()) -> MorrowindContext:
                 remap[k] = target
         index.merge(load_index(path, remap=remap))
         master_doors.append(load_master_doors(path, remap))
+        master_remaps.append((path, remap))
     ctx = MorrowindContext(index, own_index=len(paths))
     for doors in master_doors:
         for cell, entries in doors.items():
             ctx.doors_by_cell.setdefault(cell, []).extend(entries)
     ctx.master_bounds = _master_world_bounds(paths)
+    ctx.master_dirs = master_remaps
     return ctx
 
 
@@ -510,6 +525,7 @@ def convert_plugin(records, ctx: MorrowindContext) -> dict:
             ctx.register_own(rec.record_id, tes4_signature(rec))
     _register_land_textures(records, ctx)
     _register_land_grids(records, ctx)
+    _register_groundcover(records, ctx)
     register_sound_gens(records, ctx)
 
     out = {sig: [] for sig in ('CELL', 'REFR', 'ACHR', 'ACRE', 'LAND')}
@@ -532,7 +548,37 @@ def convert_plugin(records, ctx: MorrowindContext) -> dict:
     out['REFR'].extend(map_marker_records(ctx))
     out['WRLD'] = worldspace_record(ctx)
     out['CELL'].extend(persistent_cell_record(ctx))
+    _emit_groundcover(out, ctx)
     return out
+
+
+def _emit_groundcover(out: dict, ctx: MorrowindContext) -> None:
+    """Turn the tallied placements into GRAS records and LTEX bindings.
+
+    The LTEX records are OVERRIDES of the master's own: a groundcover plugin
+    defines no texture itself, and the binding has to land on the texture the
+    terrain actually names.
+    See: docs/commentary/tes4_export_morrowind.md#groundcover-as-grass
+    """
+    if ctx.grass is None:
+        return
+    placed = sum(ctx.grass.pairs.values())
+    bindings = ctx.grass.bindings()
+    records = grass_records(ctx.grass, ctx.grass_models, ctx.grass_id)
+    if not records:
+        print('  Groundcover: no grass survived binding; %d placements dropped'
+              % (placed + ctx.grass.unplaced))
+        return
+    out['GRAS'] = records
+    out.setdefault('LTEX', [])
+    for texture in sorted(bindings):
+        lines = ltex_grass_lines(bindings, texture, ctx.grass_id,
+                                 ctx.grass_ltex.get(texture.upper()))
+        if lines:
+            out['LTEX'].append((texture, lines))
+    print('  Groundcover: %d placements -> %d GRAS over %d textures '
+          '(%d off-terrain)'
+          % (placed, len(records), len(bindings), ctx.grass.unplaced))
 
 
 def map_marker_records(ctx: MorrowindContext) -> list:
@@ -567,6 +613,35 @@ def _register_land_textures(records, ctx: MorrowindContext) -> None:
             continue
         ctx.register_ltex(struct.unpack_from('<I', intv.data, 0)[0],
                           ctx.resolve(rec.record_id, 'LTEX'))
+
+
+def _register_groundcover(records, ctx: MorrowindContext) -> None:
+    """Note every groundcover static, and open a tally over the master terrain.
+
+    A plugin with no grass statics leaves `ctx.grass` None, which keeps every
+    ordinary Morrowind plugin on the untouched path.
+    See: docs/commentary/tes4_export_morrowind.md#groundcover-as-grass
+    """
+    for rec in records:
+        if rec.type != 'STAT' or rec.deleted:
+            continue
+        model = get_subrecord(rec, 'MODL')
+        path = '' if model is None else model.data.split(
+            bytes(1))[0].decode('cp1252', 'replace')
+        if is_grass_model(path):
+            ctx.grass_models[rec.record_id] = path
+    if not ctx.grass_models:
+        return
+    grid = {}
+    for master, remap in ctx.master_dirs:
+        for cell, quads in master_texture_grid(master, remap).items():
+            grid.setdefault(cell, quads)
+    ctx.grass = GrassTally(grid)
+    for master, remap in ctx.master_dirs:
+        for fid, edid in master_ltex_fields(master, remap).items():
+            ctx.grass_ltex.setdefault(fid, edid)
+    print('  Groundcover: %d grass statics over %d textured cells'
+          % (len(ctx.grass_models), len(grid)))
 
 
 def _register_land_grids(records, ctx: MorrowindContext) -> None:
@@ -705,10 +780,7 @@ def land_records(rec, ctx: MorrowindContext) -> list:
     heights = decode_heights(vhgt.data)
     vnml = get_subrecord(rec, 'VNML')
     normals = vnml.data if vnml else b''
-    textures = ctx.vtex_by_cell.get((cell_x, cell_y), [])
-    if textures:
-        textures = shift_textures(
-            textures, ctx.vtex_by_cell.get((cell_x - 1, cell_y)))
+    textures = _padded_grid(ctx, cell_x, cell_y)
 
     out = []
     for quad in ((0, 0), (1, 0), (0, 1), (1, 1)):
@@ -726,6 +798,23 @@ def land_records(rec, ctx: MorrowindContext) -> list:
     return out
 
 
+def _shifted_grid(ctx: MorrowindContext, cell_x: int, cell_y: int) -> list:
+    """One cell's 16x16 VTEX grid as the engine applies it, or []."""
+    textures = ctx.vtex_by_cell.get((cell_x, cell_y), [])
+    if not textures:
+        return []
+    return shift_textures(textures, ctx.vtex_by_cell.get((cell_x - 1, cell_y)))
+
+
+def _padded_grid(ctx: MorrowindContext, cell_x: int, cell_y: int) -> list:
+    """A cell's applied grid ringed by its neighbours', or [] with no VTEX."""
+    center = _shifted_grid(ctx, cell_x, cell_y)
+    if not center:
+        return []
+    return pad_grid(center, lambda dx, dy: _shifted_grid(
+        ctx, cell_x + dx, cell_y + dy))
+
+
 def _land_layers(textures: list, quad: tuple, ctx: MorrowindContext) -> list:
     """Every texture a TES4 quadrant uses: a dominant BASE plus ALPHA layers.
 
@@ -740,7 +829,7 @@ def _land_layers(textures: list, quad: tuple, ctx: MorrowindContext) -> list:
     cell = quadrant_textures(textures, quad)
     lines, count = [], 0
     for sub in ((0, 0), (1, 0), (0, 1), (1, 1)):
-        patch = _sub_patch(cell, sub)
+        patch = sub_patch(cell, sub)
         quadrant = sub[0] + 2 * sub[1]
         for rank, (value, form_id) in enumerate(_ranked_textures(patch, ctx)):
             lines.extend(layer_lines(count, quadrant, form_id, rank,
@@ -749,23 +838,19 @@ def _land_layers(textures: list, quad: tuple, ctx: MorrowindContext) -> list:
     return [f'LayerCount={count}'] + lines if count else []
 
 
-def _sub_patch(cell: list, sub: tuple) -> list:
-    """One 4x4 TES4 layer quadrant out of a cell's 8x8 texture patch."""
-    half = TES4_TEX_SIZE // 2
-    x0, y0 = sub[0] * half, sub[1] * half
-    return [cell[(y0 + y) * TES4_TEX_SIZE + x0 + x]
-            for y in range(half) for x in range(half)]
-
-
 def _ranked_textures(patch: list, ctx: MorrowindContext) -> list:
     """One quadrant's (VTEX value, LTEX FormID) pairs, widest coverage first.
 
-    Ties break on the VTEX value so the layer order is stable across runs.
+    Textures seen only in the ring come last: they reach the quadrant's edge
+    vertices and nothing else. Ties break on the VTEX value so the layer
+    order is stable across runs, and the quadrant's layer cap is honoured.
     """
-    tally = Counter(v for v in patch if ctx.land_texture(v))
+    tally = Counter(v for v in inner_patch(patch) if ctx.land_texture(v))
+    ring = sorted({v for v in patch if v not in tally and ctx.land_texture(v)})
+    ranked = [value for value, _n in sorted(tally.items(),
+                                            key=lambda kv: (-kv[1], kv[0]))]
     return [(value, ctx.land_texture(value))
-            for value, _n in sorted(tally.items(),
-                                    key=lambda kv: (-kv[1], kv[0]))]
+            for value in (ranked + ring)[:MAX_QUAD_LAYERS]]
 
 
 def _interior_cell(cell, ctx: MorrowindContext) -> tuple:
@@ -821,6 +906,9 @@ def _emit_refs(refs, parent_cell: str, ctx: MorrowindContext) -> list:
     out = []
     for ref in refs:
         if ref.deleted:
+            continue
+        if ctx.grass is not None and ref.record_id in ctx.grass_models:
+            ctx.grass.add(ref.record_id, ref.pos, ref.scale)
             continue
         lines = _ref_lines(ref, parent_cell, ctx)
         if not lines:

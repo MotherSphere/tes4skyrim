@@ -41,6 +41,37 @@ QUAD_VERTS = 17
 #: Vertex cells one texture patch spans: 16 cells across 4 patches.
 PATCH_VERTS = (QUAD_VERTS - 1) // QUAD_TEX_SIZE
 
+#: A grid with a one-patch ring of its neighbours: cell, TES4 cell, quadrant.
+PADDED_TEX_SIZE = TES3_TEX_SIZE + 2
+PADDED_CELL_SIZE = TES4_TEX_SIZE + 2
+PADDED_QUAD_SIZE = QUAD_TEX_SIZE + 2
+
+#: A BASE plus the eight ALPHA layers a TES4 quadrant can hold.
+MAX_QUAD_LAYERS = 9
+
+
+def pad_grid(center: list, neighbour) -> list:
+    """The 16x16 VTEX grid with a one-patch ring from the cells around it.
+
+    `neighbour(dx, dy)` returns the shifted grid of that cell or None, in
+    which case the ring repeats this cell's own edge. The ring is what lets
+    a texture blend ACROSS a quadrant or cell boundary instead of stepping.
+    See: docs/commentary/tes4_export_morrowind.md#terrain-texture-blending
+    """
+    n = TES3_TEX_SIZE
+    out = []
+    for py in range(PADDED_TEX_SIZE):
+        dy = (py - 1) // n
+        for px in range(PADDED_TEX_SIZE):
+            dx = (px - 1) // n
+            grid = center if (dx, dy) == (0, 0) else neighbour(dx, dy)
+            if grid:
+                out.append(grid[((py - 1) % n) * n + (px - 1) % n])
+            else:
+                out.append(center[min(max(py - 1, 0), n - 1) * n
+                                  + min(max(px - 1, 0), n - 1)])
+    return out
+
 
 def decode_heights(vhgt: bytes) -> list:
     """The 65x65 absolute heights in a Morrowind VHGT subrecord.
@@ -164,21 +195,37 @@ def ltex_index(vtex_value: int):
     return None if vtex_value == 0 else vtex_value - VTEX_INDEX_BIAS
 
 
-def quadrant_textures(textures: list, quadrant: tuple) -> list:
-    """The 8x8 texture indices covering one Oblivion cell."""
-    if not textures:
+def quadrant_textures(padded: list, quadrant: tuple) -> list:
+    """The 10x10 texture indices covering one Oblivion cell and its ring."""
+    if not padded:
         return []
     qx, qy = quadrant
     x0, y0 = qx * TES4_TEX_SIZE, qy * TES4_TEX_SIZE
-    return [textures[(y0 + y) * TES3_TEX_SIZE + x0 + x]
-            for y in range(TES4_TEX_SIZE) for x in range(TES4_TEX_SIZE)]
+    return [padded[(y0 + y) * PADDED_TEX_SIZE + x0 + x]
+            for y in range(PADDED_CELL_SIZE) for x in range(PADDED_CELL_SIZE)]
+
+
+def sub_patch(cell: list, sub: tuple) -> list:
+    """One 6x6 TES4 layer quadrant, ring included, out of a 10x10 cell."""
+    x0, y0 = sub[0] * QUAD_TEX_SIZE, sub[1] * QUAD_TEX_SIZE
+    return [cell[(y0 + y) * PADDED_CELL_SIZE + x0 + x]
+            for y in range(PADDED_QUAD_SIZE) for x in range(PADDED_QUAD_SIZE)]
+
+
+def inner_patch(patch: list) -> list:
+    """The 4x4 patches a quadrant owns, without its ring."""
+    return [patch[y * PADDED_QUAD_SIZE + x]
+            for y in range(1, QUAD_TEX_SIZE + 1)
+            for x in range(1, QUAD_TEX_SIZE + 1)]
 
 
 def opacity_grid(patch: list, value: int) -> list:
-    """VTXT (position, opacity) pairs for one texture over a 4x4 patch.
+    """VTXT (position, opacity) pairs for one texture over a 6x6 patch.
 
-    Each of the quadrant's 17x17 vertices takes the share of the one to four
-    patches meeting at it that use `value`. Zero-opacity entries are omitted.
+    Each of the quadrant's 17x17 vertices takes the share of the four patches
+    meeting at it that use `value`; on the quadrant's edge two of those lie
+    in the ring, so the blend continues across the boundary instead of
+    stepping. Zero-opacity entries are omitted.
     See: docs/commentary/tes4_export_morrowind.md#terrain-texture-blending
     """
     out = []
@@ -188,17 +235,15 @@ def opacity_grid(patch: list, value: int) -> list:
             for py in _touching_patches(vy):
                 for px in _touching_patches(vx):
                     total += 1
-                    hits += patch[py * QUAD_TEX_SIZE + px] == value
+                    hits += patch[py * PADDED_QUAD_SIZE + px] == value
             if hits:
                 out.append((vy * QUAD_VERTS + vx, hits / total))
     return out
 
 
 def _touching_patches(vertex: int) -> range:
-    """The patch indices along one axis that share a given vertex."""
-    lo = (vertex - 1) // PATCH_VERTS
-    hi = vertex // PATCH_VERTS
-    return range(max(lo, 0), min(hi, QUAD_TEX_SIZE - 1) + 1)
+    """The padded patch indices along one axis that share a given vertex."""
+    return range((vertex - 1) // PATCH_VERTS + 1, vertex // PATCH_VERTS + 2)
 
 
 def layer_lines(index: int, quadrant: int, form_id: str, rank: int,

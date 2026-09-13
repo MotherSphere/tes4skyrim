@@ -191,6 +191,8 @@ _FORMID_FIELDS = {
     b'XLKR': (0,),    # linked-ref keyword + ref
     b'BTXT': (0,),    # LTEX + quadrant/layer
     b'ATXT': (0,),    # LTEX + quadrant/layer
+    b'TNAM': None,    # LTEX -> TXST (wbDefinitionsTES5 wbRecord(LTEX))
+    b'GNAM': None,    # LTEX -> GRAS
     # DELIBERATELY ABSENT — verified against wbDefinitionsTES5.pas, these are
     # NOT FormIDs and rewriting them corrupts real data:
     #   XLCM  wbInteger  (level modifier)
@@ -579,6 +581,10 @@ def load_master_index(masters: list, tes4_master_count: int,
 
     An override IS the master's converted record, so without it there is
     nothing to override and the conversion cannot proceed.
+
+    A lone master is returned unwrapped only when it already numbers itself
+    at `base_slot`; otherwise its bytes still name its OWN space and must be
+    restated by `ChainedMasterIndex`.
     """
     resolved = resolve_master_outputs(masters, tes4_master_count, output_root)
     if not resolved:
@@ -602,12 +608,8 @@ def load_master_index(masters: list, tes4_master_count: int,
         raise MissingMasterOutputError("\n".join(lines))
 
     indices = [MasterIndex(path) for _, path in resolved]
-    if len(indices) == 1:
+    base_slot = len(masters) - tes4_master_count
+    if len(indices) == 1 and indices[0].own_index == base_slot:
         return indices[0]
-    # The TES4 masters are the TRAILING entries of the TES5 master list, so the
-    # first of them sits at this slot in the child's FormID space. Routing by
-    # index byte needs the real slot, not a guess — see ChainedMasterIndex.
-    return ChainedMasterIndex(
-        indices,
-        base_slot=len(masters) - tes4_master_count,
-        child_masters=masters)
+    return ChainedMasterIndex(indices, base_slot=base_slot,
+                              child_masters=masters)

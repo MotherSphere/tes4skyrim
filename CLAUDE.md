@@ -284,7 +284,7 @@ real data, or a failing-then-passing test.
   | `asset_convert/nif/nif_converter.py`, collision, skin | `--meshes-only` |
   | `spt_*` | `--speedtrees-only` |
   | sound conversion | `--sounds-only` |
-  | LOD | `--lod-only` |
+  | LOD | `tools/release/create_lod.py --worldspaces <EDID>`, NEVER `--lod-only` |
   | BSA packing | `--pack-only` |
 
   Touching several areas means running several stages — import *and* scripts if
@@ -308,7 +308,9 @@ real data, or a failing-then-passing test.
 - 🛑 **A `--*-only` FLAG IS A STAGE, NOT A SCOPE** — `--lod-only` bakes every
   qualifying worldspace, masters' included. Confirm the target from the first
   output lines before calling a build running; a banner is not progress.
-  Scoping one worldspace by hand still needs its overlays.
+- 🛑 **LOD BUILDS ONLY VIA `tools/release/create_lod.py --worldspaces <EDID>`,
+  NEVER `--lod-only`** — a worldspace bakes once from its owner plus every
+  plugin as an overlay. `--dry-run` first; the plan names owner and overlays.
 - **Never run two CPU-saturating jobs at once.** The order is **targeted tests
   first, then builds, one at a time.** While one runs, do not start pytest, a
   mesh sweep, or a second build — wait for the completion notification, then

@@ -45,6 +45,22 @@ def prefix_path(path: str) -> str:
     return p
 
 
+def landscape_texture_path(icon_path: str) -> str:
+    """The shipped path of an LTEX ICON, whatever the source game.
+
+    Oblivion names a bare file relative to Textures\\Landscape\\, so the
+    folder is prepended. Morrowind's is already a full path under Textures\\
+    and must be left alone -- prefixing it invented a landscape\\ folder that
+    does not exist, and all 107 terrain textures resolved to nothing.
+    See: docs/commentary/tes4_export_morrowind.md#land-terrain
+    """
+    lowered = icon_path.lower().replace('/', '\\')
+    if not (lowered.startswith('textures\\')
+            or lowered.startswith('landscape\\')):
+        icon_path = 'landscape\\' + icon_path
+    return prefix_path(icon_path)
+
+
 def _common_header_subs(rec: dict, need_obnd: bool = True, need_full: bool = True,
                         obnd_sig: str = '', obnd_override: tuple = None) -> bytes:
     """Build common leading subrecords: EDID, VMAD, OBND, FULL.

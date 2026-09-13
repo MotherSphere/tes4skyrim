@@ -228,15 +228,7 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
         stats['mesh_conversion'] = {'converted': 0, 'skipped': 0, 'errors': 0}
 
     if mesh_src.exists() and not textures_only:
-        stats['hair'] = hair_pipeline.run(rec_dir, plugin_dir / 'meshes')
-
-    if mesh_src.exists() and not textures_only:
-        processed, modified, missing = grass_profile.run(
-            rec_dir, plugin_dir / 'meshes')
-        stats['grass_profile'] = {
-            'processed': processed, 'modified': modified, 'missing': missing}
-        print(f"  Grass models: {processed} placed under landscape\\grass"
-              + (f", {missing} missing" if missing else ""))
+        _profile_hair_and_grass(rec_dir, plugin_dir, stats)
 
     # -----------------------------------------------------------------------
     # Copy Textures
@@ -246,7 +238,23 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("=" * 60)
 
     _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats, rec_dir)
+    checked, written = landscape_normals.ensure_ltex_normals(
+        rec_dir, plugin_dir / 'textures', output_dir)
+    stats['ltex_normals_written'] = written
+    print(f"  LTEX normals: {checked} land textures, {written} flat normals "
+          f"written for textures shipping none")
     return stats
+
+
+def _profile_hair_and_grass(rec_dir, plugin_dir, stats):
+    """Run the hair and grass post-passes over the converted mesh tree."""
+    stats['hair'] = hair_pipeline.run(rec_dir, plugin_dir / 'meshes')
+    processed, modified, missing = grass_profile.run(
+        rec_dir, plugin_dir / 'meshes')
+    stats['grass_profile'] = {
+        'processed': processed, 'modified': modified, 'missing': missing}
+    print(f"  Grass models: {processed} placed under landscape\\grass"
+          + (f", {missing} missing" if missing else ""))
 
 
 def _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats, rec_dir):
@@ -275,7 +283,7 @@ def _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats, rec_dir):
 
     checked, fixed = landscape_normals.run(tex_dst / 'landscape')
     stats['landscape_normals_fixed'] = fixed
-    print(f"  Landscape normals: {checked} checked, {fixed} DXT1->DXT5 fixed")
+    print(f"  Landscape normals: {checked} checked, {fixed} given the mask")
 
     n_checked, n_fixed, n_kinds = landscape_normals.normalize_specular_alpha(
         tex_dst, skip=(os.sep + 'landscape' + os.sep,))

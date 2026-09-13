@@ -1,31 +1,35 @@
-"""Landscape normal-map specular fix: DXT1 → DXT5 with a dark alpha channel.
+"""Landscape normal-map specular masks.
 
 Skyrim's landscape shader reads the normal map's ALPHA channel as the
 specular mask.  Oblivion's terrain shader never used it, so most Oblivion
-landscape normal maps ship as DXT1 (no alpha channel).  DXT1 samples
-alpha = 1.0 everywhere, which Skyrim treats as a full-strength specular
-mask — the entire terrain turns glossy/shiny.  (Oblivion normal maps that
-are already DXT5 carry a real specular mask in alpha and are left alone.)
+landscape normal maps ship as DXT1 (sampled alpha = 1.0, full specular) and
+the rest carry whatever their author's tool left there.  Morrowind ships no
+normal map at all, and the TXST still names one.
 
-Fix: re-container each DXT1 landscape ``*_n.dds`` as DXT5 with a constant
-dark alpha (32/255 ≈ Oblivion-typical low specular).  DXT1 and DXT5 share
-the same 8-byte color block format, so color data is reused verbatim; only
-blocks in DXT1's 3-color mode (c0 <= c1, which DXT5 would misdecode as a
-4-color block) get their endpoints swapped and indices remapped.  No
-recompression loss.
+Two passes fix that:
+
+  run(landscape_dir)        every ``*_n.dds`` in the landscape tree gets a
+                            constant dark alpha (32/255), whatever its format.
+  ensure_ltex_normals(...)  every land texture an LTEX names gets a flat
+                            normal with that same mask when no plugin ships one.
+
+DXT1 and DXT5 share the 8-byte color block format, so color data is reused
+verbatim; only DXT1 3-color blocks (c0 <= c1) get their endpoints swapped and
+indices remapped.  No recompression loss.
 
 CLI:
-    python -m asset_convert.texture.landscape_normals <textures_dir>
-    # e.g. python -m asset_convert.texture.landscape_normals \
-    #          output/Oblivion.esm/textures/tes4/landscape
+    python -m asset_convert.texture.landscape_normals <landscape_dir>
+    python -m asset_convert.texture.landscape_normals <export_dir> <textures_root> <output_dir>
 """
-from asset_convert.game_paths import current_namespace
+from asset_convert.game_paths import current_namespace, namespace_for, set_namespace
 import os
 import struct
 import sys
 from pathlib import Path
 
 import numpy as np
+
+from tes5_import.record_types.common import landscape_texture_path
 
 # Specular mask value written into the new alpha channel.  Oblivion DXT5
 # landscape normals average ~77/255; DXT1 sources were authored with no
@@ -147,46 +151,76 @@ def set_constant_alpha(path, alpha):
     return True
 
 
-def fix_normal_specular(path, alpha=SPECULAR_ALPHA):
-    """Convert one DXT1 DDS to DXT5 with constant alpha.  Returns True if
-    the file was rewritten (False = not DXT1, left untouched)."""
-    with open(path, 'rb') as f:
-        data = f.read()
-    if data[:4] != b'DDS ' or data[84:88] != b'DXT1':
-        return False
-    height, width = struct.unpack_from('<II', data, 12)
-    mip_count = max(1, struct.unpack_from('<I', data, 28)[0])
-
-    hdr = bytearray(data[:128])
-    hdr[84:88] = b'DXT5'
-    # dwPitchOrLinearSize: top-level mip byte size (16 bytes/block for DXT5)
-    top_blocks = max(1, (width + 3) // 4) * max(1, (height + 3) // 4)
-    struct.pack_into('<I', hdr, 20, top_blocks * 16)
-
-    out = [bytes(hdr)]
-    off = 128
-    for w, h in _mip_dims(width, height, mip_count):
-        n = max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * 8
-        out.append(_dxt1_to_dxt5_blocks(data[off:off + n], alpha))
-        off += n
-
-    with open(path, 'wb') as f:
-        f.write(b''.join(out))
-    return True
+def _has_constant_alpha(path, alpha) -> bool:
+    """Whether a normal map already carries `alpha` as a flat mask."""
+    from asset_convert.texture import parallax
+    blob = _read_top_mip(path)
+    info = None if blob is None else parallax.classify_alpha(blob)
+    return (info is not None and getattr(info, 'levels', 0) == 1
+            and abs(getattr(info, 'mean', -1) - alpha) < 0.5)
 
 
-def run(landscape_dir):
-    """Fix every DXT1 ``*_n.dds`` under landscape_dir (recursive).
-    Returns (checked, fixed) counts."""
+def run(landscape_dir, alpha=SPECULAR_ALPHA):
+    """Give every ``*_n.dds`` under landscape_dir the constant landscape mask.
+
+    Every format is rewritten, a real-looking mask included: TES4's terrain
+    shader never read the alpha, so whatever sits there (a generated height
+    field, in Morroblivion's case) carries no specular intent.
+    Returns (checked, fixed) counts.
+    See: docs/commentary/asset_convert_texture.md#landscape-normal-maps-dxt1-shiny
+    """
     landscape_dir = Path(landscape_dir)
     checked = fixed = 0
     if not landscape_dir.exists():
         return checked, fixed
     for path in sorted(landscape_dir.rglob('*_n.dds')):
         checked += 1
-        if fix_normal_specular(path):
+        if not _has_constant_alpha(path, alpha) \
+                and set_constant_alpha(path, alpha):
             fixed += 1
     return checked, fixed
+
+
+def _ltex_texture_rels(rec_dir):
+    """Every land texture the plugin's LTEX records name, as shipped paths."""
+    ltex_txt = Path(rec_dir) / 'LTEX.txt'
+    rels = set()
+    if not ltex_txt.is_file():
+        return rels
+    with open(ltex_txt, encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            if line.startswith('ICON='):
+                icon = line.strip().split('=', 1)[1].replace('\\\\', '\\')
+                rels.add(landscape_texture_path(icon))
+    return rels
+
+
+def ensure_ltex_normals(rec_dir, textures_root, output_dir,
+                        alpha=SPECULAR_ALPHA):
+    """Write a flat normal for every land texture that ships none.
+
+    A landscape TXST names ``<diffuse>_n.dds`` whether or not the source game
+    had one; Morrowind has no normal maps at all, and a missing landscape
+    normal renders at full specular. The file is looked for under every
+    plugin's output tree (a dependent's terrain borrows its master's
+    textures) and written under THIS plugin's when absent.
+    Returns (checked, written).
+    See: docs/commentary/asset_convert_texture.md#landscape-normal-maps-dxt1-shiny
+    """
+    output_dir = Path(output_dir)
+    trees = [p / 'textures' for p in output_dir.iterdir() if p.is_dir()]
+    written = 0
+    rels = _ltex_texture_rels(rec_dir)
+    for rel in sorted(rels):
+        parts = (rel.rsplit('.', 1)[0] + '_n.dds').split('\\')
+        if any(tree.joinpath(*parts).is_file() for tree in trees):
+            continue
+        dest = Path(textures_root).joinpath(*parts)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, 'wb') as f:
+            f.write(_flat_normal_bytes(alpha))
+        written += 1
+    return len(rels), written
 
 
 # See: docs/commentary/asset_convert_shader.md#default-mask-alpha
@@ -198,21 +232,13 @@ def default_normal_rel() -> str:
     return 'textures\\' + current_namespace() + '\\default_n.dds'
 
 
-def write_default_normal(textures_root, alpha=None, size=32):
-    """Write the shared flat normal (128,128,255) with a constant mask.
+def _flat_normal_bytes(alpha, size=32) -> bytes:
+    """A DXT5 flat normal (128,128,255) with a constant mask, mips included.
 
-    `textures_root` is the TEXTURES root; the namespace segment is appended
-    here.  Call AFTER normalize_specular_alpha.  Every 16-byte DXT5 block is an
-    8-byte constant-alpha block plus a 4-byte color block with c0 == c1 and a
-    zero index word, so each texel resolves to c0.
-
+    Every 16-byte block is an 8-byte constant-alpha block plus a 4-byte color
+    block with c0 == c1 and a zero index word, so each texel resolves to c0.
     See: docs/commentary/asset_convert_texture.md#default-normal-is-dxt5
     """
-    if alpha is None:
-        alpha = DEFAULT_MASK_ALPHA
-    dest = Path(textures_root) / current_namespace() / 'default_n.dds'
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
     # RGB565 for (128,128,255): R=16, G=32, B=31
     c565 = (16 << 11) | (32 << 5) | 31
     color = struct.pack('<HHI', c565, c565, 0)
@@ -247,8 +273,22 @@ def write_default_normal(textures_root, alpha=None, size=32):
     for w, h in dims:
         nb = max(1, (w + 3) // 4) * max(1, (h + 3) // 4)
         body.append(block * nb)
+    return bytes(hdr) + b''.join(body)
+
+
+def write_default_normal(textures_root, alpha=None, size=32):
+    """Write the shared flat normal (128,128,255) with a constant mask.
+
+    `textures_root` is the TEXTURES root; the namespace segment is appended
+    here.  Call AFTER normalize_specular_alpha.
+    See: docs/commentary/asset_convert_texture.md#default-normal-is-dxt5
+    """
+    if alpha is None:
+        alpha = DEFAULT_MASK_ALPHA
+    dest = Path(textures_root) / current_namespace() / 'default_n.dds'
+    dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, 'wb') as f:
-        f.write(bytes(hdr) + b''.join(body))
+        f.write(_flat_normal_bytes(alpha, size))
     return dest
 
 
@@ -351,12 +391,20 @@ def normalize_specular_alpha(tex_dir, alpha=DEFAULT_MASK_ALPHA, skip=()):
 
 
 def main(argv):
-    if len(argv) != 1:
-        print(__doc__)
-        return 1
-    checked, fixed = run(argv[0])
-    print(f"Landscape normals: {checked} checked, {fixed} DXT1->DXT5 fixed")
-    return 0
+    """`<landscape_dir>` runs the tree sweep; `<export_dir> <textures_root>
+    <output_dir>` writes the missing LTEX normals."""
+    if len(argv) == 1:
+        checked, fixed = run(argv[0])
+        print(f"Landscape normals: {checked} checked, {fixed} given the mask")
+        return 0
+    if len(argv) == 3:
+        set_namespace(namespace_for(argv[0]))
+        checked, written = ensure_ltex_normals(*argv)
+        print(f"LTEX normals: {checked} land textures, {written} flat "
+              f"normals written")
+        return 0
+    print(__doc__)
+    return 1
 
 
 if __name__ == '__main__':

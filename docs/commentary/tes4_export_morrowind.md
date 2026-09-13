@@ -278,6 +278,23 @@ and 1**, only 30.5% are fully opaque, and quadrants carry 1–6 alpha layers
 importer's six-alpha cap (`build_land_layers`, which keeps the highest-coverage
 layers) binds on 4 quadrants of 20,672.
 
+**The opacity must be computed over the NEIGHBOURING patches too, or every
+quadrant and cell boundary is a hard seam.** The first version scored a
+vertex only against the patches inside its own 4x4 quadrant, so an edge
+vertex saw one or two patches instead of four: where quadrant A ends in
+texture T1 and quadrant B begins in T2, A's edge vertex was 1.0 T1 and B's
+was 1.0 T2, a step, while the same two textures meeting INSIDE a quadrant
+blended over the 0.5/0.5 vertex between them. That is the "blends here,
+seams there" symptom, and the seam lines are exactly the TES4 quadrant and
+cell edges the Morrowind cell was split along. `pad_grid` now rings the
+16x16 grid with one patch from each of the eight neighbouring cells (each
+shifted the same way, see below; a missing neighbour repeats the edge), a
+quadrant's patch is 6x6, and `_touching_patches` no longer clamps at the
+quadrant edge. A texture seen only in the ring is emitted as a trailing
+layer so the blend reaches the edge from both sides; the importer's
+coverage cap drops it first when the quadrant is full. NOT yet in-game
+verified.
+
 **2. `DATA.Flags` was 3, which is not a value vanilla ever writes.**
 Per xEdit (`wbDefinitionsTES5.pas`): `0x001` normals/height map, `0x002`
 vertex colors, `0x004` layers, `0x008` unknown4, `0x010` auto-calc normals.
@@ -1010,3 +1027,196 @@ flat path list with no folder records, and no compression at all. Parsed from
 
 Vanilla textures are **already DDS**, so TGA/BMP decoding is a loose-mod concern
 and not on the critical path.
+
+
+## <a id="groundcover-as-grass"></a>Groundcover plugins become real grass
+
+**Code:** `tes4_export/morrowind_grass.py`
+
+Morrowind has no grass record. Groundcover mods place one static per clump
+because the engine offers nothing else, so the Aesthesia set for Tamriel
+Rebuilt ships 2,730,470 placed references across 2,125 cells (median 1,030 per
+cell, max 4,097) driving just 65 distinct `Grass\*.nif` statics. Converting
+those literally gives Skyrim millions of individually rendered STATs with no
+instancing, no grass LOD and no wind.
+
+Skyrim scatters grass procedurally per LANDSCAPE TEXTURE instead: a GRAS record
+names the model, and each LTEX names the grasses growing on it. The conversion
+inverts the placements into that model:
+
+1. A static whose model path starts `Grass\` is groundcover. That prefix is
+   authored by the mod, not inferred.
+2. Every placement samples the land texture beneath its X/Y.
+3. Counts accumulate per (texture, model), with the authored `XSCL` spread.
+4. One GRAS per model, bound through `GNAM` on each texture it grew on.
+5. The 2.73M references are dropped.
+
+The result is statistical, not clump-for-clump: the same grasses appear on the
+same land textures at the same coarseness, which is the most a procedural
+scatter can preserve. Deliberately mowed patterns are the part that is lost,
+because Skyrim has no way to express them.
+
+### The terrain belongs to the master
+
+A groundcover plugin ships CELL and STAT records only — the TR grass ESP has
+**no LAND and no LTEX at all** — so the texture grid comes from the master's
+export dump, not the plugin. Reading only the plugin leaves every sample empty
+and silently emits no grass, the master-blindness failure this project keeps
+hitting.
+
+The master's LAND is already split into Oblivion quadrants, so sampling reads
+`BTXT` (the quadrant's base texture) and `ATXT`/`VTXTCount` (an alpha layer,
+which wins only where it covers most of the quadrant's 17x17 vertices). The
+bulk `VHGT`/`VNML`/`VCLR` arrays are skipped by line prefix: they are ~97% of
+a 352 MB LAND dump and name no texture.
+
+### Rare pairings are sampling noise
+
+A clump sitting just over a texture boundary samples ground it never grew on.
+Left alone that binding carpets an unrelated texture across the worldspace, so
+a pairing is kept only above both a floor of 8 placements and 2% of that
+texture's clumps.
+
+### Density is solved per (texture, model) pairing, under the engine's two-grass cap
+
+The planter is the one measured in
+[grass placement parity](asset_convert_terrain.md#grass-placement-parity): per
+LAND quad it lays `n = min(2048/PositionRange, 2048/iMinGrassSize)` candidates
+per side and keeps each with probability `Density%`. Skyrim's iMinGrassSize is
+20.
+
+Vanilla fixes PositionRange at 29-55 and varies Density over 3-23, because each
+of its 27 GRAS records carpets a texture on its own. A groundcover set does not
+work that way: 65 models share one cell's ~1,030 clumps, so the median model
+places only 85 per cell. Held at a vanilla PositionRange those all round to
+Density 0-1 -- the first build emitted Density 1 for all 64 records, which
+plants almost nothing.
+
+The second build (one GRAS per model, density from clumps per CELL the model
+appears in) was still "extremely sparse" in game, for two measured reasons:
+
+- **The engine plants only the first `iMaxGrassTypesPerTexure` grasses a
+  texture names (default 2; vanilla LTEX carry at most 3).** The bindings
+  named up to 20 models per texture (median 6), so on the heaviest textures
+  the engine planted 25-55 clumps per quad of an authored 190-210.
+- **A cell is not the texture's area.** Dividing a model's clumps by the
+  cells it appears in undercounts where the texture covers a fraction of
+  each cell; the LAND quads whose dominant texture it is are the planter's
+  own unit. Across all 180 textures the records implied a median 79 per quad
+  (26 after the cap) against an authored 50.
+
+So `bindings()` keeps the two commonest models per texture and hands them the
+texture's whole clump count in proportion, and every kept pairing gets ITS
+OWN GRAS (356 records for 180 textures; FormID keyed on the static id plus
+the LTEX FormID, both authored), so each texture carries the density its
+author gave it rather than a mean over the model's textures. PositionRange is
+solved per pairing for a mid-vanilla density and clamped to 80-140; Density
+then follows the authored count. The floor is `convert_GRAS`'s Oblivion-parity
+rule (`PositionRange = max(80)`, Density x 80/PositionRange), which is not
+count-preserving: a record solved at 65 came out 20% under authored on the
+densest textures, so the exporter never goes below 80 and raises Density
+instead (up to 31 at 200 clumps per quad). Re-measured with the harness in
+`temp/`-style form (per texture: authored clumps per quad vs
+`(2048/PositionRange)^2 * Density/100` summed over its grasses): identical on
+all 180 textures, median 50 per quad. NOT yet in-game verified.
+
+The rest of DATA comes from the vanilla census (27 records in
+`references/Skyrim.esm/GRAS.txt`, DATA stored as hex): MaxSlope 45 (vanilla
+34-50; 90 grows grass up cliff faces), ColorRange 0.2, WavePeriod 120, and
+**Flags 6** -- Uniform Scaling + Fit to Slope, which all 27 set (bit meanings
+from `wbDefinitionsTES5.pas:7763`). HeightRange is the one field the source
+supplies: the authored `XSCL` spread, 0.49-0.99 here.
+
+### The binding is an override, and must look like one
+
+The first build emitted each LTEX with only `GrassCount`/`Grass[n]`. LTEX does
+not go through the override-merge path, so the importer wrote those stubs
+whole, REPLACING the master's texture with a record carrying no EDID and no
+TNAM. The grass never appeared and the terrain lost its texture set. A working
+LTEX -- compare a converted Oblivion one, which does render grass -- is
+`EDID TNAM MNAM HNAM SNAM GNAM`.
+
+The override therefore carries the master's **EditorID**, and deliberately not
+its **ICON**. Repeating the ICON makes `convert_LTEX` mint a second TXST under
+THIS plugin's texture namespace (`morrowindob\landscape\morro\...`) pointing
+at a path only the master ships as `tes4\...` -- 180 TXST records, all
+dangling. The master's own TXST already covers the terrain, so the override
+changes the grass list and nothing else, landing as
+`EDID MNAM HNAM GNAM`.
+
+Verifying GNAM links resolve is not enough to know grass will render: those
+were correct in the broken build too. Check the subrecord ORDER and set
+against a working record, and check every MODL and TX00 against the
+filesystem.
+
+### The binding must route through the master remap
+
+A converted master's records are keyed by ITS master list, not the borrowing
+plugin's. TR_Mainland in Morroblivion mode declares Morrowind_ob, the
+Morroblivion patch and Tamriel_Data -- so TR's own records are byte `03` in its
+own export, while TR sits at slot `02` in a groundcover plugin's list. Reading
+`LTEX.txt` and `LAND.txt` raw keeps the `03` and the importer's +1 shift lands
+it on `04`, THIS plugin's own space: the bindings become new records that
+override nothing, and no grass appears anywhere.
+
+`load_context` already computes the right translation per master
+(`remap = {len(own): slot}` plus each of its masters by name). The grass reads
+go through `remap_form_id` with it, exactly like `load_index` and
+`load_master_doors`. Correct output has the LTEX at the MASTER's index and only
+the new GRAS at the plugin's own.
+
+### Override JUST the grass
+
+The binding adds GNAM to a texture the MASTER defines, so the override must be
+the master's record plus that run and nothing else. Two earlier shapes both
+failed in-game:
+
+- Emitting only `GrassCount`/`Grass[n]` REPLACED the master's record with a
+  stub: no EDID, no TNAM. The landscape shader then read a null texture set and
+  crashed in `BSLightingShaderMaterialLandscape` (`mov rcx, [rax+0x48]`,
+  rax = 0) on a terrain block.
+- Repeating the master's ICON made the splice re-mint a TXST in THIS plugin's
+  namespace, pointing at a path only the master ships.
+
+So `master_ltex_fields` repeats the master's record MINUS `_LTEX_OWN_KEYS`
+(the header, plus ICON/TextureIndex, whose splice re-mints the texture set) and
+minus the master's own `Grass*` keys -- the export reader folds a repeated key
+into a LIST, and `_list_as_multiset` then compares str against list and raises.
+`('LTEX', 'Grass[]')` is a `_RUN_REBUILDERS` entry, so only the GNAM run is
+rewritten. Verified: all 170 TR overrides are byte-identical to the master
+except GNAM.
+
+### A lone master still needs its ids restated
+
+`load_master_index` returned a bare `MasterIndex` whenever exactly one master
+resolved, skipping `ChainedMasterIndex`'s rewrite. That is only safe when the
+master already numbers itself at the slot the child gives it. TR_Mainland's own
+records are byte `04` (it has four masters) but it sits at slot `03` here, so
+every id inside its bytes named the wrong file. The shortcut now also requires
+`own_index == base_slot`.
+
+`_FORMID_FIELDS` was also missing LTEX's own FormID subrecords -- it had
+`BTXT`/`ATXT` (a LAND's texture refs) but not `TNAM` -> TXST or `GNAM` -> GRAS
+(`wbDefinitionsTES5.pas:8069`). Unshifted, TNAM pointed at index `04`, this
+plugin's own empty space: the same null texture set, from the other direction.
+
+### An unmappable override key is dropped, not emitted
+
+`apply_changes` has no mapping for `Grass[]`, so a spliced LTEX came back
+byte-identical to the master and hit the "unchanged -- pure bloat" drop: all
+180 bindings silently lost, with the log reporting them under `unchanged
+(dropped)`. `('LTEX', 'Grass[]')` is therefore in `RECONVERT_KEYS`, which
+reconverts the record from the plugin's export while keeping the master's
+FormID.
+
+That alone was not enough: `_convert_ltex` is its own phase and, unlike the
+generic loop in `pipeline_records`, did not test `ov.status != 'reconvert'` --
+a reconvert returns empty bytes, so every record hit `continue` and vanished.
+Both call sites now make the same check.
+
+### Cost
+
+Measured on the Tamriel Rebuilt set: 3.3s to parse the 212 MB ESP (838k
+refs/sec), 3.4s to build the texture lookup from the master's 352 MB
+`LAND.txt`, 1.0s to sample and tally all 2.73M placements. Single-threaded and
+well under any stage that would justify a pool.

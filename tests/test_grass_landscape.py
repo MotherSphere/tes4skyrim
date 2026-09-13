@@ -306,7 +306,7 @@ class TestLandscapeNormals:
         path.write_bytes(_make_dxt1_dds(8, 8, 2, [top, mip1]))
 
         before = decode_dxt(path.read_bytes()[128:128 + 32], 8, 8, 'DXT1')
-        assert landscape_normals.fix_normal_specular(path) is True
+        assert landscape_normals.run(tmp_path) == (1, 1)
 
         data = path.read_bytes()
         assert data[84:88] == b'DXT5'
@@ -318,20 +318,52 @@ class TestLandscapeNormals:
         # Mip chain length: 4 DXT5 blocks (top) + 1 (mip1) = 80 bytes
         assert len(data) == 128 + 5 * 16
 
-    def test_dxt5_left_untouched(self, tmp_path):
-        hdr = bytearray(128)
-        hdr[0:4] = b'DDS '
-        hdr[84:88] = b'DXT5'
-        path = tmp_path / 'already_n.dds'
-        path.write_bytes(bytes(hdr) + b'\x00' * 16)
-        assert landscape_normals.fix_normal_specular(path) is False
+    def test_bright_dxt5_mask_is_dimmed(self, tmp_path):
+        """A DXT5 landscape normal with a bright mask gets the constant too.
+
+        Morroblivion's terrain normals carry a generated height field in
+        alpha (median 102/255 against Oblivion's 16); TES4 never read it, so
+        it is not a specular mask.
+        """
+        blk = bytes([200, 200]) + b'\x00' * 6 + _opaque_block(0xF800, 0x001F, 0)
+        path = tmp_path / 'bright_n.dds'
+        path.write_bytes(_make_dds(b'DXT5', 4, 4, 1, [[blk]]))
+        assert landscape_normals.run(tmp_path) == (1, 1)
+        data = path.read_bytes()
+        assert data[128] == landscape_normals.SPECULAR_ALPHA
+        assert data[128 + 8:128 + 16] == blk[8:]
 
     def test_idempotent(self, tmp_path):
         top = [_opaque_block(0xF800, 0x001F, 0)]
         path = tmp_path / 'idem_n.dds'
         path.write_bytes(_make_dxt1_dds(4, 4, 1, [top]))
-        assert landscape_normals.fix_normal_specular(path) is True
-        assert landscape_normals.fix_normal_specular(path) is False
+        assert landscape_normals.run(tmp_path) == (1, 1)
+        assert landscape_normals.run(tmp_path) == (1, 0)
+
+    def test_ensure_ltex_normals_writes_only_missing(self, tmp_path):
+        """A land texture whose normal any plugin ships is left alone; one
+        shipping none gets a flat normal under this plugin's tree."""
+        from asset_convert.game_paths import set_namespace
+        set_namespace('tes4')
+        export = tmp_path / 'export'
+        export.mkdir()
+        (export / 'LTEX.txt').write_text(
+            '---RECORD_BEGIN---\nICON=textures\\\\Tx_has.dds\n---RECORD_END---\n'
+            '---RECORD_BEGIN---\nICON=textures\\\\Tx_none.dds\n---RECORD_END---\n'
+            '---RECORD_BEGIN---\nICON=dirt02.dds\n---RECORD_END---\n')
+        out = tmp_path / 'output'
+        master = out / 'Master.esm' / 'textures' / 'tes4'
+        master.mkdir(parents=True)
+        (master / 'tx_has_n.dds').write_bytes(b'DDS ')
+        mine = out / 'Plugin.esp' / 'textures'
+        checked, written = landscape_normals.ensure_ltex_normals(
+            export, mine, out)
+        assert (checked, written) == (3, 2)
+        assert (mine / 'tes4' / 'Tx_none_n.dds').is_file()
+        flat = (mine / 'tes4' / 'landscape' / 'dirt02_n.dds').read_bytes()
+        assert flat[84:88] == b'DXT5' and flat[128] == landscape_normals.SPECULAR_ALPHA
+        assert not (mine / 'tes4' / 'Tx_has_n.dds').exists()
+        assert landscape_normals.ensure_ltex_normals(export, mine, out) == (3, 0)
 
 
 def _make_dds(fourcc, width, height, mip_count, blocks_per_mip):

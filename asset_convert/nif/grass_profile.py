@@ -53,6 +53,7 @@ import sys
 from pathlib import Path
 
 from asset_convert.game_paths import win_join
+from asset_convert.nif.grass_profile_morrowind import add_wind_weights
 
 
 def _nif_format():
@@ -128,50 +129,60 @@ def _own_grass_model_paths(export_dir):
     return paths
 
 
-def _flatten_grass_root(data):
-    """Collapse intermediate NiNodes so all geometry sits directly under the
-    BSFadeNode root — the flat structure every working grass NIF uses.
+def _bake_geometry(geo, full):
+    """Fold a local-to-root transform into one shape's vertices and normals."""
+    gd = geo.data
+    rot = full.get_matrix_33()
+    if gd is not None:
+        for v in gd.vertices:
+            nv = v * full
+            v.x, v.y, v.z = nv.x, nv.y, nv.z
+        if getattr(gd, 'has_normals', 0):
+            for n in gd.normals:
+                nn = n * rot
+                n.x, n.y, n.z = nn.x, nn.y, nn.z
+        gd.update_center_radius()
+    geo.rotation.set_identity()
+    geo.translation.x = geo.translation.y = geo.translation.z = 0.0
+    geo.scale = 1.0
 
-    Skyrim's grass instancer (AddCellGrassTask → BSMultiStreamInstanceTriShape)
-    expects grass geometry as a *direct* child of the fade-node root.  The
-    generic NIF converter, however, wraps geometry in an inner NiNode whenever
-    the source root carries a non-identity rotation (Pass-6c in nif_converter),
-    producing BSFadeNode → NiNode → NiTriShape.  For statics Skyrim honours that
-    child-NiNode rotation, but the grass path never traverses it and dereferences
-    a garbage pointer → CTD (e.g. TES4 BWCattail01/02/03, whose source roots are
-    rotated).
 
-    This bakes each intermediate node's transform into its geometry's vertices
-    and normals, then re-parents the geometry straight onto the root and drops
-    the now-empty NiNode.  Only plain NiNode wrappers holding geometry are
-    collapsed; anything with collision, controllers, or extra data is left
-    alone.  Returns True if the tree changed.
-    """
+def _grass_root(data):
+    """The BSFadeNode a grass NIF hangs from, or None."""
     NifFormat = _nif_format()
     root = data.roots[0] if data.roots else None
     if root is None or not isinstance(root, NifFormat.BSFadeNode):
-        return False
-    if not hasattr(root, 'children'):
-        return False
+        return None
+    return root if hasattr(root, 'children') else None
 
-    def _is_plain_wrapper(node):
-        # A bare NiNode (not a subclass like NiBillboardNode) whose only content
-        # is geometry — safe to bake away.
-        if type(node).__name__ != 'NiNode':
-            return False
-        if getattr(node, 'collision_object', None) is not None:
-            return False
-        if getattr(node, 'controller', None) is not None:
-            return False
-        if getattr(node, 'num_extra_data_list', 0):
-            return False
-        if getattr(node, 'num_children', 0) == 0:
-            return False
-        for c in node.children:
-            if not isinstance(c, (NifFormat.NiTriShape, NifFormat.NiTriStrips)):
-                return False
-        return True
 
+def _is_plain_wrapper(node):
+    """A bare NiNode holding only geometry, safe to bake away."""
+    NifFormat = _nif_format()
+    if type(node).__name__ != 'NiNode':
+        return False
+    if node.collision_object is not None or node.controller is not None:
+        return False
+    if node.num_extra_data_list or not node.num_children:
+        return False
+    return all(isinstance(c, (NifFormat.NiTriShape, NifFormat.NiTriStrips))
+               for c in node.children)
+
+
+def _flatten_grass_root(data):
+    """Collapse intermediate NiNodes so all geometry sits directly under the
+    BSFadeNode root, the flat structure every working grass NIF uses.
+
+    Skyrim's grass instancer expects grass geometry as a DIRECT child of the
+    fade-node root; the generic converter wraps geometry in an inner NiNode
+    whenever the source root is rotated, and the grass path dereferences a
+    garbage pointer on that nesting. Each wrapper's transform is baked into
+    its geometry and the empty node dropped. Returns True if the tree changed.
+    See: docs/commentary/asset_convert_terrain.md#grass-conversion-record-invariants-shader
+    """
+    root = _grass_root(data)
+    if root is None:
+        return False
     new_children = []
     changed = False
     for child in list(root.children):
@@ -180,31 +191,11 @@ def _flatten_grass_root(data):
         if not _is_plain_wrapper(child):
             new_children.append(child)
             continue
-        # Bake the wrapper's transform into each geometry child, then hoist
-        # the geometry up to the root.
-        wrap_m = child.get_transform()          # wrapper local → root space
+        wrap_m = child.get_transform()
         for geo in child.children:
-            gd = geo.data
-            full = geo.get_transform() * wrap_m  # geo local → root space
-            rot = full.get_matrix_33()
-            if gd is not None:
-                for v in gd.vertices:
-                    nv = v * full
-                    v.x, v.y, v.z = nv.x, nv.y, nv.z
-                if getattr(gd, 'has_normals', 0):
-                    for n in gd.normals:
-                        nn = n * rot
-                        n.x, n.y, n.z = nn.x, nn.y, nn.z
-                try:
-                    gd.update_center_radius()
-                except Exception:
-                    pass
-            geo.rotation.set_identity()
-            geo.translation.x = geo.translation.y = geo.translation.z = 0.0
-            geo.scale = 1.0
+            _bake_geometry(geo, geo.get_transform() * wrap_m)
             new_children.append(geo)
         changed = True
-
     if changed:
         root.num_children = len(new_children)
         root.children.update_size()
@@ -213,67 +204,136 @@ def _flatten_grass_root(data):
     return changed
 
 
-def apply_grass_profile(nif_path):
-    """Apply the vanilla grass shader profile to one converted (LE) NIF.
+def _bake_shape_transforms(data):
+    """Bake every root-level shape's own transform into its vertices.
 
-    Returns True if the file was modified.
+    All 26 vanilla grass NIFs carry identity rotation and scale 1 on the shape;
+    the instancer never applies a shape transform, so a rotated or scaled
+    shape renders flat and oversized. Returns True if any shape changed.
+    See: docs/commentary/asset_convert_terrain.md#grass-shape-transforms
+    """
+    NifFormat = _nif_format()
+    root = _grass_root(data)
+    if root is None:
+        return False
+    changed = False
+    for geo in root.children:
+        if not isinstance(geo, (NifFormat.NiTriShape, NifFormat.NiTriStrips)):
+            continue
+        t = geo.translation
+        if geo.rotation.is_identity() and geo.scale == 1.0                 and not (t.x or t.y or t.z):
+            continue
+        _bake_geometry(geo, geo.get_transform())
+        changed = True
+    return changed
+
+
+def _strip_collision(data):
+    """Drop the root's collision and BSXFlags; no vanilla grass carries either.
+
+    A generic static conversion earns both, and the grass instancer draws the
+    geometry itself. Returns True if anything was removed.
+    See: docs/commentary/asset_convert_terrain.md#grass-shape-transforms
+    """
+    NifFormat = _nif_format()
+    root = _grass_root(data)
+    if root is None:
+        return False
+    changed = root.collision_object is not None
+    root.collision_object = None
+    keep = [e for e in root.extra_data_list
+            if e is not None and not isinstance(e, NifFormat.BSXFlags)]
+    if len(keep) != root.num_extra_data_list:
+        root.num_extra_data_list = len(keep)
+        root.extra_data_list.update_size()
+        for i, e in enumerate(keep):
+            root.extra_data_list[i] = e
+        changed = True
+    return changed
+
+
+def apply_grass_profile(nif_path):
+    """Apply the vanilla grass shape and shader profile to one converted NIF.
+
+    Transforms are baked BEFORE the wind weights so the ramp runs up the
+    blade's world height. Returns True if the file was modified.
     """
     NifFormat = _nif_format()
     data = NifFormat.Data()
     with open(nif_path, 'rb') as f:
         data.read(f)
 
-    # Flatten intermediate NiNode wrappers first (grass instancer contract).
     changed = _flatten_grass_root(data)
-
-    for block in data.blocks:
-        if isinstance(block, NifFormat.BSLightingShaderProperty):
-            sf1 = block.shader_flags_1
-            # Own_Emit + Vertex_Alpha set, Specular clear (gloss 0 +
-            # specular flag = pow(NdotH, 0) = 1.0 white-out)
-            if not sf1.slsf_1_own_emit:
-                sf1.slsf_1_own_emit = 1
-                changed = True
-            if not sf1.slsf_1_vertex_alpha:
-                sf1.slsf_1_vertex_alpha = 1
-                changed = True
-            if sf1.slsf_1_specular:
-                sf1.slsf_1_specular = 0
-                changed = True
-            if block.emissive_multiple != GRASS_EMISSIVE_MULT:
-                block.emissive_multiple = GRASS_EMISSIVE_MULT
-                changed = True
-            if block.glossiness != GRASS_GLOSSINESS:
-                block.glossiness = GRASS_GLOSSINESS
-                changed = True
-            spec = block.specular_color
-            if (spec.r, spec.g, spec.b) != (1.0, 1.0, 1.0):
-                spec.r = spec.g = spec.b = 1.0
-                changed = True
-            if block.specular_strength != GRASS_SPECULAR_STRENGTH:
-                block.specular_strength = GRASS_SPECULAR_STRENGTH
-                changed = True
-            if block.lighting_effect_1 != GRASS_LIGHTING_EFFECT_1:
-                block.lighting_effect_1 = GRASS_LIGHTING_EFFECT_1
-                changed = True
-            if block.lighting_effect_2 != GRASS_LIGHTING_EFFECT_2:
-                block.lighting_effect_2 = GRASS_LIGHTING_EFFECT_2
-                changed = True
-            if block.texture_clamp_mode != GRASS_TEXTURE_CLAMP:
-                block.texture_clamp_mode = GRASS_TEXTURE_CLAMP
-                changed = True
-        elif isinstance(block, NifFormat.NiAlphaProperty):
-            flags = int(block.flags)
-            if flags & ALPHA_BLEND_BIT:
-                block.flags = flags & ~ALPHA_BLEND_BIT
-                changed = True
-            if block.threshold > GRASS_MAX_ALPHA_THRESHOLD:
-                block.threshold = GRASS_MAX_ALPHA_THRESHOLD
-                changed = True
-
+    changed = _bake_shape_transforms(data) or changed
+    changed = _strip_collision(data) or changed
+    changed = add_wind_weights(data, NifFormat) or changed
+    changed = _apply_shader_profile(data) or changed
     if changed:
         with open(nif_path, 'wb') as f:
             data.write(f)
+    return changed
+
+
+def _shader_scalars():
+    """The vanilla grass scalar values, as (attribute, value) pairs."""
+    return (('emissive_multiple', GRASS_EMISSIVE_MULT),
+            ('glossiness', GRASS_GLOSSINESS),
+            ('specular_strength', GRASS_SPECULAR_STRENGTH),
+            ('lighting_effect_1', GRASS_LIGHTING_EFFECT_1),
+            ('lighting_effect_2', GRASS_LIGHTING_EFFECT_2),
+            ('texture_clamp_mode', GRASS_TEXTURE_CLAMP))
+
+
+def _apply_lighting_shader(block):
+    """Own_Emit, Vertex_Alpha and Vertex_Colors set, Specular clear.
+
+    Gloss 0 plus the specular flag is pow(NdotH, 0) = 1.0, a white-out.
+    Without Vertex_Colors the shader never reads the wind weight in alpha.
+    """
+    changed = False
+    sf1 = block.shader_flags_1
+    for flag, want in (('slsf_1_own_emit', 1), ('slsf_1_vertex_alpha', 1),
+                       ('slsf_1_specular', 0)):
+        if getattr(sf1, flag) != want:
+            setattr(sf1, flag, want)
+            changed = True
+    sf2 = block.shader_flags_2
+    if not sf2.slsf_2_vertex_colors:
+        sf2.slsf_2_vertex_colors = 1
+        changed = True
+    for attr, value in _shader_scalars():
+        if getattr(block, attr) != value:
+            setattr(block, attr, value)
+            changed = True
+    spec = block.specular_color
+    if (spec.r, spec.g, spec.b) != (1.0, 1.0, 1.0):
+        spec.r = spec.g = spec.b = 1.0
+        changed = True
+    return changed
+
+
+def _apply_alpha_profile(block):
+    """Alpha-test only, thresholded into the vanilla grass envelope."""
+    changed = False
+    flags = int(block.flags)
+    if flags & ALPHA_BLEND_BIT:
+        block.flags = flags & ~ALPHA_BLEND_BIT
+        changed = True
+    if block.threshold > GRASS_MAX_ALPHA_THRESHOLD:
+        block.threshold = GRASS_MAX_ALPHA_THRESHOLD
+        changed = True
+    return changed
+
+
+def _apply_shader_profile(data):
+    """Set the vanilla grass shader and alpha values on every block."""
+    NifFormat = _nif_format()
+    changed = False
+    for block in data.blocks:
+        if isinstance(block, NifFormat.BSLightingShaderProperty):
+            changed = _apply_lighting_shader(block) or changed
+        elif isinstance(block, NifFormat.NiAlphaProperty):
+            changed = _apply_alpha_profile(block) or changed
     return changed
 
 

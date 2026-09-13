@@ -345,13 +345,16 @@ def test_landscape_icon_only_prefixes_a_bare_name():
     Prefixing a full path invented a folder that does not exist and all 107
     terrain textures resolved to nothing.
     """
-    from tes5_import.record_types.world import _landscape_icon
+    from asset_convert.game_paths import set_namespace
+    from tes5_import.record_types.common import landscape_texture_path
+    set_namespace('tes4')
     sep = chr(92)
-    assert _landscape_icon('Bark01.dds') == 'landscape' + sep + 'Bark01.dds'
-    assert _landscape_icon('textures' + sep + 'a.dds') == ('textures' + sep
-                                                           + 'a.dds')
-    assert _landscape_icon('landscape' + sep + 'a.dds') == ('landscape' + sep
-                                                             + 'a.dds')
+    assert landscape_texture_path('Bark01.dds') == sep.join(
+        ('tes4', 'landscape', 'Bark01.dds'))
+    assert landscape_texture_path('textures' + sep + 'a.dds') == sep.join(
+        ('tes4', 'a.dds'))
+    assert landscape_texture_path('landscape' + sep + 'a.dds') == sep.join(
+        ('tes4', 'landscape', 'a.dds'))
 
 
 def test_wrld_climate_names_a_record_that_exists():

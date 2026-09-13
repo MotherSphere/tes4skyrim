@@ -950,8 +950,29 @@ _RUN_PACKAGES = _RunRebuild((b'PKID',), _rebuild_packages,
 
 _RUN_BARTER_GOLD = _RunRebuild((b'COCT', b'CNTO'), _rebuild_barter_gold, ())
 
-# The whole layer run is replaced as a unit; it is the LAST thing in a LAND
-# record, so it anchors after the vertex data.
+def _rebuild_ltex_grasses(plugin_rec, master_rec, old_subs):
+    """New GNAM run for an authored Grass[] change on a land texture.
+
+    A groundcover plugin adds grasses to a texture the MASTER defines, so the
+    override must carry the master's record untouched except for this run --
+    replacing the whole record drops its TNAM and the landscape shader reads a
+    null texture set.
+    See: docs/commentary/tes4_export_morrowind.md#groundcover-as-grass
+    """
+    out = []
+    i = 0
+    while f'Grass[{i}]' in plugin_rec:
+        fid = get_formid(plugin_rec, f'Grass[{i}]')
+        i += 1
+        if fid:
+            out.append((b'GNAM', struct.pack('<I', fid)))
+    return out
+
+
+_RUN_LTEX_GRASSES = _RunRebuild((b'GNAM',), _rebuild_ltex_grasses,
+                                (('after', b'SNAM'), ('after', b'HNAM'),
+                                 ('after', b'MNAM'), ('after', b'TNAM')))
+
 _RUN_LAND_LAYERS = _RunRebuild(
     (b'BTXT', b'ATXT', b'VTXT'), _rebuild_land_layers,
     (('after', b'VCLR'), ('after', b'VHGT'), ('after', b'VNML'),
@@ -974,6 +995,8 @@ _RUN_REBUILDERS = {
     ('CREA', 'AIPackage[]'): _RUN_PACKAGES,
     ('NPC_', 'ACBS.BarterGold'): _RUN_BARTER_GOLD,
     ('CREA', 'ACBS.BarterGold'): _RUN_BARTER_GOLD,
+    ('LTEX', 'Grass[]'): _RUN_LTEX_GRASSES,
+    ('LTEX', 'GrassCount'): _RUN_LTEX_GRASSES,
     ('LAND', 'Layer[]'): _RUN_LAND_LAYERS,
     ('LAND', 'LayerCount'): _RUN_LAND_LAYERS,
 }
