@@ -83,6 +83,44 @@ The chain must also index **LVLN**, not just LVLC: 258 of the stubs template
 onto one, and until its entries were exported the walk dead-ended there. See
 [the export side](tes4_export_falloutnv.md#lvln-is-a-native-type).
 
+## <a id="every-category-flattens"></a>Every category flattens, not just three
+
+The three categories above were the ones implemented first; the other seven
+were dropped silently, because the reasoning that makes flattening the only
+channel applies to all ten equally. Measured over FalloutNV.esm's **3,723
+actors that carry a TPLT**:
+
+| Bit | Category | Actors claiming it |
+|---|---|---|
+| 3 | Actor Effect List | 2,967 |
+| 1 | Stats | 2,912 |
+| 8 | **Inventory** | **2,886** |
+| 2 | Factions | 2,853 |
+| 9 | Script | 2,042 |
+| 0 | Traits | 1,751 |
+| 5 | AI Packages | 1,401 |
+
+**1,310 of the inventory claimants own no items at all**, so they reached the
+game naked — `vMONCRTrooper4` (`00145CFC`, templating onto the LVLN
+`001543DF`) is one of them. The rest own a partial list and were missing
+whatever the template held.
+
+Factions matter as much and are less visible: an actor that inherits its
+faction list and loses it has no allies, no enemies and no ownership, which
+reads in-game as wrong aggression rather than as missing data.
+
+Six of the categories are **counted arrays** (`ItemCount`/`Item[i]`,
+`FactionCount`, `AIPackageCount`, `SpellCount`, `KFFZCount`,
+`SoundTypeCount`), so they need a different copier than the scalar keys:
+`_copy_array` takes every entry and rewrites the count, because a partial list
+is worse than none — the engine reads the count and would index past what was
+copied.
+
+The field-to-bit mapping is xEdit's own, read from the `wbActorTemplateUse*`
+visibility predicates each subrecord declares in `wbDefinitionsFNV.pas:6830`
+(NPC_) — that is what the CK hides when a bit is set, so it is exactly the set
+the engine takes from the template.
+
 ## <a id="aggression-is-already-a-tier"></a>Aggression is already a tier
 
 `build_aidt` in `record_types/actor_common.py` maps TES4's **0-100** scalar

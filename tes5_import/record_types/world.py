@@ -511,7 +511,14 @@ def build_wrld_cloud_modl(rec: dict, edid: str = None):
 
 
 def convert_CELL(rec: dict) -> bytes:
-    """Convert CELL record."""
+    """Convert CELL record.
+
+    `LTMP` is required by TES5. TES4 has no equivalent and its XCLL inherits
+    nothing, so it falls back to NULL; an FO3/FNV cell names a converted LGTM,
+    and likewise `XCIM`/`XEZN` in vanilla's own LTMP XCLW XCIM XLCN XEZN order.
+
+    See: docs/commentary/tes4_export_falloutnv.md#reference-only-types
+    """
     subs = b''
     edid = get_str(rec, 'EditorID')
     if edid:
@@ -538,9 +545,8 @@ def convert_CELL(rec: dict) -> bytes:
     if xcll_payload is not None:
         subs += pack_subrecord('XCLL', xcll_payload)
 
-    # LTMP — lighting template is a required TES5 subrecord.  TES4 has no
-    # equivalent and XCLL inherits nothing, so point it at NULL.
-    subs += pack_formid_subrecord('LTMP', 0)
+    subs += pack_formid_subrecord('LTMP',
+                                  get_formid(rec, 'LTMP.LightingTemplate'))
 
     # Ownership
     xown = get_formid(rec, 'XOWN.Owner')
@@ -556,56 +562,7 @@ def convert_CELL(rec: dict) -> bytes:
     if xnam:
         subs += pack_string_subrecord('XNAM', prefix_path(xnam))
 
-    # XCLR — the cell's region list.  THIS is how region weather reaches the
-    # sky: the engine activates a region's RDWT list only in cells whose XCLR
-    # names that region (Skyrim.esm: WeatherWinterhold sits in 30 cells' XCLR)
-    # — the RPLD polygons alone do nothing at runtime.  Without XCLR every
-    # converted exterior fell back to the climate's own WLST, and Tamriel's
-    # is a single Clear weather at 100%, so the sky never changed.  Filtered
-    # to regions that actually emitted (weather regions); TES4 lists many
-    # object/grass/sound regions here that convert_REGN drops.  Sorted:
-    # xEdit declares XCLR wbArrayS.
-    region_fids = []
-    i = 0
-    while f'Region[{i}]' in rec:
-        rfid = get_formid(rec, f'Region[{i}]')
-        if region_was_emitted(rfid):
-            region_fids.append(rfid)
-        i += 1
-    if region_fids:
-        subs += pack_subrecord(
-            'XCLR', struct.pack(f'<{len(region_fids)}I', *sorted(region_fids)))
-
-    # XLCN — Location.  This does double duty in Skyrim: entering a cell that
-    # belongs to a location discovers it (revealing its map marker), and it is
-    # also where the engine reads the cell's *name* from.  Not one vanilla
-    # exterior cell carries a FULL, so an exterior with no XLCN is displayed as
-    # "Wilderness" on a load door.
-    #
-    # XLCN AND LCEC ARE A TWO-WAY CONTRACT.  The CK validates every cell that
-    # claims a location against that location's LCEC cell list ("Warnings were
-    # encountered validating unloaded ref data for Location") and reports
-    # "Cell (x, y) in world 'W' is not in exterior cell data" for each one the
-    # location does not claim back.  An exterior may therefore only carry XLCN
-    # when the target's LCEC actually lists its grid square.
-    #
-    # This is why there is no worldspace-wide fallback: a per-worldspace
-    # location has an empty LCEC, so pointing every cell in Tamriel at one
-    # produced 26,124 warnings — the largest bucket in the log.  Vanilla is the
-    # opposite of blanket coverage: of Skyrim.esm's 16,978 exterior cells only
-    # 982 carry XLCN at all (948 of them LCEC-listed), the other 15,996 are
-    # deliberately nameless and show "Wilderness".  Its LCECs are small and
-    # hand-picked — median 2 cells, max 22.
-    #
-    # Interiors are exempt: they are matched by FormID through a door claim and
-    # the LCEC check does not apply to them.
-    lctn_fid = _CELL_LOCATION.get(get_formid(rec, 'FormID'))
-    if not lctn_fid and x is not None:
-        lctn_fid = _GRID_LOCATION.get((get_formid(rec, 'ParentWRLD'), x, y))
-    if lctn_fid:
-        subs += pack_formid_subrecord('XLCN', lctn_fid)
-
-    subs += _cell_water_and_music(rec)
+    subs += _cell_pointers(rec)
 
     return pack_record('CELL', get_formid(rec, 'FormID'), get_int(rec, 'RecordFlags'), subs)
 
@@ -1221,33 +1178,80 @@ def _world_climate(rec: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# CELL water and music
+# CELL outbound pointers
 # ---------------------------------------------------------------------------
-def _cell_water_and_music(rec: dict) -> bytes:
-    """CELL XCWT (own water type) and XCMO (music), in xEdit subrecord order.
+def _cell_regions(rec: dict) -> bytes:
+    """CELL XCLR: the region list, filtered to regions that emitted, sorted.
 
-    XCWT overrides the worldspace NAM2. TES4 stores music as a 3-value XCMT
-    enum (0 Default, 1 Public, 2 Dungeon); TES5 needs a MUSC FormID, so the
-    enum is resolved through music_for_enum. An interior with no authored XCMT
-    takes the engine default enum; exteriors are left to inherit the
-    worldspace ZNAM.
+    See: docs/commentary/tes5_import_landscape.md#cell-xclr-regions
+    """
+    region_fids = []
+    i = 0
+    while f'Region[{i}]' in rec:
+        rfid = get_formid(rec, f'Region[{i}]')
+        if region_was_emitted(rfid):
+            region_fids.append(rfid)
+        i += 1
+    if not region_fids:
+        return b''
+    return pack_subrecord(
+        'XCLR', struct.pack(f'<{len(region_fids)}I', *sorted(region_fids)))
+
+
+def _cell_location(rec: dict) -> bytes:
+    """CELL XLCN: the cell's OWN Location claim, else its grid's.
+
+    An interior has no grid, so only the FormID claim can match.
+
+    See: docs/commentary/tes5_import_landscape.md#cell-xlcn-lcec
+    """
+    lctn_fid = _CELL_LOCATION.get(get_formid(rec, 'FormID'))
+    x = get_int(rec, 'XCLC.X', None)
+    if not lctn_fid and x is not None:
+        lctn_fid = _GRID_LOCATION.get((get_formid(rec, 'ParentWRLD'), x,
+                                       get_int(rec, 'XCLC.Y')))
+    return pack_formid_subrecord('XLCN', lctn_fid) if lctn_fid else b''
+
+
+def _cell_music(rec: dict) -> bytes:
+    """CELL XCMO: an FO3/FNV MUSC, else TES4's 3-value XCMT enum resolved.
+
+    An interior with no authored XCMT takes the engine default; exteriors are
+    left to inherit the worldspace ZNAM.
 
     See: docs/commentary/tes5_import_landscape.md#cell-water-and-music
     """
-    subs = b''
-    xcwt = get_formid(rec, 'XCWT.Water')
-    if xcwt:
-        subs += pack_formid_subrecord('XCWT', xcwt)
-
+    xcmo = get_formid(rec, 'XCMO.Music')
+    if xcmo:
+        return pack_formid_subrecord('XCMO', xcmo)
     xcmt = get_int(rec, 'XCMT.MusicType', None)
     is_exterior = get_int(rec, 'XCLC.X', None) is not None
     if xcmt is None and not is_exterior:
         xcmt = TES4_DEFAULT_MUSIC_ENUM
-    if xcmt is not None:
-        musc = music_for_enum(xcmt)
-        if musc:
-            subs += pack_formid_subrecord('XCMO', musc)
-    return subs
+    musc = music_for_enum(xcmt) if xcmt is not None else None
+    return pack_formid_subrecord('XCMO', musc) if musc else b''
+
+
+def _cell_pointers(rec: dict) -> bytes:
+    """Every CELL subrecord naming another record, in xEdit order.
+
+    XCIM and XEZN exist only in FO3/FNV sources; XCWT overrides the
+    worldspace NAM2.
+
+    See: docs/commentary/tes5_import_landscape.md#cell-water-and-music
+    """
+    subs = _cell_regions(rec)
+    xcim = get_formid(rec, 'XCIM.Imagespace')
+    if xcim:
+        subs += pack_formid_subrecord('XCIM', xcim)
+    subs += _cell_location(rec)
+    xezn = get_formid(rec, 'XEZN.EncounterZone')
+    if xezn:
+        subs += pack_formid_subrecord('XEZN', xezn)
+    xcwt = get_formid(rec, 'XCWT.Water')
+    if xcwt:
+        subs += pack_formid_subrecord('XCWT', xcwt)
+    return subs + _cell_music(rec)
 
 
 # ---------------------------------------------------------------------------

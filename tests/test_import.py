@@ -6907,3 +6907,264 @@ class TestFalloutAidtTiers:
         rec = {'AIDT.Aggression': '5', 'AIDT.Confidence': '100',
                'AIDT.Responsibility': '50', 'DATA.Personality': '50'}
         assert build_aidt(rec)[1] == 4
+
+
+class TestFalloutReferenceOnlyRecords:
+    """See docs/commentary/tes4_export_falloutnv.md#reference-only-types."""
+
+    def test_formlist_members_pass_through_in_order(self):
+        """FLST is byte-identical between the games, so order is preserved."""
+        from tes5_import.record_types.reference_falloutnv import convert_FLST
+        rec = {'FormID': '00100000', 'RecordFlags': '0', 'EditorID': 'AmmoList',
+               'LNAM[0]': '0000000A', 'LNAM[1]': '0000000B',
+               'LNAM[2]': '0000000C'}
+        members = _find_all_subrecords(convert_FLST(rec), b'LNAM')
+        assert [struct.unpack('<I', m)[0] & 0xFFFFFF for m in members] == \
+            [0xA, 0xB, 0xC]
+
+    def test_texture_set_keeps_only_the_six_fnv_slots(self):
+        """TES5 defines TX06/TX07, which no FO3/FNV record authors."""
+        from tes5_import.record_types.reference_falloutnv import convert_TXST
+        rec = {'FormID': '00100001', 'RecordFlags': '0', 'EditorID': 'Tex',
+               'TX00': 'landscape\\a.dds', 'TX01': 'landscape\\a_n.dds',
+               'DNAM.Flags': '1'}
+        out = convert_TXST(rec)
+        assert _find_subrecord(out, b'TX00') is not None
+        assert _find_subrecord(out, b'TX06') is None
+        assert struct.unpack('<H', _find_subrecord(out, b'DNAM'))[0] == 1
+
+    def test_imagespace_needs_the_cinematic_group(self):
+        """A DNAM too short to hold Cinematic (offset 100-131) is dropped."""
+        from tes5_import.record_types.reference_falloutnv import convert_IMGS
+        rec = {'FormID': '00100002', 'RecordFlags': '0', 'EditorID': 'IS',
+               'DNAM': '00' * 100}
+        assert convert_IMGS(rec) == b''
+
+    def test_imagespace_splits_fnv_dnam_into_tes5_subrecords(self):
+        """TES5 uses HNAM/CNAM/TNAM/DNAM; FNV packs one blob. Sizes are fixed."""
+        from tes5_import.record_types.reference_falloutnv import convert_IMGS
+        blob = bytearray(152)
+        struct.pack_into('<f', blob, 100, 1.5)
+        struct.pack_into('<f', blob, 108, 1.2)
+        struct.pack_into('<f', blob, 112, 1.1)
+        struct.pack_into('<4f', blob, 116, 0.25, 0.5, 0.75, 0.9)
+        rec = {'FormID': '00100003', 'RecordFlags': '0', 'EditorID': 'IS',
+               'DNAM': bytes(blob).hex()}
+        out = convert_IMGS(rec)
+        assert len(_find_subrecord(out, b'HNAM')) == 36
+        assert len(_find_subrecord(out, b'CNAM')) == 12
+        assert len(_find_subrecord(out, b'TNAM')) == 16
+        assert len(_find_subrecord(out, b'DNAM')) == 16
+
+    def test_imagespace_cinematic_maps_saturation_brightness_contrast(self):
+        """FNV stores saturation/contrast/brightness; TES5 CNAM reorders them."""
+        from tes5_import.record_types.reference_falloutnv import convert_IMGS
+        blob = bytearray(152)
+        struct.pack_into('<f', blob, 100, 1.5)
+        struct.pack_into('<f', blob, 108, 1.2)
+        struct.pack_into('<f', blob, 112, 1.1)
+        rec = {'FormID': '00100007', 'RecordFlags': '0', 'EditorID': 'IS',
+               'DNAM': bytes(blob).hex()}
+        cnam = struct.unpack('<3f', _find_subrecord(convert_IMGS(rec), b'CNAM'))
+        assert cnam == pytest.approx((1.5, 1.1, 1.2))
+
+    def test_imagespace_tint_moves_amount_to_the_front(self):
+        """FNV tint is (R, G, B, amount); TES5 TNAM is (amount, R, G, B)."""
+        from tes5_import.record_types.reference_falloutnv import convert_IMGS
+        blob = bytearray(152)
+        struct.pack_into('<4f', blob, 116, 0.25, 0.5, 0.75, 0.9)
+        rec = {'FormID': '00100008', 'RecordFlags': '0', 'EditorID': 'IS',
+               'DNAM': bytes(blob).hex()}
+        tnam = struct.unpack('<4f', _find_subrecord(convert_IMGS(rec), b'TNAM'))
+        assert tnam == pytest.approx((0.9, 0.25, 0.5, 0.75))
+
+    def test_formlist_drops_a_member_whose_type_never_converts(self):
+        """FNV lists reach ARMA/IMOD/EXPL; a dangling LNAM breaks the engine."""
+        from tes5_import.record_types.reference_falloutnv import (
+            convert_FLST, index_convertible_records)
+        by_type = {'WEAP': [{'FormID': '0000000A'}],
+                   'ARMA': [{'FormID': '0000000B'}]}
+        index_convertible_records(by_type, {'WEAP': object()}, set())
+        rec = {'FormID': '00100009', 'RecordFlags': '0', 'EditorID': 'L',
+               'LNAM[0]': '0000000A', 'LNAM[1]': '0000000B'}
+        members = _find_all_subrecords(convert_FLST(rec), b'LNAM')
+        assert [struct.unpack('<I', m)[0] & 0xFFFFFF for m in members] == [0xA]
+        index_convertible_records({}, {}, set())
+
+    def test_lighting_template_extends_40_bytes_to_92(self):
+        """FNV DATA is 40 bytes; TES5 needs 92 plus a DALC."""
+        from tes5_import.record_types.reference_falloutnv import convert_LGTM
+        data = struct.pack('<3I2f2i3f', 0, 0, 0, 750.0, 3000.0, 0, 270,
+                           0.5, 0.0, 0.7)
+        assert len(data) == 40
+        rec = {'FormID': '00100004', 'RecordFlags': '0', 'EditorID': 'LT',
+               'DATA': data.hex()}
+        out = convert_LGTM(rec)
+        payload = _find_subrecord(out, b'DATA')
+        assert len(payload) == 92
+        assert payload[:40] == data
+        assert len(_find_subrecord(out, b'DALC')) == 32
+
+    def test_lighting_template_fade_mirrors_the_fog_distances(self):
+        """Vanilla's light fade tracks fog near/far; FNV authors neither."""
+        from tes5_import.record_types.reference_falloutnv import convert_LGTM
+        data = struct.pack('<3I2f2i3f', 0, 0, 0, 750.0, 3000.0, 0, 270,
+                           0.5, 0.0, 0.7)
+        rec = {'FormID': '00100005', 'RecordFlags': '0', 'EditorID': 'LT',
+               'DATA': data.hex()}
+        payload = _find_subrecord(convert_LGTM(rec), b'DATA')
+        assert struct.unpack_from('<2f', payload, 80) == (750.0, 3000.0)
+        assert struct.unpack_from('<I', payload, 88)[0] == 0
+
+    def test_encounter_zone_inserts_the_location_formid(self):
+        """TES5 form version 34+ puts Location at offset 4, so fields move."""
+        from tes5_import.record_types.reference_falloutnv import convert_ECZN
+        rec = {'FormID': '00100006', 'RecordFlags': '0', 'EditorID': 'EZ',
+               'DATA.Owner': '0000000A', 'DATA.Rank': '2',
+               'DATA.MinLevel': '10', 'DATA.Flags': '1'}
+        payload = _find_subrecord(convert_ECZN(rec), b'DATA')
+        assert len(payload) == 12
+        assert struct.unpack_from('<I', payload, 4)[0] == 0
+        assert struct.unpack_from('<bbBb', payload, 8) == (2, 10, 1, 0)
+
+
+class TestFalloutCellPointers:
+    """See docs/commentary/tes5_import_landscape.md#cell-water-and-music."""
+
+    def _cell(self, **over):
+        """An interior CELL export record with `over` applied."""
+        rec = {'Signature': 'CELL', 'FormID': '00100010', 'RecordFlags': '0',
+               'EditorID': 'TestCell', 'DATA.Flags': '1'}
+        rec.update(over)
+        return rec
+
+    def test_an_authored_lighting_template_is_carried(self):
+        """TES4 has no LTMP source, but an FO3/FNV cell names a real LGTM."""
+        from tes5_import.record_types.world import convert_CELL
+        out = convert_CELL(self._cell(**{'LTMP.LightingTemplate': '0000ABCD'}))
+        assert struct.unpack('<I', _find_subrecord(out, b'LTMP'))[0] \
+            & 0xFFFFFF == 0xABCD
+
+    def test_a_cell_with_no_template_still_writes_null_ltmp(self):
+        """LTMP is required by TES5, so a TES4 cell writes it as NULL."""
+        from tes5_import.record_types.world import convert_CELL
+        out = convert_CELL(self._cell())
+        assert struct.unpack('<I', _find_subrecord(out, b'LTMP'))[0] == 0
+
+    def test_imagespace_and_encounter_zone_carry(self):
+        """XCIM and XEZN exist only in FO3/FNV sources."""
+        from tes5_import.record_types.world import convert_CELL
+        out = convert_CELL(self._cell(**{'XCIM.Imagespace': '0000BEEF',
+                                         'XEZN.EncounterZone': '0000CAFE'}))
+        assert struct.unpack('<I', _find_subrecord(out, b'XCIM'))[0] \
+            & 0xFFFFFF == 0xBEEF
+        assert struct.unpack('<I', _find_subrecord(out, b'XEZN'))[0] \
+            & 0xFFFFFF == 0xCAFE
+
+    def test_an_authored_musc_beats_the_tes4_enum(self):
+        """FO3/FNV names a MUSC directly; only TES4 resolves the XCMT enum."""
+        from tes5_import.record_types.world import convert_CELL
+        out = convert_CELL(self._cell(**{'XCMO.Music': '0000DEAD',
+                                         'XCMT.MusicType': '2'}))
+        assert struct.unpack('<I', _find_subrecord(out, b'XCMO'))[0] \
+            & 0xFFFFFF == 0xDEAD
+
+
+class TestFalloutTemplateCategories:
+    """See docs/commentary/tes5_import_falloutnv_actors.md#every-category-flattens."""
+
+    def _pair(self, flags, donor):
+        """A stub claiming `flags` plus the NPC_ donor it templates onto."""
+        stub = {'Signature': 'NPC_', 'FormID': '00145CFC',
+                'EditorID': 'Stub', 'ACBS.TemplateFlags': str(flags),
+                'TPLT.Template': '001543DF'}
+        base = {'Signature': 'NPC_', 'FormID': '001543DF',
+                'EditorID': 'Donor'}
+        base.update(donor)
+        return {'NPC_': [stub, base]}, stub
+
+    def test_inventory_is_carried_whole(self):
+        """1,310 FNV actors claim UseInventory and own no items themselves."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        by_type, stub = self._pair(1 << 8, {
+            'ItemCount': '2',
+            'Item[0].FormID': '0000000A', 'Item[0].Count': '1',
+            'Item[1].FormID': '0000000B', 'Item[1].Count': '3'})
+        flatten_actor_templates(by_type)
+        assert stub['ItemCount'] == '2'
+        assert stub['Item[1].FormID'] == '0000000B'
+        assert stub['Item[1].Count'] == '3'
+
+    def test_factions_are_carried_whole(self):
+        """An actor that loses its factions has no allies, enemies or owner."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        by_type, stub = self._pair(1 << 2, {
+            'FactionCount': '1',
+            'Faction[0].FormID': '0001B2A4', 'Faction[0].Rank': '2'})
+        flatten_actor_templates(by_type)
+        assert stub['FactionCount'] == '1'
+        assert stub['Faction[0].Rank'] == '2'
+
+    def test_a_stub_with_its_own_items_keeps_them(self):
+        """A stub that overrides a category must not take the donor's."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        by_type, stub = self._pair(1 << 8, {
+            'ItemCount': '1', 'Item[0].FormID': '0000000A',
+            'Item[0].Count': '1'})
+        stub['ItemCount'] = '1'
+        stub['Item[0].FormID'] = '000000FF'
+        stub['Item[0].Count'] = '9'
+        flatten_actor_templates(by_type)
+        assert stub['Item[0].FormID'] == '000000FF'
+
+    def test_a_category_the_flags_do_not_claim_is_not_copied(self):
+        """Only the categories the Template Flags name are inherited."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        by_type, stub = self._pair(1 << 2, {
+            'ItemCount': '1', 'Item[0].FormID': '0000000A',
+            'Item[0].Count': '1'})
+        flatten_actor_templates(by_type)
+        assert 'Item[0].FormID' not in stub
+
+    def test_traits_carry_race_voice_and_class(self):
+        """Traits is the identity category: race, voice, class, combat style."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        by_type, stub = self._pair(1 << 0, {
+            'RNAM.Race': '00000019', 'VTCK.Voice': '0000002D',
+            'CNAM.Class': '00000801', 'ZNAM.CombatStyle': '0001B2A4'})
+        flatten_actor_templates(by_type)
+        assert stub['RNAM.Race'] == '00000019'
+        assert stub['ZNAM.CombatStyle'] == '0001B2A4'
+
+    def test_stats_carry_the_level_band(self):
+        """Stats drives level scaling; a stub left at level 1 never scales."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        by_type, stub = self._pair(1 << 1, {
+            'ACBS.Level': '12', 'ACBS.CalcMin': '5', 'ACBS.CalcMax': '20',
+            'DATA.Health': '250'})
+        flatten_actor_templates(by_type)
+        assert stub['ACBS.Level'] == '12'
+        assert stub['DATA.Health'] == '250'
+
+    def test_the_chain_resolves_inventory_through_a_leveled_list(self):
+        """FNV points a stub at an actor via LVLN: stub -> LVLN -> NPC_."""
+        from tes5_import.record_types.actors_falloutnv import (
+            flatten_actor_templates)
+        stub = {'Signature': 'NPC_', 'FormID': '00145CFC', 'EditorID': 'Stub',
+                'ACBS.TemplateFlags': str(1 << 8),
+                'TPLT.Template': '001543DF'}
+        lvln = {'Signature': 'LVLN', 'FormID': '001543DF',
+                'EditorID': 'List', 'EntryCount': '1',
+                'Entry[0].FormID': '000ABCDE'}
+        real = {'Signature': 'NPC_', 'FormID': '000ABCDE', 'EditorID': 'Real',
+                'ItemCount': '1', 'Item[0].FormID': '0000000A',
+                'Item[0].Count': '1'}
+        flatten_actor_templates({'NPC_': [stub, real], 'LVLN': [lvln]})
+        assert stub['ItemCount'] == '1'
+        assert stub['Item[0].FormID'] == '0000000A'

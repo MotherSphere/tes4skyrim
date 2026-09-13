@@ -38,8 +38,19 @@ def _emit_obnd(lines: list, rec: Record):
         lines.append(f"OBND.Z2={z2}")
 
 
+#: CELL FormID pointers FO3/FNV and TES5 define identically -> the type each names.
+CELL_POINTERS = (("LTMP", "LightingTemplate"), ("XCIM", "Imagespace"),
+                 ("XCMO", "Music"), ("XEZN", "EncounterZone"))
+
+
 def _emit_cell_deltas(lines: list, rec: Record):
-    """CELL's FO3/FNV-only fields: the land-flag byte and the water noise texture."""
+    """CELL's FO3/FNV-only fields: land flags, water noise and its pointers.
+
+    See: docs/commentary/tes4_export_falloutnv.md#reference-only-types
+    """
+    for sig, key in CELL_POINTERS:
+        emit_formid(lines, f"{sig}.{key}", get_subrecord(rec, sig))
+
     xclc = get_subrecord(rec, "XCLC")
     if xclc and len(xclc.data) >= 12:
         lines.append(f"XCLC.LandFlags={xclc.data[8]}")
@@ -549,6 +560,75 @@ def export_FORMLIST(rec: Record) -> list:
     return lines
 
 
+#: FNV TXST texture slots; TES5 adds TX06/TX07, which FO3/FNV never author.
+TEXTURE_SLOTS = ("TX00", "TX01", "TX02", "TX03", "TX04", "TX05")
+
+
+def export_TEXTURESET(rec: Record) -> list:
+    """A TXST: its six texture paths, bounds and DNAM flags.
+
+    See: docs/commentary/tes4_export_falloutnv.md#texture-sets
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    for slot in TEXTURE_SLOTS:
+        emit_string(lines, slot, get_subrecord(rec, slot))
+    emit_u16(lines, "DNAM.Flags", get_subrecord(rec, "DNAM"))
+    _emit_obnd(lines, rec)
+    return lines
+
+
+def export_IMAGESPACE(rec: Record) -> list:
+    """An IMGS: its 152-byte DNAM tone-mapping block, verbatim.
+
+    See: docs/commentary/tes4_export_falloutnv.md#imagespaces
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    emit_raw_hex(lines, "DNAM", get_subrecord(rec, "DNAM"))
+    return lines
+
+
+def export_LIGHTINGTEMPLATE(rec: Record) -> list:
+    """An LGTM: the 40-byte DATA lighting block, verbatim.
+
+    See: docs/commentary/tes4_export_falloutnv.md#lighting-templates
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    emit_raw_hex(lines, "DATA", get_subrecord(rec, "DATA"))
+    return lines
+
+
+def export_ENCOUNTERZONE(rec: Record) -> list:
+    """An ECZN: owner, rank, minimum level and reset flags.
+
+    See: docs/commentary/tes4_export_falloutnv.md#encounter-zones
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    data = get_subrecord(rec, "DATA")
+    if data and len(data.data) >= 8:
+        emit_formid(lines, "DATA.Owner", data)
+        rank, min_level = struct.unpack_from("<2b", data.data, 4)
+        lines.append(f"DATA.Rank={rank}")
+        lines.append(f"DATA.MinLevel={min_level}")
+        lines.append(f"DATA.Flags={data.data[6]}")
+    return lines
+
+
+def export_MUSICTYPE(rec: Record) -> list:
+    """A MUSC: the track file it names and its dB gain.
+
+    See: docs/commentary/tes4_export_falloutnv.md#music-types
+    """
+    lines = []
+    emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
+    emit_string(lines, "FNAM.FileName", get_subrecord(rec, "FNAM"))
+    emit_float(lines, "ANAM.DB", get_subrecord(rec, "ANAM"))
+    return lines
+
+
 #: FNV IPDS DATA: twelve IPCT FormIDs in this material order (wbDefinitionsFNV).
 IMPACT_MATERIALS = ("Stone", "Dirt", "Grass", "Glass", "Metal", "Wood",
                     "Organic", "Cloth", "Water", "HollowMetal", "OrganicBug",
@@ -613,6 +693,11 @@ FALLOUT_BASE_EXPORTERS = {
     "MESG": export_MESSAGE,
     "PROJ": export_PROJECTILE,
     "FLST": export_FORMLIST,
+    "TXST": export_TEXTURESET,
+    "IMGS": export_IMAGESPACE,
+    "LGTM": export_LIGHTINGTEMPLATE,
+    "ECZN": export_ENCOUNTERZONE,
+    "MUSC": export_MUSICTYPE,
     "IPCT": export_IMPACT,
     "IPDS": export_IMPACTSET,
     "NAVM": export_NAVMESH,

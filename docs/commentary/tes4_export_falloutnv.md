@@ -57,14 +57,81 @@ a record type this converter does not emit:
 | `XCMO` | `MUSC` | 297 |
 | `XEZN` | `ECZN` | 84 |
 
-None of `LGTM`, `ASPC`, `IMGS`, `MUSC` or `ECZN` is in `IMPORT_DISPATCH`.
-Passing these through writes dangling FormIDs, which is a rejection the CK
-reports as a broken reference rather than a bad value. They drop until their
-target types convert.
+`ASPC` reduces to a `STAT` through `FALLOUT_BASE_TYPES`, so `XCAS` still drops.
+`LGTM`, `IMGS`, `MUSC` and `ECZN` now convert, and their CELL pointers carry.
 
 `XNAM` survives the same test: FNV and Skyrim both define it as
 `wbString(XNAM, 'Water Noise Texture')`, and it carries no FormID. 30,458 of
 30,495 are a 1-byte empty string; 36 carry real 35-47 byte paths.
+
+## <a id="reference-only-types"></a>The types CELL points at
+
+**Code:** `tes4_export/record_types/falloutnv.py`,
+`tes5_import/record_types/reference_falloutnv.py`
+
+Five record types are format-identical enough between FNV and TES5 to convert
+directly. Four exist only to be referenced — by `CELL.LTMP`, `XCIM`, `XCMO`,
+`XEZN` — so converting them is what makes those pointers legal.
+
+### <a id="formlist-members"></a>FormList members are filtered, not passed through
+
+`FLST` itself is byte-identical between the games, but its members are not
+guaranteed to survive. FalloutNV.esm's 464 lists hold **4,436 members**, and
+203 of them (4.6%) name a type this converter does not write: **139 ARMA**
+(TES5 ARMA is generated from ARMO, never read from source), **50 IMOD** and
+**14 EXPL**. Every other member resolves — 1,343 WEAP, 802 ARMO, 748 ALCH,
+550 MISC and the rest.
+
+Writing those 203 verbatim produces a dangling FormID, which the engine treats
+as a broken reference rather than a bad value. `index_convertible_records`
+indexes every source FormID whose own type is in `IMPORT_DISPATCH` and not
+skipped, and `convert_FLST` drops any member missing from it.
+
+Dropping rather than NULL-ing is safe here because nothing reads these lists
+positionally: TES5 indexes a FLST only where a script does, and every list a
+converted script touches is homogeneous.
+
+### <a id="texture-sets"></a>Texture sets
+
+FNV `TXST` declares `TX00`-`TX05`; TES5 adds `TX06` (multilayer) and `TX07`
+(backlight mask), which no FO3/FNV record authors. `DNAM` is a `u16` flag field
+in both, and bit 0 (No Specular Map) is the only value FNV sets. So the record
+passes through slot-for-slot. `LTEX` already indexed these for its diffuse
+path; this emits them as records in their own right.
+
+### <a id="imagespaces"></a>Imagespaces
+
+`IMGS.DNAM` is a 152-byte block in FNV and the same 152 bytes in TES5 — the HDR
+tone-mapping parameters the weather conversion already mints companions for.
+It is exported verbatim as hex rather than field-by-field: nothing reorders.
+
+### <a id="lighting-templates"></a>Lighting templates
+
+`LGTM.DATA` is **40 bytes in FNV and 92 in TES5**, so this one is not a
+passthrough. The shared 40-byte prefix (ambient / directional / fog colors,
+fog near/far, directional rotation and fade, fog clip, fog power) is identical;
+TES5 appends a 24-byte unused ambient block, a far fog color, fog max, and a
+light-fade start/end pair. The converter keeps the prefix and zero-fills the
+tail, then writes the `DALC` ambient-colors subrecord TES5 requires.
+
+### <a id="encounter-zones"></a>Encounter zones
+
+`ECZN.DATA` is 8 bytes in FNV — `Owner`(4) `Rank`(1) `MinLevel`(1) `Flags`(1)
+pad(1) — and 12 in TES5 at form version 34+, which **inserts a `Location`
+FormID at offset 4** and appends a `MaxLevel` byte. The fields are therefore
+reordered, not extended. TES4 has no LCTN source, so Location writes NULL.
+
+### <a id="music-types"></a>Music types
+
+FO3/FNV `MUSC` is a single **track** (`FNAM` filename, `ANAM` dB gain); TES5
+`MUSC` is a music **type** holding `MUST` tracks. So each FNV record becomes a
+pair: one `MUST` naming the file, wrapped in one `MUSC` that `XCMO` points at.
+Both are built by the existing `build_MUST` / `build_MUSC`, so FNV music joins
+the folder-derived types rather than forking the music system.
+
+`ANAM` is a gain, not a duration, and the TES5 single-track shape carries
+neither — it is dropped rather than written into `FLTV`, which on a non-silent
+track produces a combination no vanilla record uses.
 
 ## Measured field coverage
 

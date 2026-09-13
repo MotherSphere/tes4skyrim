@@ -51,6 +51,14 @@ def _init_dispatch() -> None:
     from .record_types.message_falloutnv import convert_MESG
     from .record_types.projectile_falloutnv import convert_PROJ
     from .record_types.impact_falloutnv import convert_IPCT, convert_IPDS
+    from .record_types.music_falloutnv import convert_MUSC
+    from .record_types.reference_falloutnv import (
+        convert_ECZN,
+        convert_FLST,
+        convert_IMGS,
+        convert_LGTM,
+        convert_TXST,
+    )
     from .record_types.items import (
         convert_ACTI,
         convert_ANIO,
@@ -88,6 +96,12 @@ def _init_dispatch() -> None:
     IMPORT_DISPATCH['PROJ'] = convert_PROJ
     IMPORT_DISPATCH['IPCT'] = convert_IPCT
     IMPORT_DISPATCH['IPDS'] = convert_IPDS
+    IMPORT_DISPATCH['FLST'] = convert_FLST
+    IMPORT_DISPATCH['TXST'] = convert_TXST
+    IMPORT_DISPATCH['IMGS'] = convert_IMGS
+    IMPORT_DISPATCH['LGTM'] = convert_LGTM
+    IMPORT_DISPATCH['ECZN'] = convert_ECZN
+    IMPORT_DISPATCH['MUSC'] = convert_MUSC
     IMPORT_DISPATCH.update({
         'STAT': convert_STAT,
         'ACTI': convert_ACTI,

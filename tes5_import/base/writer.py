@@ -1137,6 +1137,7 @@ class PluginWriter:
             # itself puts them after CELL), but pinning them keeps the layout
             # independent of the order groups were added in.
             'WATR', 'FLST',
+            'ECZN',
             'LCTN',
             # Vanilla puts MESG just after LCTN. Nothing in a MESG is resolved
             # order-sensitively at load (ours carry no conditions), but keep
@@ -1147,6 +1148,7 @@ class PluginWriter:
             # table to repoint BTMS at our Battle music, so it must precede
             # MUSC for the form it names to already be in the file.
             'DOBJ',
+            'LGTM',
             # MUSC/MUST sit AFTER CELL in vanilla (measured on the real
             # Skyrim.esm top-level order: CELL 57, WRLD 58, LCTN 86, MUSC 91,
             # DLBR 97, MUST 98).  Unlike a REFR base object, a cell's XCMO is

@@ -13,27 +13,65 @@ See: docs/commentary/tes5_import_falloutnv_actors.md
 
 from ..base.text_reader import get_formid, get_int, get_str
 
-#: Template Flags bits (wbDefinitionsCommon.pas:7715).
+#: Template Flags bits, and the field each hides (wbDefinitionsFNV.pas:6830).
+_USE_TRAITS = 1 << 0
+_USE_STATS = 1 << 1
+_USE_FACTIONS = 1 << 2
+_USE_EFFECTS = 1 << 3
 _USE_AI_DATA = 1 << 4
+_USE_PACKAGES = 1 << 5
 _USE_MODEL = 1 << 6
 _USE_BASE_DATA = 1 << 7
+_USE_INVENTORY = 1 << 8
+_USE_SCRIPT = 1 << 9
 
 #: A template chain longer than this is a cycle; FNV's deepest is 3.
 _MAX_DEPTH = 8
 
 #: Inherited with Model/Animation, and read by the creature race builder.
-_MODEL_KEYS = ('Model.MODL', 'Model.MODB', 'Model.MODT')
+_MODEL_KEYS = ('Model.MODL', 'Model.MODB', 'Model.MODT', 'HNAM.Hair',
+               'LNAM.HairLength', 'ENAM.Eyes', 'HCLR.R', 'HCLR.G', 'HCLR.B',
+               'FGGS', 'FGGA', 'FGTS', 'NIFT.Size')
 
 #: Inherited with AI Data; Aggression and Confidence drive the combat tiers.
 _AIDT_KEYS = ('AIDT.Aggression', 'AIDT.Confidence', 'AIDT.EnergyLevel',
               'AIDT.Responsibility', 'AIDT.Mood', 'AIDT.Services',
               'AIDT.Teaches', 'AIDT.MaxTraining', 'AIDT.Assistance',
-              'AIDT.AggroRadiusBehavior', 'AIDT.AggroRadius')
+              'AIDT.AggroRadiusBehavior', 'AIDT.AggroRadius',
+              'ACBS.BarterGold')
 
-#: Each inherited category: its Template Flags bit and the keys it carries.
+#: Inherited with Traits: race, voice, class and the rest of an actor's identity.
+_TRAIT_KEYS = ('RNAM.Race', 'VTCK.Voice', 'CNAM.Class', 'ZNAM.CombatStyle',
+               'INAM.DeathItem', 'ACBS.Karma', 'ACBS.Disposition',
+               'BNAM.BaseScale', 'TNAM.TurningSpeed', 'WNAM.FootWeight',
+               'RNAM.AttackReach', 'CSCR.InheritSound')
+
+#: Inherited with Stats: level, the ACBS scaling band and the DATA attributes.
+_STAT_KEYS = ('ACBS.Level', 'ACBS.CalcMin', 'ACBS.CalcMax', 'ACBS.Fatigue',
+              'ACBS.SpeedMultiplier', 'DATA.Health', 'DATA.AttackDamage',
+              'DATA.Strength', 'DATA.Perception', 'DATA.Endurance',
+              'DATA.Charisma', 'DATA.Intelligence', 'DATA.Agility',
+              'DATA.Luck')
+
+#: Scalar categories: a Template Flags bit and the keys it carries verbatim.
 _CATEGORIES = ((_USE_MODEL, _MODEL_KEYS),
                (_USE_AI_DATA, _AIDT_KEYS),
-               (_USE_BASE_DATA, ('FULL',)))
+               (_USE_TRAITS, _TRAIT_KEYS),
+               (_USE_STATS, _STAT_KEYS),
+               (_USE_BASE_DATA, ('FULL',)),
+               (_USE_SCRIPT, ('SCRI',)))
+
+#: Counted-array categories: bit, count key, and its per-entry key templates.
+_ARRAY_CATEGORIES = (
+    (_USE_INVENTORY, 'ItemCount', ('Item[%d].FormID', 'Item[%d].Count')),
+    (_USE_FACTIONS, 'FactionCount', ('Faction[%d].FormID', 'Faction[%d].Rank')),
+    (_USE_PACKAGES, 'AIPackageCount', ('AIPackage[%d]',)),
+    (_USE_EFFECTS, 'SpellCount', ('Spell[%d]',)),
+    (_USE_MODEL, 'KFFZCount', ('KFFZ[%d]',)),
+    (_USE_TRAITS, 'SoundTypeCount', ('SoundType[%d].Type',
+                                     'SoundType[%d].Sound',
+                                     'SoundType[%d].Sound.Chance')),
+)
 
 
 #: Highest legal TES5 tier: wbAggressionEnum is 0-3, wbConfidenceEnum 0-4.
@@ -95,11 +133,40 @@ def _first_owning(rec: dict, index: dict, key: str) -> dict:
     return None
 
 
+def _first_owning_array(rec: dict, index: dict, count_key: str) -> dict:
+    """The nearest actor down the chain with a non-empty ``count_key``."""
+    for node in _chain(rec, index):
+        if get_int(node, count_key, 0) > 0:
+            return node
+    return None
+
+
+def _copy_array(rec: dict, donor: dict, count_key: str, templates) -> bool:
+    """Copy one counted array down from ``donor``, entry by entry.
+
+    Every entry is taken: a partial list is worse than none, since the engine
+    reads the count and would index past what was copied.
+    """
+    count = get_int(donor, count_key, 0)
+    if not count:
+        return False
+    for i in range(count):
+        for tmpl in templates:
+            key = tmpl % i
+            if key in donor:
+                rec[key] = donor[key]
+    rec[count_key] = str(count)
+    return True
+
+
 def _flatten_one(rec: dict, index: dict) -> bool:
     """Copy every category ``rec``'s flags claim down from its template.
 
     A category is skipped when the stub already owns its lead key, so a stub
-    that overrides one of them keeps its own.
+    that overrides one of them keeps its own. Counted arrays (inventory,
+    factions, packages, spells) are carried whole.
+
+    See: docs/commentary/tes5_import_falloutnv_actors.md#every-category-flattens
     """
     flags = get_int(rec, 'ACBS.TemplateFlags')
     filled = False
@@ -115,6 +182,13 @@ def _flatten_one(rec: dict, index: dict) -> bool:
         if bit == _USE_MODEL:
             _copy_nifz(rec, donor)
         filled = True
+
+    for bit, count_key, templates in _ARRAY_CATEGORIES:
+        if not flags & bit or get_int(rec, count_key, 0) > 0:
+            continue
+        donor = _first_owning_array(rec, index, count_key)
+        if donor is not None and _copy_array(rec, donor, count_key, templates):
+            filled = True
     return filled
 
 

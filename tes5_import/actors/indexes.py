@@ -19,7 +19,9 @@ from ..record_types.items import load_door_model_sounds
 from ..record_types.sound import (load_soun_identity, reset_sound_descriptors,
                                  reset_soun_identity)
 from ..record_types.projectile_falloutnv import index_gun_projectiles
+from ..record_types.reference_falloutnv import index_convertible_records
 from ..record_types.world_falloutnv import register_fallout_source
+from ..registry import IMPORT_DISPATCH, SKIP_TYPES
 
 
 def _load_door_sounds(by_type: dict, export_dir: str) -> None:
@@ -48,6 +50,7 @@ def build_actor_indexes(by_type: dict, writer, export_dir: str, ctx,
     _load_sound_identity(by_type, master_export)
     reset_emitted_regions()
     register_fallout_source(by_type)
+    index_convertible_records(by_type, IMPORT_DISPATCH, SKIP_TYPES)
     n_ammo = index_gun_projectiles(by_type, master_export)
     if n_ammo:
         print(f'  FO3/FNV gun projectiles: {n_ammo} ammo type(s) indexed')

@@ -103,7 +103,47 @@ by the new-master offset, so an exported `CNAM.Climate=00000812` arrives as
 
 ## CELL water and music
 
-**Code:** `_cell_water_and_music` in `tes5_import/record_types/world.py`
+**Code:** `_cell_pointers` in `tes5_import/record_types/world.py`
+
+Every CELL subrecord naming another record is built here, in vanilla's own
+order: `LTMP XCLW XNAM XCLR XCIM XLCN XEZN XCWT XCMO`. `XCIM` (imagespace) and
+`XEZN` (encounter zone) exist only in FO3/FNV sources; see
+[the reference-only types](tes4_export_falloutnv.md#reference-only-types).
+
+### <a id="cell-xclr-regions"></a>`XCLR` — how region weather reaches the sky
+
+The engine activates a region's `RDWT` list **only** in cells whose `XCLR`
+names that region — Skyrim.esm's WeatherWinterhold sits in 30 cells' `XCLR` —
+and the `RPLD` polygons alone do nothing at runtime. Without `XCLR` every
+converted exterior fell back to the climate's own `WLST`, and Tamriel's is a
+single Clear weather at 100%, so the sky never changed.
+
+The list is filtered to regions that actually emitted: TES4 lists many
+object/grass/sound regions here that `convert_REGN` drops. It is sorted
+because xEdit declares `XCLR` as `wbArrayS`.
+
+### <a id="cell-xlcn-lcec"></a>`XLCN` and `LCEC` are a two-way contract
+
+`XLCN` does double duty in Skyrim: entering a cell that belongs to a location
+discovers it (revealing its map marker), and it is where the engine reads the
+cell's **name** from. Not one vanilla exterior carries a `FULL`, so an exterior
+with no `XLCN` is displayed as "Wilderness" on a load door.
+
+The CK validates every cell that claims a location against that location's
+`LCEC` cell list ("Warnings were encountered validating unloaded ref data for
+Location"), reporting "Cell (x, y) in world 'W' is not in exterior cell data"
+for each one the location does not claim back. An exterior may therefore only
+carry `XLCN` when the target's `LCEC` actually lists its grid square.
+
+That is why there is **no worldspace-wide fallback**: a per-worldspace location
+has an empty `LCEC`, so pointing every cell in Tamriel at one produced 26,124
+warnings — the largest bucket in the log. Vanilla is the opposite of blanket
+coverage: of Skyrim.esm's 16,978 exterior cells only 982 carry `XLCN` at all
+(948 of them LCEC-listed), the other 15,996 are deliberately nameless. Its
+LCECs are small and hand-picked — median 2 cells, max 22.
+
+Interiors are exempt: they are matched by FormID through a door claim, and the
+LCEC check does not apply to them.
 
 `XCWT` is the cell's own water type, overriding the worldspace's `NAM2`. This is
 how Oblivion authors the lava in its realm interiors — 46 of the 162 cells that

@@ -171,6 +171,16 @@ reproduced all three on the pre-fix output and passes on vanilla.
 **This is not the hang** — CK logs these and keeps going — but it silently cost
 1,852 placed objects in every build so far.
 
+### <a id="lgtm-eczn-slots"></a>LGTM and ECZN sit after CELL
+
+The FO3/FNV reference-only types take vanilla's own slots: `…MESG RGDL DOBJ
+LGTM MUSC…` puts `LGTM` between `DOBJ` and `MUSC`, and `ECZN` immediately
+precedes `LCTN`. Both are CELL targets (`LTMP`, `XEZN`) and both are legal
+after `CELL` for the same reason `XCMO`/`MUSC` is: unlike a REFR's `NAME`,
+neither is resolved while the CELL group parses — vanilla's own cells load
+with these groups tens of slots later. Pinning them keeps the layout
+independent of the order groups were added in.
+
 ### <a id="qust-after-cell-wrld-dial"></a>QUST must come AFTER CELL, WRLD and DIAL
 
 The same parse-order rule runs in the other direction for quests. Vanilla's
