@@ -18,6 +18,7 @@ ships cells and statics only, never LAND.
 See: docs/commentary/tes4_export_morrowind.md#groundcover-as-grass
 """
 
+import math
 import os
 from collections import Counter, defaultdict
 
@@ -57,8 +58,8 @@ _MAX_SLOPE = 45
 #: Placements a (texture, model) pairing needs before it counts as authored.
 MIN_PAIR_SUPPORT = 8
 
-#: Grasses the engine plants per texture: iMaxGrassTypesPerTexure's default.
-MAX_GRASSES_PER_TEXTURE = 2
+#: Grasses the planter takes per texture at the default ini: the cap is 2 and the loop's test is `jg`, so 3.
+MAX_GRASSES_PER_TEXTURE = 3
 
 #: Keys an LTEX override never repeats; a splice of these re-mints the TXST.
 _LTEX_OWN_KEYS = frozenset({'Signature', 'FormID', 'RecordFlags',
@@ -114,6 +115,15 @@ def _cell_grids(export_dir: str, remap: dict = None) -> dict:
     return out
 
 
+def _mean_opacity(rec: dict, layer: int) -> float:
+    """An ALPHA layer's blend weight averaged over the quadrant's vertices."""
+    painted = int(rec.get('Layer[%d].VTXTCount' % layer, 0) or 0)
+    total = 0.0
+    for j in range(painted):
+        total += float(rec.get('Layer[%d].VT[%d].Opacity' % (layer, j), 0) or 0)
+    return min(1.0, total / QUAD_VERTS_TOTAL)
+
+
 def _read_land_layers(rec: dict) -> dict:
     """One LAND record's layers, folded into per-quadrant texture coverage."""
     out = {}
@@ -124,29 +134,33 @@ def _read_land_layers(rec: dict) -> dict:
             out['BTXT.%d' % quad] = rec.get('Layer[%d].BTXT.Texture' % i, '')
         elif kind == 'ALPHA':
             quad = int(rec.get('Layer[%d].ATXT.Quadrant' % i, 0) or 0)
-            painted = int(rec.get('Layer[%d].VTXTCount' % i, 0) or 0)
             out.setdefault('ATXT.%d' % quad, []).append(
                 (rec.get('Layer[%d].ATXT.Texture' % i, ''),
-                 painted / float(QUAD_VERTS_TOTAL)))
+                 _mean_opacity(rec, i)))
     return out
 
 
-def _quadrant_texture(layers: dict, quadrant: int) -> str:
-    """The FormID of the texture covering most of one LAND quadrant.
+def _quadrant_weights(layers: dict, quadrant: int) -> dict:
+    """LTEX FormID -> the share of one quadrant the planter gives it.
 
-    The BASE layer covers the whole quadrant; an ALPHA layer covers only the
-    vertices it lists, so it wins only where it is painted over most of them.
+    The planter multiplies a grass's density by its layer's blend weight, so
+    an ALPHA layer counts for its mean opacity and the BASE for what the
+    alphas leave uncovered. The dict's first key is the BASE texture.
+    See: docs/commentary/tes4_export_morrowind.md#groundcover-density
     """
-    best = layers.get('BTXT.%d' % quadrant, '')
-    best_share = 0.5
+    weights = {}
+    base = layers.get('BTXT.%d' % quadrant, '')
+    if base:
+        weights[base] = 1.0
     for texture, share in layers.get('ATXT.%d' % quadrant, ()):
-        if share > best_share:
-            best, best_share = texture, share
-    return best
+        weights[texture] = weights.get(texture, 0.0) + share
+        if base:
+            weights[base] = max(0.0, weights[base] - share)
+    return weights
 
 
 def master_texture_grid(export_dir: str, remap: dict = None) -> dict:
-    """TES4 cell grid -> the dominant LTEX FormID over each of its quadrants.
+    """TES4 cell grid -> ([dominant LTEX per quadrant], [{LTEX: weight}]).
 
     Reads the master's LAND dump, already split into Oblivion cells, so no
     VTEX de-swizzling is needed.  Every id is re-keyed through `remap` into
@@ -162,10 +176,12 @@ def master_texture_grid(export_dir: str, remap: dict = None) -> dict:
         if grid is None:
             continue
         layers = _read_land_layers(rec)
-        quads = [remap_form_id(_quadrant_texture(layers, q), remap) or ''
-                 for q in range(4)]
+        weights = [{(remap_form_id(t, remap) or '').upper(): w
+                    for t, w in _quadrant_weights(layers, q).items()}
+                   for q in range(4)]
+        quads = [max(w, key=w.get) if w else '' for w in weights]
         if any(quads):
-            out[grid] = quads
+            out[grid] = (quads, weights)
     return out
 
 
@@ -191,7 +207,7 @@ def master_ltex_fields(export_dir: str, remap: dict = None) -> dict:
 def _sample(grid_map: dict, pos_x: float, pos_y: float) -> str:
     """The LTEX FormID of the ground under one world position, or ''."""
     grid = (int(pos_x // TES4_CELL_SIZE), int(pos_y // TES4_CELL_SIZE))
-    quads = grid_map.get(grid)
+    quads = grid_map.get(grid, ((), ()))[0]
     if not quads:
         return ''
     half = TES4_CELL_SIZE / 2.0
@@ -210,8 +226,12 @@ class GrassTally:
     def __init__(self, grid_map: dict):
         """Start empty over a master's texture grid."""
         self.grid_map = grid_map
-        self.quads = Counter(tex.upper() for quads in grid_map.values()
-                             for tex in quads if tex)
+        self.area = Counter()
+        for _quads, weights in grid_map.values():
+            for per_quad in weights:
+                for tex, w in per_quad.items():
+                    if tex:
+                        self.area[tex] += w
         self.pairs = Counter()
         self.scales = defaultdict(list)
         self.unplaced = 0
@@ -246,38 +266,48 @@ class GrassTally:
             kept = [(m, c) for m, c in counts.most_common(
                 MAX_GRASSES_PER_TEXTURE) if c >= MIN_PAIR_SUPPORT]
             share = sum(c for _, c in kept)
-            if share:
-                total = sum(counts.values())
-                out[texture] = {m: c * total / share for m, c in kept}
+            if not share:
+                continue
+            total = sum(counts.values())
+            planted = {m: c * total / share for m, c in kept}
+            planted = {m: c for m, c in planted.items()
+                       if self._density(texture, c)}
+            if planted:
+                out[texture] = planted
         self._bindings = out
         return self._bindings
 
-    def _per_quad(self, texture: str, model_key: str) -> float:
-        """Clumps of one model per LAND quad of one texture."""
-        planted = self.bindings()[texture][model_key]
-        return max(0.01, planted / max(1, self.quads[texture]))
+    def _per_quad(self, texture: str, planted: float) -> float:
+        """Clumps per full-weight LAND quad of one texture."""
+        return max(0.01, planted / max(0.01, self.area[texture]))
 
-    def position_range(self, texture: str, model_key: str) -> float:
-        """The jitter cell that puts this pairing's density in vanilla range.
-
-        See: docs/commentary/tes4_export_morrowind.md#groundcover-as-grass
-        """
+    def _position_range(self, texture: str, planted: float) -> float:
+        """The jitter cell that puts a pairing's density in vanilla range."""
         solved = QUAD_SIZE * ((TARGET_DENSITY / MAX_DENSITY
-                               / self._per_quad(texture, model_key)) ** 0.5)
+                               / self._per_quad(texture, planted)) ** 0.5)
         return max(MIN_POSITION_RANGE, min(MAX_POSITION_RANGE, solved))
 
-    def density(self, texture: str, model_key: str) -> int:
-        """The GRAS density reproducing this pairing's authored clump count.
+    def _density(self, texture: str, planted: float) -> int:
+        """The GRAS density planting `planted` clumps; 0 when too few to express.
 
-        The planter lays n = min(2048/PositionRange, 2048/iMinGrassSize)
-        candidates per quad side and keeps each with probability Density%, so
-        matching the source count is a division.
+        The planter lays floor(2048/PositionRange) candidates per quad side,
+        capped by iMinGrassSize, and keeps each with probability Density%, so
+        matching the source count is a division. A pairing that rounds to 0
+        is dropped rather than planted at 1, which over-plants it 2-28x.
         See: docs/commentary/asset_convert_terrain.md#grass-placement-parity
         """
-        side = min(QUAD_SIZE / self.position_range(texture, model_key),
-                   QUAD_SIZE / SKYRIM_MIN_GRASS_SIZE)
-        share = self._per_quad(texture, model_key) / (side * side) * MAX_DENSITY
-        return max(1, min(MAX_DENSITY, round(share)))
+        side = math.floor(min(QUAD_SIZE / self._position_range(texture, planted),
+                              QUAD_SIZE / SKYRIM_MIN_GRASS_SIZE))
+        share = self._per_quad(texture, planted) / (side * side) * MAX_DENSITY
+        return min(MAX_DENSITY, round(share))
+
+    def position_range(self, texture: str, model_key: str) -> float:
+        """PositionRange for one bound pairing."""
+        return self._position_range(texture, self.bindings()[texture][model_key])
+
+    def density(self, texture: str, model_key: str) -> int:
+        """Density for one bound pairing; never 0, those are not bound."""
+        return self._density(texture, self.bindings()[texture][model_key])
 
     def height_range(self, model_key: str) -> float:
         """The spread of authored scales on one grass model."""

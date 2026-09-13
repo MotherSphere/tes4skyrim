@@ -34,6 +34,22 @@ NAMESPACE_ENV = 'TESCONV_ASSET_NAMESPACE'
 _ACTIVE = {'ns': (os.environ.get(NAMESPACE_ENV) or DEFAULT_NAMESPACE).lower()}
 
 
+def _export_root(export_dir: Path) -> Path:
+    """The export ROOT above `export_dir`, found by its `sources.json` marker.
+
+    An imported mod nests its plugins as `export/<mod>/<plugin>/`, so the
+    parent of an export dir is the MOD folder, not the root every master is
+    resolved against. Walk up to the marker instead; without one, fall back to
+    the parent, which is correct for a plain `export/<plugin>/`.
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+    from output_layout import REGISTRY_FILENAME
+    for cand in export_dir.parents:
+        if (cand / REGISTRY_FILENAME).is_file():
+            return cand
+    return export_dir.parent
+
+
 def _chain_root(export_dir: Path) -> Path:
     """The masterless plugin at the root of this plugin's master chain.
 
@@ -44,7 +60,7 @@ def _chain_root(export_dir: Path) -> Path:
     """
     from asset_convert.lod.terrain_lod import master_names
     from output_layout import record_dir
-    root = export_dir.parent
+    root = _export_root(export_dir)
     seen = set()
     cur = export_dir
     while cur is not None and cur.name.lower() not in seen:

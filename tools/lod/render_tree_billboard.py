@@ -15,6 +15,7 @@ Usage:
 import argparse
 import multiprocessing as mp
 import os
+import struct
 import sys
 from pathlib import Path
 
@@ -23,6 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.subprocess_flags import configure_multiprocessing
 from core.worker_budget import worker_count
 from asset_convert.game_paths import win_join
+from asset_convert.lod.esm_scan import parse_esm
+from asset_convert.lod.lod_far_gen import is_tree_model
 from asset_convert.lod.tree_billboard import (billboard_dir, BS, render_billboard,
                                           write_dds_rgba)
 
@@ -30,17 +33,21 @@ configure_multiprocessing()
 
 
 def tree_models(plugin_dirs):
-    """{model_rel: owning output dir} for every placed TREE-type base."""
-    from asset_convert.lod import lod_gen as G
-    from asset_convert.lod.lod_far_gen import is_tree_model
+    """{model_rel: owning output dir} for every placed TREE-type base.
+
+    Every plugin in a directory is read, not just the first: a directory can
+    hold several and the TREE bases are spread across them.  An unreadable
+    plugin is reported on stderr rather than swallowed -- skipping in silence
+    renders nothing and still exits 0.
+    """
     found = {}
     for base in plugin_dirs:
-        # Every plugin in the tree, not just the first: a directory can hold
-        # several, and the TREE bases we need are spread across them.
         for esm in sorted(list(base.glob('*.esm')) + list(base.glob('*.esp'))):
             try:
-                _ws, _cells, stats, _refs = G._parse_esm(esm)
-            except Exception:
+                _ws, _cells, stats, _refs = parse_esm(esm)
+            except (OSError, ValueError, KeyError, struct.error) as exc:
+                print('  SKIP %s: %s: %s' % (esm.name, type(exc).__name__, exc),
+                      file=sys.stderr)
                 continue
             for _fid, st in stats.items():
                 if not is_tree_model(st):

@@ -1170,7 +1170,7 @@ def generate_lod(esm_path: Path, output_dir: Path,
                            Distinct from master_dirs because the tile-ownership
                            skip above is NOT valid when this plugin owns the
                            worldspace, while mesh reuse always is.
-        master_texture_dirs: Converted output dirs of this plugin's masters,
+        master_texture_dirs: Converted output dirs of every other plugin,
                            always. A plugin regularly places a master's models
                            in its OWN worldspace, and their textures exist only
                            in the master's output; the .bto tiles baked here

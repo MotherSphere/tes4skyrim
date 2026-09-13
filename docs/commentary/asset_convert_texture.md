@@ -10,6 +10,7 @@
   - [A generated companion joins its family's namespace](#borrowing-across-a-namespace-boundary)
 - [Per-game asset namespace](#per-game-asset-namespace)
   - [A master is resolved by `record_dir`, never by joining its name](#master-resolved-by-record-dir)
+    - [...and the ROOT it resolves against is found by marker, not by `.parent`](#export-root-by-marker)
 - [Tree billboards are named, never written down](#tree-billboards-are-named-never-written-down)
 
 ## Oblivion parallax → Skyrim height maps (`asset_convert/texture/parallax.py`, opt-in, 2026-08-15)
@@ -789,6 +790,33 @@ build on a bare join for exactly this reason; it caught all three sites
 (`_chain_root` twice, `overrides/manifest.py` once). `record_dir` already falls
 back to `<root>/<name>` when no registry claims the plugin, so it is always the
 correct call — an `os.path.join` fallback behind it only reintroduces the bug.
+
+### ...and the ROOT it resolves against is found by marker, not by `.parent`
+<a id="export-root-by-marker"></a>
+
+**Code:** `_export_root` in `asset_convert/game_paths.py`
+
+Calling `record_dir` is necessary but not sufficient: it also needs the export
+ROOT. `_chain_root` took `export_dir.parent`, which is the root only for a
+plain `export/<plugin>/`. For a plugin nested in a mod folder
+(`export/<mod>/<plugin>/`) the parent is the MOD folder, so every master
+resolved to a path under it that does not exist, the walk fell through to
+`return dirs[0]`, and the namespace was named after that bogus dir.
+
+`Grass_Aes_TRv25_05_mowed.esp` (masters `Morrowind_ob.esm`, the compat patch,
+`TR_Mainland.esm`) resolved all three against `export/Aesthesia groundcover/`:
+
+| plugin | chain root before | ns before | chain root now | ns now |
+|---|---|---|---|---|
+| Grass_Aes_TRv25_05_mowed | `Aesthesia groundcover/Morrowind_ob.esm` (absent) | `morrowindob` | `Oblivion.esm` | `tes4` |
+
+It therefore wrote WRLD MODL `morrowindob\worldmapclouds\wrldmorrowind.nif`
+while Morrowind_ob, Tamriel_Data and TR_Mainland all wrote `tes4\...`. No mesh
+is ever generated under `morrowindob\`, and the grass ESP loads last and wins
+the override, so WrldMorrowind got a dangling cloud model and the world map
+drew NO clouds. `_export_root` walks up to `output_layout.REGISTRY_FILENAME`
+(`sources.json`, which marks the export root and exists for exactly this
+distinction) and falls back to `.parent` only when no marker is found.
 
 ## The namespace crosses process boundaries through the environment
 <a id="namespace-crosses-process-boundaries"></a>

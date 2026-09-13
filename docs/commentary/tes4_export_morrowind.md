@@ -1077,7 +1077,40 @@ Left alone that binding carpets an unrelated texture across the worldspace, so
 a pairing is kept only above both a floor of 8 placements and 2% of that
 texture's clumps.
 
-### Density is solved per (texture, model) pairing, under the engine's two-grass cap
+### <a id="groundcover-density"></a>Density is solved per (texture, model) pairing, under the engine's grass cap
+
+**The cap is 3 at the default ini, not 2.** The planter (SkyrimSE.exe
+`0x26a2c0`, the only reader of `iMaxGrassTypesPerTexure`) walks the LTEX's
+GNAM list with `cmp eax, edi; jg exit` before each entry, so it takes entries
+while `taken <= cap`: the shipped default of 2 admits three, which is exactly
+why vanilla's four 3-GNAM textures (LReachGrass01, LPineForest02,
+LCoastOceanFloor01, LRiverBottom01) work on a stock install. Entries past
+that are skipped outright; nothing renormalises the kept densities.
+`MAX_GRASSES_PER_TEXTURE` is therefore 3, which keeps 70% of TR's clumps on
+their own model before reattribution (2 kept 55%, 7 would keep 89%; the
+author places a median 16 distinct models per texture).
+
+**The planter multiplies density by the layer's blend weight, so the area a
+texture is solved over is its weight summed across quads, not a quad count.**
+Binding every clump to the quad's dominant texture and dividing by the number
+of quads it dominates assumed weight 1.0; on TR's 41,164 quads the dominant
+texture's mean weight is 0.685 (median 0.665, p10 0.43), because the export
+paints alpha ramps at every patch boundary and a quad averages 2.2 alpha
+layers, so roughly a third of the intended clumps never planted.
+`_quadrant_weights` gives each ALPHA layer its mean opacity and the BASE what
+they leave uncovered, `GrassTally.area` sums those per texture, and the grid
+is `floor(2048 / PositionRange)` per side as the planter lays it (14 at the
+140 clamp, not 14.6).
+
+**A pairing whose density rounds to 0 is dropped, not planted at 1.** The
+Density byte cannot express less than 1% of 196 candidates per quad, so the
+old `max(1, ...)` floor planted 36 sparse pairings at 2-28x their authored
+count (one texture at 28.8x). Those 36 carry 0.49% of all clumps; dropping
+them costs that and nothing else. Re-measured with the planter's own formula
+(`area x floor(n)^2 x Density/100` summed over a texture's grasses, against
+its authored clumps): median 1.00 across 172 textures, range 0.58-1.60 from
+integer rounding on the sparsest pairings. 494 GRAS records. NOT yet
+in-game verified.
 
 The planter is the one measured in
 [grass placement parity](asset_convert_terrain.md#grass-placement-parity): per

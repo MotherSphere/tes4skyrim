@@ -34,7 +34,8 @@ from pathlib import Path
 import numpy as np
 
 from asset_convert.game_paths import win_join
-from tes5_import.base.tes5_reader import records
+from output_layout import plugin_out_root
+from tes5_import.base.tes5_reader import masters, records
 
 # 4096 game units per cell; landscape diffuse repeats every 2 cells in Skyrim.
 # Oblivion authored the same, so one .dds spans a 2x2 cell region at UV [0,1].
@@ -73,47 +74,89 @@ def default_land_texture() -> str:
 _LTEX_MAP_CACHE: dict = {}
 
 
-def build_ltex_texture_map(esm_path: Path) -> dict:
-    """Return {LTEX FormID(int) -> {'diffuse': path, 'normal': path}}.
+def _ltex_tables(esm_path: Path) -> tuple:
+    """One plugin's ({LTEX -> TNAM}, {TXST -> (TX00, TX01)}), load-order keyed.
 
-    Paths are relative to the Data folder (e.g. 'tes4\\landscape\\foo.dds').
-    Resolved via LTEX.TNAM -> TXST.TX00/TX01.
-
-    Memoised per file. A COPY is returned every call: `generate_terrain_lod`
-    merges overlays with `ltex_map.update(...)`, which would otherwise write the
-    overlay's entries into the cached master map and leak them into every later
-    worldspace.
+    Every id is re-stamped through `formid_remap_table`, so a LAND layer, an
+    LTEX and the TXST it names compare across files. Memoised per file.
     """
+    from asset_convert.lod.esm_scan import formid_remap_table
     esm_path = Path(esm_path)
     try:
         st = esm_path.stat()
         key = (str(esm_path).lower(), st.st_mtime_ns, st.st_size)
     except OSError:
         key = None
-    if key is not None:
-        hit = _LTEX_MAP_CACHE.get(key)
-        if hit is not None:
-            # Shallow copy: the inner dicts are never mutated, only replaced.
-            return dict(hit)
+    hit = None if key is None else _LTEX_MAP_CACHE.get(key)
+    if hit is not None:
+        return hit
 
-    raw = esm_path.read_bytes()
+    gmap = formid_remap_table(esm_path)
+
+    def g(fid):
+        """This file's id re-stamped with its global index byte."""
+        return gmap[fid >> 24] | (fid & 0x00FFFFFF)
+
     txst = {}
     ltex_tnam = {}
-    for rec in records(raw, b'TXST', b'LTEX'):
+    for rec in records(esm_path.read_bytes(), b'TXST', b'LTEX'):
         if rec.sig == b'TXST':
-            txst[rec.form_id] = (rec.string(b'TX00'), rec.string(b'TX01'))
+            txst[g(rec.form_id)] = (rec.string(b'TX00'), rec.string(b'TX01'))
             continue
         tnam = rec.sub(b'TNAM')
         if tnam and len(tnam) >= 4:
-            ltex_tnam[rec.form_id] = struct.unpack_from('<I', tnam)[0]
+            ltex_tnam[g(rec.form_id)] = g(struct.unpack_from('<I', tnam)[0])
+    if key is not None:
+        _LTEX_MAP_CACHE[key] = (ltex_tnam, txst)
+    return ltex_tnam, txst
 
+
+def _with_masters(esm_paths) -> list:
+    """The listed plugins, each preceded by its converted masters, in order.
+
+    A converted master sits at `output/<plugin>/<plugin>`; one that was never
+    converted (Skyrim.esm) is skipped. Morroblivion's terrain names Oblivion's
+    own land textures, which only Oblivion.esm's records resolve.
+    """
+    out = []
+    for path in esm_paths:
+        path = Path(path)
+        out_root = path.parent.parent
+        export_dir = out_root.parent / 'export'
+        for name in masters(path.read_bytes()):
+            master = plugin_out_root(
+                out_root, name, export_dir if export_dir.is_dir() else None
+            ) / name
+            if master.is_file() and master not in out:
+                out.append(master)
+        if path not in out:
+            out.append(path)
+    return out
+
+
+def build_ltex_texture_map(esm_paths) -> dict:
+    """Return {LTEX FormID(int) -> {'diffuse': path, 'normal': path}}.
+
+    `esm_paths` is one plugin or the owner followed by its overlays in load
+    order; each file's converted masters are read ahead of it. Keys are
+    load-order-normalized ids, and TNAM resolves against the TXST records of
+    EVERY file read: an override plugin re-emits an LTEX
+    whose texture set lives in the master, so resolving per file left the
+    override with an empty diffuse that composited grey.
+    See: docs/commentary/asset_convert_terrain.md#terrain-lod-texture-lookup
+    """
+    if isinstance(esm_paths, (str, Path)):
+        esm_paths = [esm_paths]
+    ltex_tnam = {}
+    txst = {}
+    for path in _with_masters(esm_paths):
+        own_ltex, own_txst = _ltex_tables(path)
+        ltex_tnam.update(own_ltex)
+        txst.update(own_txst)
     out = {}
     for lfid, tfid in ltex_tnam.items():
         tx00, tx01 = txst.get(tfid, ('', ''))
         out[lfid] = {'diffuse': tx00, 'normal': tx01}
-    if key is not None:
-        _LTEX_MAP_CACHE[key] = out
-        return dict(out)
     return out
 
 
@@ -121,8 +164,32 @@ def build_ltex_texture_map(esm_path: Path) -> dict:
 # LAND layer decode (from output-ESM binary body)
 # ---------------------------------------------------------------------------
 
-def decode_land_layers(body: bytes) -> dict:
+def _fill_vtxt(grid: np.ndarray, val: bytes) -> None:
+    """Write one VTXT run of (position:u16, unused:u16, opacity:f32) into `grid`.
+
+    A structured dtype reads the whole array at once: the per-entry unpack it
+    replaces was the hottest thing in the LAND parse, 14.7M calls across
+    Tamriel's 14,686 records. Later entries win, as sequential assignment did.
+    """
+    cnt = len(val) // 8
+    if not cnt:
+        return
+    rec = np.frombuffer(val, count=cnt, dtype=np.dtype(
+        [('pos', '<u2'), ('u', '<u2'), ('op', '<f4')]))
+    pos = rec['pos']
+    keep = pos < QUAD_VERTS * QUAD_VERTS
+    ops = rec['op']
+    if not keep.all():
+        pos = pos[keep]
+        ops = ops[keep]
+    grid[pos // QUAD_VERTS, pos % QUAD_VERTS] = ops
+
+
+def decode_land_layers(body: bytes, remap=None) -> dict:
     """Decode BTXT/ATXT/VTXT into per-quadrant layer data.
+
+    `remap` re-stamps each LTEX id into load-order space, matching the keys
+    `build_ltex_texture_map` writes; None keeps the file's raw ids.
 
     Returns:
       {
@@ -144,36 +211,17 @@ def decode_land_layers(body: bytes) -> dict:
         val = body[p+6:p+6+sz]
         if tag == b'BTXT' and len(val) >= 6:
             tex, quad = struct.unpack_from('<IB', val)
-            base[quad] = tex
+            base[quad] = remap(tex) if remap else tex
             pending_atxt = None
         elif tag == b'ATXT' and len(val) >= 8:
             tex, quad, _unused, layer = struct.unpack_from('<IBBH', val)
+            tex = remap(tex) if remap else tex
             pending_atxt = (tex, quad)
             # opacity grid defaults to 0
             grid = np.zeros((QUAD_VERTS, QUAD_VERTS), dtype=np.float32)
             alpha.setdefault(quad, []).append((layer, tex, grid))
         elif tag == b'VTXT' and pending_atxt is not None:
-            tex, quad = pending_atxt
-            grid = alpha[quad][-1][2]
-            cnt = len(val) // 8
-            if cnt:
-                # VTXT is a packed array of (position:u16, unused:u16,
-                # opacity:f32).  The per-entry struct.unpack_from loop this
-                # replaces was the hottest thing in the whole LAND parse —
-                # 14.7M calls across Tamriel's 14,686 records, since a single
-                # layer can carry 17x17 = 289 entries per quadrant.
-                # A structured dtype reads the whole array in one go.
-                rec = np.frombuffer(val, count=cnt, dtype=np.dtype(
-                    [('pos', '<u2'), ('u', '<u2'), ('op', '<f4')]))
-                pos = rec['pos']
-                keep = pos < QUAD_VERTS * QUAD_VERTS
-                if not keep.all():
-                    pos = pos[keep]
-                    ops = rec['op'][keep]
-                else:
-                    ops = rec['op']
-                # Later entries win, exactly as the sequential assignment did.
-                grid[pos // QUAD_VERTS, pos % QUAD_VERTS] = ops
+            _fill_vtxt(alpha[pending_atxt[1]][-1][2], val)
             pending_atxt = None
         p += 6 + sz
 

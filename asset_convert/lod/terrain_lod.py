@@ -579,7 +579,7 @@ def scan_land_file(esm_path: Path, worldspace_edid: str,
             cell = stack.cell
             coords = cell_coords.get(None if cell is None else g(cell))
             if coords is not None:
-                _take_land(rec, coords, lands, count_only, allow_unscoped)
+                _take_land(rec, coords, lands, count_only, allow_unscoped, g)
 
 
 def _take_cell(rec, fid: int, cell_coords: dict, cell_water) -> None:
@@ -615,28 +615,29 @@ def _take_cell(rec, fid: int, cell_coords: dict, cell_water) -> None:
 
 
 def _take_land(rec, coords, lands: dict, count_only: bool,
-               allow_unscoped: bool) -> None:
+               allow_unscoped: bool, remap) -> None:
     """Decode one LAND into `lands`, or erase the cell it deletes.
 
     An OVERLAY's LAND with no VHGT is the author DELETING that cell's terrain;
     skipping it left the MASTER's heightmap in the dict, so distant terrain
     kept rendering ground the plugin removed.  That fires for overlays only.
     With `count_only` the VHGT presence check keeps the count matching what a
-    real parse would store.
+    real parse would store. `remap` re-stamps the layer LTEX ids into
+    load-order space.
     """
     if count_only:
         if rec.sub(b'VHGT') is not None:
             lands[coords] = True
         return
-    land = _decode_land(rec.body, lambda b, t: rec.sub(t.encode()))
+    land = _decode_land(rec.body, lambda b, t: rec.sub(t.encode()), remap)
     if land is not None:
         lands[coords] = land
     elif not allow_unscoped:
         lands.pop(coords, None)
 
 
-def _decode_land(body, _sub):
-    """Decode VHGT → heights (33×33), VCLR → colors (33×33,3)."""
+def _decode_land(body, _sub, remap=None):
+    """Decode VHGT → heights (33×33), VCLR → colors (33×33,3), layers."""
     vhgt = _sub(body, 'VHGT')
     if vhgt is None or len(vhgt) < 4 + VERTS_SIDE * VERTS_SIDE:
         return None
@@ -691,7 +692,7 @@ def _decode_land(body, _sub):
     # Full per-quadrant texture layer structure (BTXT/ATXT/VTXT) for the
     # diffuse compositor.  decode_land_layers takes the raw record body.
     from asset_convert.lod.terrain_lod_textures import decode_land_layers
-    layers = decode_land_layers(body)
+    layers = decode_land_layers(body, remap)
 
     return {'heights': heights, 'colors': colors, 'layers': layers}
 
@@ -1249,10 +1250,10 @@ def generate_terrain_lod(esm_path: Path, output_dir: Path,
                          its regraded terrain never reaches LOD.
         extra_texture_roots: Additional textures/ roots searched when a
                          landscape texture is not in this plugin's own output.
-                         An override plugin converts none of the master's
-                         landscape textures, so without the master's root here
-                         every diffuse lookup misses and the tiles composite
-                         to flat grey.
+                         Every converted tree belongs here, not only the
+                         masters': a masterless patch ships the textures TR's
+                         terrain names, and a miss composites flat grey.
+                         See: docs/commentary/asset_convert_terrain.md#terrain-lod-texture-lookup
         only_cells:      Restrict output to tiles COVERING these (x, y) cells.
                          An override plugin regenerates just the tiles its
                          edits touch; every other tile the master already
@@ -1301,12 +1302,8 @@ def generate_terrain_lod(esm_path: Path, output_dir: Path,
     # Overlays are merged on top so an LTEX the PLUGIN adds or re-points wins
     # over the master's, exactly like the LAND records above.
     from asset_convert.lod.terrain_lod_textures import build_ltex_texture_map
-    ltex_map = build_ltex_texture_map(esm_path)
-    for ov in (overlay_paths or []):
-        ltex_map.update(build_ltex_texture_map(Path(ov)))
-    # Texture lookup roots, searched in order: this plugin's own output first,
-    # then its masters'. The master's root is what makes an override plugin's
-    # tiles composite the REAL landscape instead of flat grey.
+    ltex_map = build_ltex_texture_map(
+        [esm_path] + [Path(ov) for ov in (overlay_paths or [])])
     tex_roots = [output_dir / 'textures']
     tex_roots += [Path(r) for r in (extra_texture_roots or [])]
     print(f"  Resolved {len(ltex_map)} LTEX landscape textures "

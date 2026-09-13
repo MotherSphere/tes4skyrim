@@ -54,6 +54,20 @@ def _supplier_asset_dirs(names, out_root, export_root, _out_root) -> list:
             if _out_root(out_root, n, export_root).is_dir()]
 
 
+def _all_plugin_dirs(out_root: Path, lod_dir: Path) -> list:
+    """Every converted output tree that ships textures, the LOD mod excluded.
+
+    Texture lookup must not follow the dependency chain: a masterless patch
+    ships the land textures another plugin's terrain names, and the owner's
+    own MASTER ships the shared flat normal.
+    See: docs/commentary/asset_convert_terrain.md#terrain-lod-texture-lookup
+    """
+    return sorted(
+        d for d in Path(out_root).iterdir()
+        if d.is_dir() and d != lod_dir
+        and any((d / n).is_dir() for n in ('textures', 'Textures')))
+
+
 def _supplier_overlay_dirs(names, out_root, export_root, _out_root,
                            record_dir) -> list:
     """Overlay-manifest dirs, index-aligned with `_supplier_asset_dirs`."""
@@ -155,6 +169,7 @@ def _bake_worldspace(job, ctx) -> bool:
 
     asset_dirs = ctx['supplier_asset_dirs']([owner] + suppliers)
     overlay_dirs = ctx['supplier_overlay_dirs']([owner] + suppliers)
+    texture_dirs = _all_plugin_dirs(out_root, lod_dir)
 
     cloud_rel = ctx['merge_cloud_bank'](out_root, lod_dir, edid, owner,
                                         contributors, export_root)
@@ -168,7 +183,7 @@ def _bake_worldspace(job, ctx) -> bool:
         worldspace_edid=edid,
         master_dirs=None,
         master_mesh_dirs=asset_dirs,
-        master_texture_dirs=asset_dirs,
+        master_texture_dirs=texture_dirs,
         overlay_paths=overlays,
         only_cells=None,
         far_nif_dirs=asset_dirs,
@@ -183,7 +198,7 @@ def _bake_worldspace(job, ctx) -> bool:
         overlay_paths=overlays,
         only_cells=None,
         extra_texture_roots=[ctx['lod_textures_root'](Path(d))
-                             for d in asset_dirs],
+                             for d in texture_dirs],
     )
     print()
     return bool(ok and ok_terrain)
