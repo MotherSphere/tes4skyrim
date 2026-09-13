@@ -54,12 +54,6 @@ def _supplier_asset_dirs(names, out_root, export_root, _out_root) -> list:
             if _out_root(out_root, n, export_root).is_dir()]
 
 
-def _supplier_overlay_dirs(names, export_root, record_dir) -> list:
-    """Each plugin's detail-overlay diffuse manifest dir, beside its meshes."""
-    return [assets_for(record_dir(export_root, n)) for n in names
-            if record_dir(export_root, n).is_dir()]
-
-
 def _plan_jobs(wanted, owners, plugins, touched, out_root, export_root,
                _out_root, master_chain, _worldspace_fid) -> list:
     """One (edid, owner, esm, overlays, contributors, suppliers) job per world.
@@ -153,7 +147,6 @@ def _bake_worldspace(job, ctx) -> bool:
         print(f"  Cleared {stale} tile(s) from a previous run")
 
     asset_dirs = ctx['supplier_asset_dirs']([owner] + suppliers)
-    overlay_dirs = ctx['supplier_overlay_dirs']([owner] + suppliers)
 
     cloud_rel = ctx['merge_cloud_bank'](out_root, lod_dir, edid, owner,
                                         contributors, export_root)
@@ -171,7 +164,6 @@ def _bake_worldspace(job, ctx) -> bool:
         overlay_paths=overlays,
         only_cells=None,
         far_nif_dirs=asset_dirs,
-        overlay_manifest_dirs=overlay_dirs,
     )
 
     print("  Generating terrain LOD...")
@@ -359,8 +351,6 @@ def main() -> int:
         'lod_textures_root': _lod_textures_root,
         'supplier_asset_dirs': lambda names: _supplier_asset_dirs(
             names, out_root, export_root, _out_root),
-        'supplier_overlay_dirs': lambda names: _supplier_overlay_dirs(
-            names, export_root, record_dir),
     }
     ok_all = True
     for job in jobs:

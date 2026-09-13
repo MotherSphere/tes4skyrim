@@ -19,7 +19,8 @@ import os
 import shutil
 from pathlib import Path
 
-from asset_convert.game_paths import namespace_for, set_namespace
+from asset_convert.game_paths import (namespace_for, owns_namespace,
+                                       set_namespace)
 from asset_convert.sources import bsa_extract
 from asset_convert.nif import grass_profile
 from asset_convert.character import hair_pipeline
@@ -222,17 +223,6 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
         if mesh_subdirs:
             _used = set(_used) | texture_prune.read_manifest(mesh_manifest_dir)
         texture_prune.write_manifest(mesh_manifest_dir, _used)
-
-        # Which of those the source authored as detail overlays (alpha = blend
-        # weight).  Object LOD reads diffuse alpha as opacity, so the LOD stage
-        # ships opaque copies of exactly these; see
-        # texture_prune.OVERLAY_MANIFEST_NAME.
-        _overlays = stats['mesh_conversion'].pop('overlay_diffuses', set())
-        if mesh_subdirs:
-            _overlays = set(_overlays) | texture_prune.read_manifest(
-                mesh_manifest_dir, texture_prune.OVERLAY_MANIFEST_NAME)
-        texture_prune.write_manifest(mesh_manifest_dir, _overlays,
-                                     texture_prune.OVERLAY_MANIFEST_NAME)
     else:
         print(f"  No meshes found at {mesh_src}")
         stats['mesh_conversion'] = {'converted': 0, 'skipped': 0, 'errors': 0}
@@ -255,18 +245,19 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("Copy Textures to Output")
     print("=" * 60)
 
-    _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats)
+    _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats, rec_dir)
     return stats
 
 
-def _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats):
+def _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats, rec_dir):
     """Copy the texture tree, then repair what Skyrim reads differently.
 
     L8 glow maps become BGRA (Skyrim samples slot 2 as plain RGB, so an L8
     glow renders pure red), DXT1 landscape normals gain a real alpha mask,
-    and a diffuse whose alpha became a `_p` height map drops to DXT1. Every
-    pass runs AFTER the copy, so a re-copy cannot resurrect the originals and
-    re-running is a no-op.
+    and a diffuse whose alpha became a `_p` height map drops to DXT1. Only the
+    namespace's ROOT plugin writes the shared `default_n.dds`. Every pass runs
+    AFTER the copy, so a re-copy cannot resurrect the originals and re-running
+    is a no-op.
     See: docs/commentary/asset_convert_texture.md#landscape-normal-maps-dxt1-shiny
     """
     from asset_convert.texture import parallax as _parallax
@@ -288,7 +279,8 @@ def _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats):
 
     n_checked, n_fixed, n_kinds = landscape_normals.normalize_specular_alpha(
         tex_dst, skip=(os.sep + 'landscape' + os.sep,))
-    landscape_normals.write_default_normal(tex_dst.parent)
+    if owns_namespace(rec_dir):
+        landscape_normals.write_default_normal(tex_dst.parent)
     stats['spec_alpha_fixed'] = n_fixed
     print(f"  Specular masks: {n_checked} normal maps checked, {n_fixed} "
           f"given a constant mask "

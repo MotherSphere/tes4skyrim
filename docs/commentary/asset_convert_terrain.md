@@ -12,6 +12,8 @@
 - [Prescreening the LODGen input](#prescreening-the-lodgen-input)
 - [`write_lodgen_input`: master modes and `only_cells`](#write-lodgen-input-master-modes)
 - [Terrain LOD invents ground over cells that own no LAND](#lod-invents-terrain-over-cells-with-no-land)
+- [GENERATED `_far.nif` belong to the LOD mod](#generated-far-nif-belong-to-the-lod-mod)
+  - [Why one LOD folder, not one per plugin](#one-lod-folder-not-one-per-plugin)
 
 ## Grass (GRAS) conversion — record invariants + shader profile (2026-07-09)
 <a id="grass-conversion-record-invariants-shader"></a>
@@ -498,10 +500,33 @@ separate plugin, and stem-matching correctly excludes it.
 
 ## <a id="generated-far-nif-belong-to-the-lod-mod"></a>GENERATED `_far.nif` belong to the LOD mod
 
-**Code:** `generate_missing_far_nifs` (`gen_meshes_dir`), `lod_gen.generate_lod`
+**Code:** `generate_missing_far_nifs` (`gen_meshes_dir`), `lod_gen.generate_lod`,
+`LOD_DIR_NAME` in `asset_convert/lod/sibling_lod.py`
 
 A derived `_far.nif` is a bake-time intermediate, not a shipped asset, so it is
 written into `output/AutoConvertLOD/meshes/` rather than the plugin's tree.
+
+### Why one LOD folder, not one per plugin
+<a id="one-lod-folder-not-one-per-plugin"></a>
+
+A LOD tile is a file on a fixed grid keyed only by worldspace and coordinate,
+so every plugin editing a worldspace produces the SAME tile paths. Per-plugin
+output therefore meant rival copies of one file, with the mod manager's install
+order silently picking a winner. Generating once for the whole load order leaves
+exactly one copy of each tile: no overwrite to win, and no merge pass to
+reconcile it afterwards.
+
+What lives in `AutoConvertLOD` is what belongs to the whole load order —
+LODSettings, the baked `.btr`/`.bto`/`.dds` tiles, and every GENERATED
+`_far.nif`. An AUTHORED `_far.nif` is the plugin's own art and stays with it.
+`ZZZ Merged Sibling LOD` is the previous merged-tile folder, recognised only so
+an existing install can be cleaned up; nothing writes there any more.
+
+A plugin's own TEXTURES never belong here either. They were shadowed into this
+tree to flatten detail-overlay alpha, which cost 401.6 MB of mipless
+uncompressed DDS and put 192 paths in two mods at once; that fix has been
+removed entirely. See
+[asset_convert_shader.md](asset_convert_shader.md#detail-overlay-diffuses).
 
 Measured before the change. Scanning 28,828 non-`_far` files (meshes, `.bto`
 tiles, records) across FalloutNV, Oblivion and AutoConvertLOD for any reference

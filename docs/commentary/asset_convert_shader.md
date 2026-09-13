@@ -573,17 +573,35 @@ decided. That diffuse must keep its alpha and may not be stripped to BC1 later.
 Measured on the author's Nehrim parallax mod: **1** shape of **39,201**, but the
 converter runs on plugins nobody has measured.
 
-### <a id="detail-overlay-diffuses"></a>Detail-overlay diffuses, recorded for LOD
+### <a id="detail-overlay-diffuses"></a>Detail-overlay diffuses: REMOVED, and why
 
-A `HILIGHT2` diffuse is recorded as a DETAIL OVERLAY when the source authored it
-that way. This is not about the `NiAlphaProperty` — most overlay shapes ship none
-(`RockGreatForest645`) — it is about the TEXTURE, whose alpha is a blend weight
-rather than a mask.
+A `HILIGHT2` diffuse's alpha is a blend weight rather than a mask. Harmless in
+the full mesh, since nothing samples that channel as transparency — but object
+LOD does: LODGen stamps every baked shape `slsf_2_lod_objects` and the LOD
+shader reads diffuse alpha as opacity, so `RockGreatForest645` was solid up
+close and see-through at distance.
 
-Harmless in the full mesh, since nothing samples that channel as transparency.
-But object LOD does: LODGen stamps every baked shape `slsf_2_lod_objects` and the
-LOD shader reads diffuse alpha as opacity. The LOD stage flattens the alpha on a
-LOD-local copy of exactly these textures — see `lod_gen._force_opaque_lod_diffuses`.
+The fix was `lod_gen._force_opaque_lod_diffuses`: mesh conversion recorded every
+HILIGHT2 diffuse to `export/<plugin>/overlay_diffuses.txt`, and the LOD stage
+wrote an alpha-flattened COPY into `output/AutoConvertLOD/`'s texture tree at
+the same relative path, relying on install order to shadow the plugin's file.
+
+**All of it is gone.** The copies were written with
+`Image.fromarray(...).save(format='DDS')` — uncompressed 32bpp with NO mipmap
+chain. Measured on a full build: 200 files, **401.6 MB** (~100 MB as DXT5), all
+200 mipless, and since the copy shadowed the original it was also the one the
+game sampled at distance. It additionally put 192 plugin-owned texture paths
+inside the LOD mod, where `drop_staged_meshes` — which sweeps only `meshes/` —
+never reclaimed them.
+
+The record chain (`_record_overlay`, the `overlay_diffuses` stats key,
+`texture_prune.OVERLAY_MANIFEST_NAME`) was deleted with it: nothing else ever
+read the manifest, so it had become write-only.
+
+Object LOD therefore renders these overlays with their authored alpha again.
+If the see-through-at-distance symptom returns, fix it in the PLUGIN's own
+texture — `parallax.strip_diffuse_alpha` already re-containers DXT3/5 as DXT1
+losslessly and keeps every mip — never in a second shadowing copy.
 
 The key is the CONVERTED path (post-`tes4\` rewrite), because that is what the
 shipped mesh — and therefore the baked `.bto` tile — actually references.

@@ -51,7 +51,6 @@ SHARED_CACHES = (
     # per-plugin leftovers stranded them in a record folder the prune step
     # never reads, so every texture looked unreferenced.
     'textures_used.txt',
-    'overlay_diffuses.txt',
 )
 
 

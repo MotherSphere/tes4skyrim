@@ -60,14 +60,6 @@ _LATE_ASSET_SUFFIXES = ('.nif', '.bto', '.btr')
 # never installed.
 MANIFEST_NAME = 'textures_used.txt'
 
-# Of the textures above, the ones the SOURCE authored as APPLY_HILIGHT2 detail
-# overlays, where the diffuse alpha is a per-texel blend weight rather than a
-# transparency mask.  Object LOD reads that channel as opacity, so the LOD
-# stage needs to know which textures they are; it cannot tell from the
-# converted mesh, because the apply mode is a TES4 concept with no Skyrim
-# equivalent and most of these shapes carry no NiAlphaProperty to give it away.
-OVERLAY_MANIFEST_NAME = 'overlay_diffuses.txt'
-
 
 def write_manifest(export_dir, refs, name: str = MANIFEST_NAME) -> Path:
     """Record a set of texture keys for a later phase to read back."""

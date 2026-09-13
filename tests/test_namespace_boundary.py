@@ -12,8 +12,9 @@ import sys
 
 import pytest
 
-from asset_convert.game_paths import (NAMESPACE_ENV, current_namespace,
-                                      set_namespace)
+from asset_convert.game_paths import (DEFAULT_NAMESPACE, NAMESPACE_ENV,
+                                      current_namespace, namespace_for,
+                                      owns_namespace, set_namespace)
 
 #: Helpers the once-broken pools reach, as (import path, attribute, call).
 PROBES = (
@@ -76,3 +77,42 @@ class TestNamespaceCrossesSpawn:
         assert got['namespace'] == 'tes4'
         assert got['script_prefix'] == 'TES4_'
         assert got['anim_prefix'] == 'Animations\\TES4Guns\\'
+
+
+def _plugin(root, name, masters=()):
+    """An export dir for `name` whose _HEADER.txt lists `masters`."""
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / '_HEADER.txt').write_text(
+        ''.join(f'Master[{i}]={m}\n' for i, m in enumerate(masters)),
+        encoding='utf-8')
+    return d
+
+
+class TestNamespaceOwnership:
+    """Exactly one plugin per namespace writes that namespace's shared files.
+
+    `default_n.dds` sits at a namespace-relative path, so writing it per plugin
+    wrote one file once per plugin sharing the namespace.
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+
+    def test_the_chain_root_owns_its_namespace(self, tmp_path):
+        """A masterless plugin named for its namespace writes the shared files."""
+        assert owns_namespace(_plugin(tmp_path, 'Nehrim.esm'))
+
+    def test_oblivion_owns_tes4(self, tmp_path):
+        """Oblivion roots `tes4` even though the name is not its stem."""
+        assert owns_namespace(_plugin(tmp_path, 'Oblivion.esm'))
+
+    def test_a_dependent_does_not(self, tmp_path):
+        """A plugin BORROWING the namespace must not write into it."""
+        _plugin(tmp_path, 'Oblivion.esm')
+        assert not owns_namespace(
+            _plugin(tmp_path, 'Knights.esp', ['Oblivion.esm']))
+
+    def test_a_companion_root_does_not(self, tmp_path):
+        """A COMPANION_ROOTS plugin is masterless but only JOINS tes4."""
+        d = _plugin(tmp_path, 'Morrowind-Morroblivion-Compatibility.esp')
+        assert namespace_for(d) == DEFAULT_NAMESPACE
+        assert not owns_namespace(d)

@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 
 __all__ = ["win_join", "DEFAULT_NAMESPACE", "namespace_for",
-           "set_namespace", "current_namespace"]
+           "set_namespace", "current_namespace", "owns_namespace"]
 
 #: Namespace for Oblivion and everything mastered on it, and the fallback.
 DEFAULT_NAMESPACE = 'tes4'
@@ -75,6 +75,20 @@ def namespace_for(export_dir) -> str:
     if not stem or stem.startswith('oblivion') or stem in COMPANION_ROOTS:
         return DEFAULT_NAMESPACE
     return ''.join(c for c in stem if c.isalnum()) or DEFAULT_NAMESPACE
+
+
+def owns_namespace(export_dir) -> bool:
+    """True when this plugin roots the master chain its namespace is named for.
+
+    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    """
+    export_dir = Path(export_dir)
+    root = _chain_root(export_dir)
+    if root is not None and root.name.lower() != export_dir.name.lower():
+        return False
+    stem = Path(export_dir.name).stem.lower()
+    return namespace_for(export_dir) != DEFAULT_NAMESPACE \
+        or stem.startswith('oblivion')
 
 
 def set_namespace(ns: str) -> None:

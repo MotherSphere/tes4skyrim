@@ -419,7 +419,7 @@ def test_the_two_output_scanners_agree(tmp_path):
 
 
 def test_texture_manifests_live_beside_the_meshes_they_describe(tmp_path):
-    """`textures_used.txt` / `overlay_diffuses.txt` are ASSET-scoped.
+    """`textures_used.txt` is ASSET-scoped.
 
     They list textures the SHARED meshes reference, and asset_pipeline writes
     them beside those meshes. Treating them as per-plugin records stranded them
@@ -450,7 +450,6 @@ def test_migration_treats_texture_manifests_as_shared():
     import tools.esm.migrate_group_layout as mig
 
     assert 'textures_used.txt' in mig.SHARED_CACHES
-    assert 'overlay_diffuses.txt' in mig.SHARED_CACHES
 
 
 def test_one_mod_one_zip_named_for_the_mod(tmp_path):

@@ -60,23 +60,10 @@ def _out_root(out_root, plugin: str, export_root=None) -> Path:
         return Path(out_root) / plugin
 
 
-# The standalone mod ALL generated LOD ships in.
-#
-# One folder, not one per plugin, because a LOD tile is a file on a fixed grid
-# keyed only by worldspace and coordinate: every plugin editing a worldspace
-# produces the SAME tile paths, so per-plugin output meant rival copies of one
-# file and the mod manager's install order silently picked a winner. Generating
-# once for the whole load order leaves exactly one copy of each tile, so there
-# is no overwrite to win and no merge pass to reconcile it afterwards.
-#
-# What lives here is what belongs to the whole load order: LODSettings and the
-# baked .btr/.bto/.dds tiles. Derived _far.nif meshes do NOT — they are ordinary
-# converted meshes and stay in the plugin that ships the full model they came
-# from (see lod_gen.generate_lod's `far_nif_dirs`).
+#: Mod ALL generated LOD ships in. See: docs/commentary/asset_convert_terrain.md#one-lod-folder-not-one-per-plugin
 LOD_DIR_NAME = "AutoConvertLOD"
 
-# The previous merged-tile folder. Kept only so an existing install can be
-# recognised and cleaned up; nothing writes here any more.
+#: Superseded merged-tile folder, recognised only to clean up an old install.
 MERGED_DIR_NAME = "ZZZ Merged Sibling LOD"
 
 
