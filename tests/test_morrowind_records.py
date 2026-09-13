@@ -542,7 +542,8 @@ def test_exterior_teleport_doors_move_to_the_worldspace_persistent_cell():
         assert parent not in ctx.exterior_cell_ids,             'no persistent reference may stay in an exterior grid cell'
 
     homed = [lines for _, lines in out['REFR']
-             if _value(lines, 'ParentCELL') == dummy_fid]
+             if _value(lines, 'ParentCELL') == dummy_fid
+             and 'MapMarker=1' not in lines]
     assert len(homed) == 1, 'the exterior teleport door moves out of the grid'
 
 def test_door_carries_the_flags_subrecord_tes5_requires():
