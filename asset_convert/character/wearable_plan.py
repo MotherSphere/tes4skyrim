@@ -43,6 +43,12 @@ MALE = 32
 #: Named as an AMMO model: hangs on the QUIVER node when its NIF carries no Prn.
 QUIVER = 64
 
+#: Morrowind WPDT type -> Prn, Oblivion's vocabulary. See: docs/commentary/asset_convert_armor.md#morrowind-weapons
+MORROWIND_WEAPON_PRN = {0: 'WeaponDagger', 1: 'WeaponSword', 2: 'BackWeapon',
+                        3: 'WeaponMace', 4: 'BackWeapon', 5: 'BackWeapon',
+                        6: 'BackWeapon', 7: 'WeaponAxe', 8: 'BackWeapon',
+                        9: 'BackWeapon', 10: 'BackWeapon', 11: 'WeaponDagger'}
+
 # TES4 BMDT biped bit -> the Skyrim body part the geometry belongs in.  This is
 # the plugin's OWN statement of what the item is, so it replaces guessing the
 # slot from the filename ('helm' in the stem) or from the geometry name.
@@ -144,6 +150,9 @@ def build_biped_flags(export_dir) -> dict:
 # the sub-map cannot collide with a real mesh entry.
 BIPED_FLAGS_KEY = '*biped_flags*'
 
+#: Key under which build_plan stashes the weapon Prn map; `_norm` can never emit it either.
+WEAPON_PRN_KEY = '*weapon_prn*'
+
 
 def biped_flags_for(plan: dict, src_path, meshes_root) -> int:
     """BMDT biped flags for a source NIF, or 0 when no record wears it.
@@ -178,10 +187,40 @@ def body_parts_for_flags(biped_flags: int) -> list:
     return out
 
 
+def build_weapon_prns(export_dir) -> dict:
+    """Mesh-relative NIF path -> the Prn a Morrowind weapon record gives it.
+
+    A 4.0.0.2 weapon carries no Prn; the WPDT type is the authored answer, and
+    a staff is the one keyword Oblivion's own refinement keeps.
+    See: docs/commentary/asset_convert_armor.md#morrowind-weapons
+    """
+    out = {}
+    for rec in iter_records(Path(export_dir) / 'WEAP.txt'):
+        model = rec.get('Model.MODL', '').strip()
+        kind = rec.get('MorrowindWeaponType', '').strip()
+        if not model or not kind.isdigit():
+            continue
+        prn = MORROWIND_WEAPON_PRN.get(int(kind))
+        if prn and 'staff' in os.path.basename(_norm(model)):
+            prn = 'WeaponStaff'
+        if prn:
+            out[_norm(model)] = prn
+    return out
+
+
 def _want_ammo(export_dir: Path, want):
     """Flag every AMMO record's model as a QUIVER attachment."""
     for rec in iter_records(export_dir / 'AMMO.txt'):
         want(rec.get('Model.MODL', ''), QUIVER | BASE)
+
+
+def _inherit(plan: dict, inherited: dict) -> None:
+    """Lay a base's plan under `plan`; the nested maps merge instead of replacing."""
+    for k, v in inherited.items():
+        if k in (BIPED_FLAGS_KEY, WEAPON_PRN_KEY):
+            plan.setdefault(k, {}).update(v)
+        else:
+            plan[k] = v
 
 
 def build_plan(export_dir, _seen=None) -> dict:
@@ -214,14 +253,7 @@ def build_plan(export_dir, _seen=None) -> dict:
     for base in base_plugins.export_dirs(export_dir):
         if Path(base).resolve() in _seen:
             continue
-        inherited = build_plan(base, _seen)
-        # BIPED_FLAGS_KEY holds a nested map, so a plain update() would drop
-        # the base's flags wholesale instead of merging them.
-        for k, v in inherited.items():
-            if k == BIPED_FLAGS_KEY:
-                plan.setdefault(k, {}).update(v)
-            else:
-                plan[k] = v
+        _inherit(plan, build_plan(base, _seen))
 
     def want(path: str, flags: int):
         if path:
@@ -263,6 +295,7 @@ def build_plan(export_dir, _seen=None) -> dict:
     # (see the base_plugins loop above) and this tree's own must win
     # per entry rather than replacing the map wholesale.
     plan.setdefault(BIPED_FLAGS_KEY, {}).update(build_biped_flags(export_dir))
+    plan.setdefault(WEAPON_PRN_KEY, {}).update(build_weapon_prns(export_dir))
     return plan
 
 
@@ -279,12 +312,27 @@ def variants_for(plan: dict, src_path, meshes_root) -> int:
     return plan.get(_norm(rel), BASE)
 
 
-_LATCH = [0]
+_LATCH = [0, None]
 
 
 def latch_variants(plan: dict, src_path, meshes_root):
-    """Record the plugin's variant flags for the NIF about to convert."""
+    """Record the plugin's variant flags and weapon Prn for the NIF about to convert."""
     _LATCH[0] = variants_for(plan, src_path, meshes_root) if plan else 0
+    _LATCH[1] = weapon_prn_for(plan, src_path, meshes_root) if plan else None
+
+
+def weapon_prn_for(plan: dict, src_path, meshes_root):
+    """The Prn a weapon record gives this NIF, or None."""
+    try:
+        rel = os.path.relpath(str(src_path), str(meshes_root))
+    except ValueError:
+        return None
+    return plan.get(WEAPON_PRN_KEY, {}).get(_norm(rel))
+
+
+def mesh_weapon_prn():
+    """The Prn the plugin's WEAP record gives the NIF being converted, or None."""
+    return _LATCH[1]
 
 
 def mesh_is_female(src_path) -> bool:

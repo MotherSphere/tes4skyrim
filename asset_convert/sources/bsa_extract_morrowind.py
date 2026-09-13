@@ -67,22 +67,41 @@ def is_morrowind_bsa(bsa_path) -> bool:
             and struct.unpack('<I', head)[0] == TES3_BSA_MAGIC)
 
 
-def iter_bsa(bsa_path):
-    """Yield (filepath_str, data_bytes) for every file in a Morrowind BSA.
-
-    Matches the tuple shape the Oblivion reader yields, so extraction consumes
-    either without knowing which game the archive came from.
-    """
-    data = Path(bsa_path).read_bytes()
-    version, hash_offset, count = struct.unpack_from('<III', data, 0)
+def _tables(head: bytes, bsa_path) -> list:
+    """[(stored path, absolute start, size)] from the archive's leading bytes."""
+    version, hash_offset, count = struct.unpack_from('<III', head, 0)
     if version != TES3_BSA_MAGIC:
         raise ValueError(f'Not a Morrowind BSA: {bsa_path}')
-
-    names = _read_names(data, count)
+    names = _read_names(head, count)
     data_start = _HEADER_SIZE + hash_offset + count * 8
+    out = []
     for index, name in enumerate(names):
-        size, offset = struct.unpack_from('<II', data, _HEADER_SIZE + index * 8)
-        start = data_start + offset
+        size, offset = struct.unpack_from('<II', head, _HEADER_SIZE + index * 8)
+        out.append((name, data_start + offset, size))
+    return out
+
+
+def read_index(bsa_path) -> dict:
+    """{lower-case stored path: (absolute start, size)} without reading the data."""
+    with open(bsa_path, 'rb') as fh:
+        head = fh.read(_HEADER_SIZE)
+        hash_offset = struct.unpack_from('<I', head, 4)[0]
+        head += fh.read(hash_offset)
+    return {name.lower(): (start, size)
+            for name, start, size in _tables(head, bsa_path)}
+
+
+def read_entry(bsa_path, start: int, size: int) -> bytes:
+    """One file's bytes, located by `read_index`."""
+    with open(bsa_path, 'rb') as fh:
+        fh.seek(start)
+        return fh.read(size)
+
+
+def iter_bsa(bsa_path):
+    """Yield (filepath_str, data_bytes) for every file, as the Oblivion reader does."""
+    data = Path(bsa_path).read_bytes()
+    for name, start, size in _tables(data, bsa_path):
         yield name, data[start:start + size]
 
 

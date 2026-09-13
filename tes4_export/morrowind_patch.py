@@ -29,10 +29,13 @@ import os
 import time
 
 from asset_convert.sources.bsa_extract_morrowind import (is_morrowind_bsa,
+                                                         read_index,
                                                          iter_bsa)
 from asset_convert.sources.source_registry import asset_root
-from output_layout import DEFAULT_OUTPUT, plugin_esm, record_dir
+from output_layout import (DEFAULT_OUTPUT, plugin_esm, plugin_out_root,
+                           record_dir)
 
+from .morroblivion import MORROBLIVION_CREATURES, archive_path
 from .morrowind_ids import BASE_TYPES, IdIndex, load_index
 from .record_types.morrowind import as_dds
 from .tes3_reader import get_string, get_subrecord, read_file
@@ -117,7 +120,8 @@ def collect_gap_records(sources, index: IdIndex) -> dict:
     Judged against the same index a conversion resolves against. Earlier
     sources win, so Tribunal and Bloodmoon add only what Morrowind.esm lacks.
     Keyed by type as well as id because Morrowind's ids are unique only within
-    a type, so a bare-name key drops one of the pair.
+    a type, so a bare-name key drops one of the pair. A creature whose mesh
+    the Morroblivion table pairs is supplied whatever its id resolves to.
     See: docs/commentary/tes4_export_morrowind.md#per-type-id-namespaces
     """
     found = {}
@@ -127,11 +131,17 @@ def collect_gap_records(sources, index: IdIndex) -> dict:
         for rec in read_file(path)[1]:
             name = (rec.record_id or '').lower()
             key = (rec.type, name)
-            if rec.deleted or not name or key in found:
+            if rec.deleted or not name or key in found or _paired_creature(rec):
                 continue
             if rec.type in GAP_TYPES and index.lookup(rec.record_id) is None:
                 found[key] = rec
     return found
+
+
+def _paired_creature(rec) -> bool:
+    """Whether this CREA wears a vanilla mesh the Morroblivion table pairs."""
+    sub = get_subrecord(rec, 'MODL') if rec.type == 'CREA' else None
+    return sub is not None and archive_path(get_string(sub)) in MORROBLIVION_CREATURES
 
 
 def gap_assets(records) -> set:
@@ -144,9 +154,24 @@ def gap_assets(records) -> set:
     wanted = set()
     for rec in records:
         _add_asset(wanted, rec, 'MODL', 'meshes')
+        if rec.type == 'CREA':
+            _add_animation_pair(wanted, rec)
         if rec.type == 'LTEX':
             _add_asset(wanted, rec, 'DATA', 'textures', dds=True)
     return wanted
+
+
+def _add_animation_pair(wanted: set, rec) -> None:
+    """Add the `x<model>.nif`/`.kf` pair a creature's animations may live in."""
+    sub = get_subrecord(rec, 'MODL')
+    if sub is None:
+        return
+    path = get_string(sub).replace('/', chr(92)).strip().lower().lstrip(chr(92))
+    folder, name = os.path.split(path)
+    stem = os.path.splitext(name)[0]
+    for ext in ('.nif', '.kf'):
+        wanted.add('meshes' + chr(92) + chr(92).join(
+            p for p in (folder, 'x' + stem + ext) if p))
 
 
 def _add_asset(wanted: set, rec, sig: str, subtree: str,
@@ -194,13 +219,29 @@ def build_patch(data_dir: str, export_dir: str, morroblivion_exports,
         return {'ok': True, 'records': 0, 'assets': 0, 'output': '',
                 'plugin': '', 'seconds': time.time() - start}
 
+    assets = _extract_assets(gaps.values(), esms, data_dir, export_dir,
+                             progress)
     out_dir = _write_records(gaps, export_dir, progress)
-    assets = _extract_assets(gaps.values(), data_dir, export_dir, progress)
     _convert_assets(export_dir, out_root, progress)
+    _convert_creatures(export_dir, out_root, progress)
     plugin, error = _import_records(export_dir, out_root, progress)
     return {'ok': bool(plugin), 'records': len(gaps), 'assets': assets,
             'output': out_dir, 'plugin': plugin, 'error': error,
             'seconds': time.time() - start}
+
+
+def _convert_creatures(export_dir: str, out_root, progress) -> None:
+    """Convert the patch's creatures, so dependent plugins inherit their projects.
+
+    See: docs/commentary/tes4_export_morrowind.md#morroblivion-creatures
+    """
+    from asset_convert.havok.creature_pipeline import convert_creatures
+    rec_dir = str(record_dir(export_dir, PATCH_NAME))
+    out_meshes = str(plugin_out_root(out_root, PATCH_NAME, export_dir) / 'meshes')
+    progress('  Converting patch creatures')
+    result = convert_creatures(rec_dir, out_meshes, log=progress)
+    progress(f"  {len(result['projects'])} creature projects, "
+             f"{len(result['errors'])} errors")
 
 
 def _import_records(export_dir: str, out_root, progress) -> tuple:
@@ -266,6 +307,7 @@ def _write_records(gaps: dict, export_dir: str, progress) -> str:
 
     ids = {key: patch_formid(key) for key in gaps}
     ctx = MorrowindContext(own_index=0)
+    ctx.own_meshes = asset_root(export_dir, PATCH_NAME) / 'meshes'
     for key, rec in gaps.items():
         signature = tes4_signature(rec)
         ctx.register_own(rec.record_id, signature)
@@ -283,9 +325,40 @@ def _write_records(gaps: dict, export_dir: str, progress) -> str:
     return out_dir
 
 
-def _extract_assets(records, data_dir: str, export_dir: str,
+def orphan_meshes(sources, data_dir: str) -> set:
+    """Archive meshes no vanilla record names, as `meshes\\...` keys.
+
+    Morroblivion can replace only what a record names, so these are the
+    patch's to convert. `base_anim*` and a creature's `x<model>` animation
+    pair are not objects and stay out.
+    See: docs/commentary/tes4_export_morrowind.md#morroblivion-meshes
+    """
+    named = set()
+    for path in sources:
+        if not os.path.isfile(path):
+            continue
+        for rec in read_file(path)[1]:
+            _add_asset(named, rec, 'MODL', 'meshes')
+    stored = set()
+    for name in PATCH_ARCHIVES:
+        path = os.path.join(data_dir, name)
+        if os.path.isfile(path) and is_morrowind_bsa(path):
+            stored.update(k for k in read_index(path)
+                          if k.startswith('meshes' + chr(92)) and k.endswith('.nif'))
+    orphans = set()
+    for key in stored:
+        base = os.path.basename(key)
+        paired = key[:-len(base)] + base[1:]
+        if key in named or base.startswith('base_anim') \
+                or (base.startswith('x') and paired in stored):
+            continue
+        orphans.add(key)
+    return orphans
+
+
+def _extract_assets(records, sources, data_dir: str, export_dir: str,
                     progress) -> int:
-    """Extract the meshes the gap records name, plus EVERY vanilla texture.
+    """Extract the meshes the gap records name, the ownerless vanilla meshes, and EVERY texture.
 
     Meshes come per record; textures cannot, because third-party content
     references vanilla names from meshes that are not gap records. Both are
@@ -294,8 +367,8 @@ def _extract_assets(records, data_dir: str, export_dir: str,
     See: docs/commentary/tes4_export_morrowind.md#morroblivion-gap-patch
     """
     asset_dir = asset_root(export_dir, PATCH_NAME)
-    wanted = gap_assets(records)
-    progress(f'  {len(wanted)} meshes named; extracting those and all textures')
+    wanted = gap_assets(records) | orphan_meshes(sources, data_dir)
+    progress(f'  {len(wanted)} meshes wanted; extracting those and all textures')
     written = 0
     for name in PATCH_ARCHIVES:
         path = os.path.join(data_dir, name)

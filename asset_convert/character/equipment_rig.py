@@ -31,7 +31,7 @@ from asset_convert.character.prn_skin import (BODY_PART_FALLBACK_PRN_BONE,
 from asset_convert.character.skin_replacement import (apply_armor_offset,
                                                       collect_skin_info,
                                                       strip_body_skin_geometry)
-from asset_convert.character.wearable_plan import mesh_is_ammo
+from asset_convert.character.wearable_plan import mesh_is_ammo, mesh_weapon_prn
 from asset_convert.character.skin_retarget import (dominant_body_part,
                                                    regen_skin_partition,
                                                    retarget_skin_to_skyrim)
@@ -58,6 +58,7 @@ from asset_convert.collision.collision_constraints import (
     strip_marker_collision_bodies)
 from asset_convert.havok.hkx_skeleton import BONE_RENAMES
 from asset_convert.nif.inv_marker import compute_inv_rotation
+from asset_convert.nif.nif_converter_morrowind import is_morrowind
 from asset_convert.nif.nif_flags import NIF_FLAGS
 from asset_convert.nif.nif_passes import add_bsx_flags
 
@@ -81,6 +82,9 @@ _PRN_REMAP: dict[str, str] = {
     'Bip01 L ForearmTwist': 'SHIELD',
     'Bip01 Head': 'NPC Head [Head]',
 }
+
+#: The Prn a Morrowind-version shield takes; the assembler builds it in that frame.
+MORROWIND_SHIELD_PRN = 'Bip01 L ForearmTwist'
 
 #: Filename keyword -> Skyrim Prn, refining Oblivion's single 1H node.
 _WEAPON_FILENAME_PRN: list[tuple[str, str]] = [
@@ -303,18 +307,23 @@ def _add_prn(fade, value: str):
     fade.extra_data_list[fade.num_extra_data_list - 1] = new_prn
 
 
-def convert_prn(root, fade, src_path):
-    """Carry the authored Prn onto the new root, remapped to a Skyrim node;
-    an AMMO model without one hangs on QUIVER, unseated.
+def name_morrowind_shield(data) -> None:
+    """Name the Prn a 4.0.0.2 shield cannot carry, before the version upgrade."""
+    for root in data.roots:
+        if root is not None and _prn_value(root) is None:
+            _add_prn(root, MORROWIND_SHIELD_PRN)
 
-    Weapons, shields and torches also gain the BSInvMarker Skyrim needs to
-    resolve the equipped model. A TORCH also hangs off the SHIELD node but is
-    NOT a shield: it is authored at the grip in both games, so it must not get
-    the shield's attach transform.
+
+def convert_prn(root, fade, src_path):
+    """Carry the authored Prn onto the new root, remapped to a Skyrim node.
+
+    A Morrowind weapon takes the Prn its WEAP record gives it; an AMMO model
+    without one hangs on QUIVER, unseated. A torch shares the SHIELD node but
+    never the shield's attach transform.
     See: docs/commentary/asset_convert_armor.md#shield-attachment
     See: docs/commentary/asset_convert_falloutnv.md#ammo-prn
     """
-    prn_val = _prn_value(root)
+    prn_val = _prn_value(root) or mesh_weapon_prn()
     if prn_val is None:
         if mesh_is_ammo():
             _add_prn(fade, 'QUIVER')
@@ -445,6 +454,8 @@ def prepare_worn_armor(data, has_skin, is_shield, authored_bp, has_skin_fn):
     because skin_retarget composes it with the Skyrim bone position.
     See: docs/commentary/asset_convert_armor.md#rigid-prn-skinning
     """
+    if is_shield and is_morrowind(data):
+        name_morrowind_shield(data)
     if not has_skin and not is_shield:
         fallback = BODY_PART_FALLBACK_PRN_BONE.get(authored_bp)
         for root in data.roots:

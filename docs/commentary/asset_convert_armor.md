@@ -304,6 +304,87 @@ The bone name picks the biped slot; note that vanilla Skyrim puts **helmets on
 the HAIR slot (131)**, which is why a head or neck bone maps there rather than
 to a head slot.
 
+## Morrowind armor assembly
+<a id="morrowind-armor-assembly"></a>
+
+**Code:** `assemble_armor` in `asset_convert/character/morrowind_armor.py`,
+fed by `tes4_export/morrowind_armor.py`.
+
+A Morrowind wearable is several BODY meshes hung on named attach nodes of
+`base_anim.nif` (OpenMW `npcanimation.cpp` `sPartList`: slot 4 Groin, 19
+Right Knee, ...), where Skyrim wants one skinned mesh per ARMA. The export
+lists the parts on the record (`MorrowindPart[i]`), and the mesh stage builds
+the worn NIF the record names BEFORE the batch conversion, into the source
+tree at 4.0.0.2, shaped like the Oblivion armor the worn path already
+converts. Parts and both skeletons (`base_anim.nif`, `base_anim_female.nif`)
+resolve through the plugin's tree, its masters', then the Morrowind install
+([vanilla assets](tes4_export_morrowind.md#vanilla-assets)); a loose file in
+that install beats the archive, as in the engine, and the loose replacers in
+a modded install differ from the archive copies (root layout, skin skeleton
+root) -- measure on what the assembler actually read.
+
+The attach rules are OpenMW's `SceneUtil::attach`, reproduced per part:
+
+- **Rigid part** (every boot, greave, helm and knee piece): the whole file
+  hangs under the attach node; a `BoneOffset` node's translation offsets it,
+  and an attach node whose name holds `Left` mirrors it in X (Morrowind ships
+  ONE mesh for both sides), so the winding is reversed too. The vertices are
+  then stored as `add_prn_skin` leaves an Oblivion helmet: upright offsets
+  from the bone pivot (`v_world - pivot`), turned by the rotation that takes
+  the bone's rest direction (pivot to first bone child) onto the Skyrim
+  bone's, because Morrowind rests with the arms down where Skyrim's A-pose
+  does not. The first attempt stored bone-LOCAL vertices under the same
+  identity bind, and every piece floated: `_bake_shape_into_bone_frame`
+  composes the stored verts with the bone's TRANSLATION only. The one-bone
+  skin is a plain `NiSkinInstance` on a flat bone node under the root; a
+  `BSDismemberSkinInstance` with the head's slot 131 is a FO3 gore cap to
+  `hide_dismember_caps`, which runs before the worn path, and hid every helm.
+- **Skinned part** (cuirasses, shirts, robes): only the shapes whose name
+  starts with the attach node's name, case-insensitively and past a `Tri `
+  prefix, belong to that slot (`CopyRigVisitor::filterMatches`); the iron
+  cuirass file also carries both hands, which the gauntlet records take. The
+  part carries its own bind skeleton (T-posed, `Bip01` as the file root or a
+  child of an unnamed one, and the skin's `skeleton_root` may be an arm
+  bone). Bind-pose vertices come from the skinning contract itself
+  (`v @ G @ S @ B_i @ W_i`, blended), are moved bone by bone into Oblivion's
+  rest pose (`inv(part bone) @ oblivion bone`) and bound to the shared
+  `Bip01` tree, itself posed like Oblivion's rest and pruned to the bones
+  used, so the FK deltas and body wrap run exactly as on Oblivion armor.
+  Bone names match case-insensitively (`Bip01 R Upperarm` on a shirt).
+- **Shield**: geometry in the `Bip01 L Forearm` local frame. Measured on the
+  iron shields of both games, Morrowind's forearm frame carries the shield
+  exactly as Oblivion's `Bip01 L ForearmTwist` frame does (X along the arm,
+  boss at -Y, width on Z), so no roll is applied. A 4.0.0.2 extra data has no
+  name, so the assembler cannot write the `Prn`; `name_morrowind_shield`
+  (`equipment_rig`) names `Bip01 L ForearmTwist` on a Morrowind-version
+  shield before the version upgrade, and `shield_attach_transform` seats it
+  like an Oblivion shield (same inner-node transform, -20.5/0.34/8.72).
+
+Verified offline on iron boots, greaves, helmet, cuirass, left gauntlet,
+shield and tower shield plus common shirt, pants, shoes, skirt and robe: every
+converted rigid shape carries flags 14, its bone node at the Skyrim position
+and its record slot; the gauntlet's hand shapes span 7 units at the Skyrim
+hand; the cuirass torso sits at z 72-106 like Oblivion's. Not yet confirmed
+in game.
+
+## Morrowind weapons
+<a id="morrowind-weapons"></a>
+
+**Code:** `build_weapon_prns` (`wearable_plan.py`), `convert_prn`
+(`equipment_rig.py`).
+
+Measured on the iron longsword, iron dagger and long bow: Morrowind authors
+weapons in Oblivion's frame (grip at the origin, blade along +Y, a bow's
+string at -X), so a Morrowind weapon converts exactly like an Oblivion one
+once it carries the `Prn` a 4.0.0.2 NIF cannot. The WEAP record's WPDT type is
+the authored answer (`MorrowindWeaponType` in the export): short blades and
+thrown weapons hang on `WeaponDagger`, long blades on `WeaponSword`, one-hand
+blunt on `WeaponMace`, one-hand axes on `WeaponAxe`, and every two-hander and
+bow on Oblivion's `BackWeapon`, so the existing remap, axe flip, inventory
+marker and bow bend rig apply unchanged; a staff keeps `WeaponStaff` by
+name, as Oblivion's own refinement does. The wearable plan carries the Prn
+per mesh and `convert_prn` uses it only when the source root names none.
+
 ## Contents
 
 - [NIF worn armor conversion](#nif-worn-armor-conversion)

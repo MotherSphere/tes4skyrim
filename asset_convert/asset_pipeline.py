@@ -30,6 +30,7 @@ from asset_convert.collision import mesh_scan_fragments
 from asset_convert.nif import nif_batch
 from asset_convert.speedtree import spt_converter
 from asset_convert.texture import texture_prune
+from asset_convert.character.morrowind_armor import assemble_armor
 from asset_convert.character import wearable_plan
 
 
@@ -225,6 +226,7 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("NIF Mesh Conversion")
     print("=" * 60)
     mesh_src = asset_dir / 'meshes'
+    assemble_armor(rec_dir, mesh_src)
     if mesh_src.exists():
         stats['mesh_conversion'] = _convert_mesh_tree(
             mesh_src, plugin_dir / 'meshes' / ns, asset_dir, rec_dir,

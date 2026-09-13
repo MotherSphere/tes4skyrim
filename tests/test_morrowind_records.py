@@ -19,6 +19,7 @@ from tes4_export.record_types.morrowind import (export_ARMO, export_DOOR,
                                                 tes4_signature)
 from tes4_export.record_types.morrowind_actors import export_LEVI, export_NPC_
 from tes4_export.record_types.morrowind_scripts import export_SCPT
+from tes4_export.morroblivion import MorroblivionModels
 from tes4_export.morrowind_patch import PATCH_NAME, build_patch, patch_formid
 
 #: Struct layouts of the fixed subrecords the tests author.
@@ -258,6 +259,28 @@ def test_dependent_plugin_borrows_its_masters_records(tmp_path):
     assert ctx.unlinked_doors == 1,         'the master cell holds no door of ours to arrive beside'
 
 
+def test_wearable_names_its_body_parts():
+    """A slotted piece names a synthetic worn model and lists its BODY parts.
+
+    See: docs/commentary/tes4_export_morrowind.md#worn-models
+    """
+    ctx = MorrowindContext()
+    ctx.body_models = {'a_iron_cuirass': 'a' + chr(92) + 'A_Iron_skinned.NIF'}
+    aodt = struct.pack('<ifiiii', 1, 30.0, 100, 500, 0, 15)
+    cuirass = _rec('ARMO', 'iron cuirass', _sub('AODT', aodt),
+                   _sub('INDX', b'\x03'), _text('BNAM', 'a_iron_cuirass'))
+    lines = export_ARMO(cuirass, ctx)
+    assert _value(lines, 'Male.BipedModel.MODL') == (
+        'armor' + chr(92) * 2 + 'morrowind' + chr(92) * 2 + 'm'
+        + chr(92) * 2 + '0ironscuirass.nif')
+    assert 'MorrowindPartCount=1' in lines and 'MorrowindPart[0].Slot=3' in lines
+    assert 'Female.BipedModel.MODL' not in ''.join(lines)
+    pauldron = _rec('ARMO', 'iron pauldron', _sub('AODT', struct.pack(
+        '<ifiiii', 2, 5.0, 10, 100, 0, 5)), _sub('INDX', b'\x0d'),
+        _text('BNAM', 'a_iron_cuirass'))
+    assert not any(l.startswith('Male.BipedModel') for l in export_ARMO(pauldron, ctx))
+
+
 def test_ai_packages_become_pack_records():
     """Inline AI_* subrecords become listed PACKs; travel gets a marker.
 
@@ -284,7 +307,7 @@ def test_ai_packages_become_pack_records():
     assert _value(marker_lines, 'ParentCELL') == ctx.interior_cell_id('Hall')
 
 
-def test_creature_names_its_split_folder_and_sounds():
+def test_creature_names_its_split_folder_and_sounds(tmp_path):
     """A creature points at the split folder and carries its SNDG slots.
 
     See: docs/commentary/tes4_export_morrowind.md#creatures
@@ -295,6 +318,9 @@ def test_creature_names_its_split_folder_and_sounds():
     guar = _rec('CREA', 'guar', _text('MODL', 'r/Guar.NIF'),
                 _sub('FLAG', struct.pack('<I', 0)))
     ctx = MorrowindContext()
+    ctx.own_meshes = tmp_path / 'meshes'
+    (ctx.own_meshes / 'r').mkdir(parents=True)
+    (ctx.own_meshes / 'r' / 'Guar.NIF').write_bytes(b'')
     out = convert_plugin([roar, sndg, guar], ctx)
     lines = out['CREA'][0][1]
     assert _value(lines, 'Model.MODL') == 'r' + chr(92) * 2 + 'guar' + chr(92) * 2 + 'skeleton.nif'
@@ -302,6 +328,24 @@ def test_creature_names_its_split_folder_and_sounds():
     assert _value(lines, 'MorrowindModel') == 'r' + chr(92) * 2 + 'Guar.NIF'
     assert 'SoundType[0].Type=6' in lines
     assert _value(lines, 'SoundType[0].Sound') == ctx.resolve('guar roar')
+
+
+def test_creature_on_a_vanilla_mesh_binds_to_morroblivions(tmp_path):
+    """A vanilla mesh the plugin does not ship takes Morroblivion's model, unsplit.
+
+    See: docs/commentary/tes4_export_morrowind.md#morroblivion-creatures
+    """
+    ctx = MorrowindContext()
+    ctx.morroblivion = MorroblivionModels(str(tmp_path), [], str(tmp_path / 'none.esm'))
+    ctx.morroblivion.creatures = {'0kwamawarrior': (
+        'Morroblivion' + chr(92) + 'KwamaWarrior' + chr(92) + 'skeleton.nif', ['mesh.nif'])}
+    crea = _rec('CREA', 'kwama warrior', _text('MODL', 'r/kwama warior.nif'),
+                _sub('FLAG', struct.pack('<I', 0)))
+    lines = convert_plugin([crea], ctx)['CREA'][0][1]
+    assert _value(lines, 'Model.MODL') == (
+        'Morroblivion' + chr(92) * 2 + 'KwamaWarrior' + chr(92) * 2 + 'skeleton.nif')
+    assert 'NIFZ[0]=mesh.nif' in lines and not any(
+        l.startswith('MorrowindModel') for l in lines)
 
 
 def test_script_exports_its_source_and_attaches_by_scri():

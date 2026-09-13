@@ -205,7 +205,7 @@ def export_CREA(rec: Tes3Record, ctx) -> list:
     """
     lines = [f'EditorID={escape_value(rec.record_id)}']
     emit_str(lines, 'FULL', rec, 'FNAM')
-    _emit_creature_model(lines, rec)
+    _emit_creature_model(lines, rec, ctx)
     flags = unpack(rec, 'FLAG', '<I')
     lines.append(f'ACBS.Flags={_map_flags(flags[0] if flags else 0, _CREA_FLAGS)}')
     data = unpack(rec, 'NPDT', '<ii8i7i6ii')
@@ -236,21 +236,36 @@ def export_CREA(rec: Tes3Record, ctx) -> list:
     return lines
 
 
-def _emit_creature_model(lines: list, rec: Tes3Record) -> None:
-    """Point the creature at the split folder and record its source NIF.
+def _emit_creature_model(lines: list, rec: Tes3Record, ctx) -> None:
+    """Point the creature at the folder whose project the importer binds it to.
 
-    See: docs/commentary/tes4_export_morrowind.md#creatures
+    A mesh in this plugin's own tree is split here (`MorrowindModel`); a
+    vanilla mesh Morroblivion replaces takes that creature's model and parts;
+    anything else keeps the derived folder for a master's project to fill.
+    See: docs/commentary/tes4_export_morrowind.md#morroblivion-creatures
     """
     sub = get_subrecord(rec, 'MODL')
-    path = get_string(sub).replace('/', chr(92)) if sub else ''
+    path = get_string(sub).replace('/', chr(92)).lstrip(chr(92)) if sub else ''
     if not path:
+        return
+    own = ctx.own_meshes is not None and (
+        ctx.own_meshes / path.replace(chr(92), '/')).is_file()
+    replacement = (None if own or ctx.morroblivion is None
+                   else ctx.morroblivion.creature(path))
+    if replacement is not None:
+        model, parts = replacement
+        lines.append(f'Model.MODL={escape_value(model)}')
+        lines.append(f'NIFZCount={len(parts)}')
+        lines.extend(f'NIFZ[{i}]={escape_value(p)}' for i, p in enumerate(parts))
         return
     folder, name = os.path.split(path)
     stem = os.path.splitext(name)[0].lower()
     skeleton = chr(92).join(p for p in (folder, stem, _SKELETON_NIF) if p)
     body = stem + ('_body' if stem + '.nif' == _SKELETON_NIF else '') + '.nif'
     lines.extend([f'Model.MODL={escape_value(skeleton)}', 'NIFZCount=1',
-                  f'NIFZ[0]={body}', f'MorrowindModel={escape_value(path)}'])
+                  f'NIFZ[0]={body}'])
+    if own:
+        lines.append(f'MorrowindModel={escape_value(path)}')
 
 
 def _emit_sound_slots(lines: list, rec: Tes3Record, ctx) -> None:

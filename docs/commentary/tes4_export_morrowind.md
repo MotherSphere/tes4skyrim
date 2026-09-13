@@ -445,6 +445,43 @@ link only where the escaped name matches, and exteriors do not link at all.
 `TR_Mainland.esm` (four masters, 108,448 records) converts in 26s with 98.2%
 of references kept when all four masters are converted first.
 
+### <a id="vanilla-assets"></a>Vanilla meshes when the vanilla ESMs are not exported
+
+**Code:** `asset_convert/sources/morrowind_assets.py`.
+
+In `morroblivion` mode nothing extracts `Morrowind.bsa`, yet a dependent
+plugin's wearables still list vanilla BODY parts and every worn model is
+assembled on vanilla `base_anim.nif`. `resolve_mesh` looks through the
+plugin's own mesh tree and its exported masters' first, then the registered
+Morrowind install (`source_registry.directory_for('Morrowind.esm')`): a loose
+file under `Data Files\Meshes`, else the archive entry, read through
+`bsa_extract_morrowind.read_index` (header and name tables only, never the
+whole archive) and extracted once into `export/morrowind_assets/meshes/`. The
+BODY records themselves are read from the master ESMs resolved the same way,
+by `resolve_plugin_path`.
+
+### <a id="morroblivion-meshes"></a>Vanilla meshes map through their records
+
+**Code:** `remap_vanilla_models` in `tes4_export/morroblivion.py`;
+`orphan_meshes` in `morrowind_patch.py`.
+
+Records name vanilla meshes directly too: 174 Tamriel Data and 165 Tamriel
+Rebuilt WEAP records point at `w\` weapon meshes, and 1,043 distinct vanilla
+non-creature meshes are named across both plugins. Morroblivion does not
+rename meshes by path (4 of the 1,043 exist under `morro\`); it reworks them
+per RECORD: vanilla `iron shortsword` is `0ironSshortsword` wearing
+`Morroblivion\Weapons\Iron\shortsword.nif`. So a vanilla mesh maps the way
+records do: the vanilla record owning that `MODL` (12,631 records over the
+three ESMs), the record index, then the Morroblivion record's own model. That
+resolves 857 of the 1,043; 111 belong to records Morroblivion lacks
+(pauldrons, bracers, some clothes), which are gap records, and 69 are meshes
+no vanilla record names at all (`f\ex_boulder00`, furniture). Both remaining
+kinds are the compatibility patch's: it extracts and converts every gap
+record's mesh and every ownerless vanilla mesh (animation pairs and
+`base_anim*` excepted), under the same `tes4` namespace, so a plugin's record
+that keeps the vanilla path finds the patch's conversion. The plugin's own
+tree always wins, and CREA models take the creature table above instead.
+
 ## <a id="morroblivion-gap-patch"></a>The Morroblivion gap patch
 
 **Code:** `tes4_export/morrowind_patch.py`.
@@ -620,15 +657,15 @@ for records with a biped slot; pauldrons and belts have none in either later
 game.
 
 The mesh stage assembles the model before the ordinary conversion runs
-(`assemble_armor`, called from `asset_pipeline.convert_meshes`): the rest-pose
-skeleton `base_anim.nif` supplies each attach node's parent bone and offset, a
-rigid part is baked into that bone's local frame and given a one-bone identity
-skin -- the same shape `add_prn_skin` gives an Oblivion helmet, so the worn
-path treats it as a Prn piece -- and a skinned part is re-bound to the shared
-skeleton. Shields are not skinned: the root carries `Prn=Shield` and the
-Oblivion shield path takes it. The result is written as a Morrowind-version
-NIF beside the source meshes, so everything downstream is unchanged.
-See: [asset_convert_armor.md#morrowind-armor-assembly](asset_convert_armor.md#morrowind-armor-assembly).
+(`assemble_armor`, called from `asset_pipeline.convert_meshes`), reproducing
+OpenMW's attach rules (mirrored `Left` parts, `BoneOffset`, the shape-name
+filter on skinned parts) and writing a Morrowind-version NIF shaped like the
+Oblivion armor the worn path already converts: rigid parts as Prn pieces,
+skinned parts re-posed into Oblivion's rest, shields in the forearm frame.
+The BODY records come from the masters resolved through
+`resolve_plugin_path`, so a plugin ingested from an archive still finds
+`Morrowind.esm`. The mechanism and its measurements:
+[asset_convert_armor.md#morrowind-armor-assembly](asset_convert_armor.md#morrowind-armor-assembly).
 
 Armor rating is `AODT.armor x 100`: TES4 stores hundredths and the importer
 passes the value straight to Skyrim's `DNAM`, which also stores hundredths.
@@ -751,6 +788,68 @@ Sound slots come from `SNDG` (per-creature sound generators), exported in the
 TES4 `SoundType[i].Type/.Sound` vocabulary: LeftFoot/RightFoot keep their
 slots, Moan -> Idle (4), Roar -> Attack (6), Scream -> Hit (7); the swim and
 Land cues have no TES4 slot.
+
+The split runs from `creature_pipeline._creature_folders`, before the folder
+walk, and resolves the source model through the plugin's tree, its masters'
+and the Morrowind install ([vanilla assets](#vanilla-assets)); a folder whose
+`skeleton.nif` postdates the model, its `x*.kf` and the splitter is kept. The
+first in-game build shipped every creature INVISIBLE: the stage found no
+folders (`creature_projects.json` held an empty map), so the importer wrote
+ARMA paths no mesh backed. Split and converted, `pc_RedServKeeper_01` yields
+a 9-bone body with `BSLightingShaderProperty` and its texture, a skeleton and
+14 clips.
+
+A Morrowind creature also parents RIGID shapes under bones, which the engine
+draws in the bone's frame: `tr_troll_frost01` carries its head, bone helm,
+three billboard eyes, hair, the log club (under `Bip01 R Hand`) and eight toe
+claws that way. The pipeline knows only skinned and Prn-attached geometry and
+shipped them as static shapes at the origin, so the body animated while those
+parts floated. `_skin_rigid_parts` bakes each such shape's chain from its
+nearest NAMED ancestor node into the vertices and gives it a one-bone identity
+skin on that node, under the root, exactly the shape `rigid_skin_creature_parts`
+gives an Oblivion Prn part; every skeleton NiNode is a bone
+(`hkx_skeleton.collect_bones`), so the node need not be a `Bip01` bone.
+
+Morrowind authors a creature's heading and height on `Bip01` itself: the
+frost troll's root is yawed 90° at z 52.65 and its walk animates that node.
+The pipeline plays the accum root as identity and keeps heading and height on
+`Bip01 NonAccum` ([accum root identity](asset_convert_falloutnv.md#accum-root-identity)),
+so the first build faced every creature 90° right and sank it into the
+ground. `_insert_nonaccum` gives the split skeleton and body Oblivion's
+layout: a `<root> NonAccum` child takes the root's transform, subtree and
+skin bindings, the root becomes identity, and the root's animation track is
+written under the NonAccum name, where `split_root_motion` extracts the
+locomotion and keeps frame 0 (measured: NonAccum first sample (4.3, 28.1,
+50.1) at 90°, forward motion 107.8 units).
+
+### <a id="morroblivion-creatures"></a>Who converts a creature mesh
+
+**Code:** `_emit_creature_model` (`morrowind_actors.py`),
+`MORROBLIVION_CREATURES` in `tes4_export/morroblivion.py`, `morrowind_patch.py`.
+
+A plugin splits and converts only the creature meshes its OWN asset tree
+ships (`MorrowindModel` is emitted only then). Every other CREA keeps the
+folder path derived from its mesh, so the importer binds it to the project of
+whichever master converted that folder. Measured before this rule: Tamriel
+Data placed 96 and Tamriel Rebuilt 473 CREA records on 58 vanilla
+`Morrowind.bsa` meshes, and Tamriel Rebuilt's 94 non-vanilla models are all
+referenced by a Tamriel Data CREA, so the owner always has a project.
+
+In Morroblivion mode the vanilla meshes are Morroblivion's creatures, already
+converted under `Morrowind_ob.esm`. Morroblivion renames its records freely,
+so the record index pairs only 20 of the 58 (and pairs `clannfear_daddy` with
+the Ogrim); `MORROBLIVION_CREATURES` is the authored pairing, vanilla mesh to
+Morroblivion CREA EditorID (79 entries, each checked against the archive and
+Morroblivion's export), and the export copies that record's `Model.MODL` and
+`NIFZ` so the leaf-name lookup lands on the inherited project. The same
+naming gap made the patch treat 352 vanilla CREA records as gaps, so it
+converted 82 creatures Morroblivion already ships; `collect_gap_records` now
+skips any creature the table pairs, leaving 19 records on 9 meshes
+(Almalexia, Vivec, Dagoth Ur, Hircine, the Heart, dremora, `skinnpc`) that
+Morroblivion has no creature for. Those are real gaps: the patch extracts
+each one's `x<name>.nif`/`.kf` pair beside the model and runs the creature
+stage, so it owns those projects once and every dependent plugin inherits
+them.
 
 ## <a id="scripts"></a>Scripts
 

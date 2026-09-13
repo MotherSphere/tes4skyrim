@@ -12,6 +12,7 @@ See: docs/commentary/tes4_export_morrowind.md#tes4-vocabulary
 import math
 import struct
 
+from ..morrowind_armor import emit_worn_models
 from ..record_types.common import escape_value
 from ..tes3_reader import Tes3Record, get_string, get_subrecord
 
@@ -299,7 +300,7 @@ def export_WEAP(rec: Tes3Record, ctx) -> list:
     else:
         lines.extend([f'DATA.Type={_WEAPON_TYPES.get(wtype, 0)}',
                       f'DATA.Speed={speed}', f'DATA.Reach={reach}',
-                      'DATA.Flags=0'])
+                      'DATA.Flags=0', f'MorrowindWeaponType={wtype}'])
     lines.append(f'DATA.Value={value}')
     if wtype not in _AMMO_TYPES:
         lines.append(f'DATA.Health={health}')
@@ -312,12 +313,16 @@ def _emit_wearable(lines: list, rec: Tes3Record, biped: int,
                    general: int, ctx) -> None:
     """The TES4 wearable header: models, icon and biped flags.
 
+    The worn model and its body parts are named only for a piece with a slot.
+    See: docs/commentary/tes4_export_morrowind.md#worn-models
     """
     lines.append(f'EditorID={escape_value(rec.record_id)}')
     emit_str(lines, 'FULL', rec, 'FNAM')
     lines.append(f'BMDT.BipedFlags={biped}')
     lines.append(f'BMDT.GeneralFlags={general}')
     emit_model(lines, rec, 'Male.WorldModel.MODL')
+    if biped:
+        emit_worn_models(lines, rec, ctx)
     emit_icon(lines, rec, key='Male.Icon')
 
 

@@ -144,7 +144,7 @@ _PRN_BONE_SLOTS = (
 )
 
 
-def _prn_body_part(prn_bone):
+def prn_body_part(prn_bone):
     """The biped slot a rigidly-attached piece on this bone belongs to.
 
     Vanilla Skyrim puts helmets on the HAIR slot, which is why a head bone
@@ -174,7 +174,7 @@ def _insert_bone_node(root_node, prn_bone):
     return bone_node
 
 
-def _rigid_skin_data(geom_data):
+def rigid_skin_data(geom_data):
     """NiSkinData binding every vertex to one bone at weight 1.0.
 
     The bind is IDENTITY because the caller leaves the verts in bone-LOCAL
@@ -217,8 +217,8 @@ def _rigid_skin_data(geom_data):
     return skin
 
 
-def _rigid_skin_instance(root_node, bone_node, skin_data, body_part, plain):
-    """The skin instance for a rigid part: plain for creatures, else dismember."""
+def rigid_skin_instance(root_node, bone_node, skin_data, body_part, plain):
+    """The skin instance for a rigid part: plain (creatures, assembled Morrowind parts) or dismember."""
     bsd = (NifFormat.NiSkinInstance() if plain
            else NifFormat.BSDismemberSkinInstance())
     bsd.skeleton_root = root_node
@@ -258,7 +258,7 @@ def add_prn_skin(data, root_node, keep_bone_names=False, plain=False,
                 else OBLIVION_TO_SKYRIM_BONE_MAP.get(prn_val, prn_val))
 
     bone_node = _insert_bone_node(root_node, prn_bone)
-    body_part = _prn_body_part(prn_bone)
+    body_part = prn_body_part(prn_bone)
 
     skinned = 0
     for block in list(root_node.tree()):
@@ -269,8 +269,8 @@ def add_prn_skin(data, root_node, keep_bone_names=False, plain=False,
         geom_data = block.data
         if geom_data is None or geom_data.num_vertices == 0:
             continue
-        block.skin_instance = _rigid_skin_instance(
-            root_node, bone_node, _rigid_skin_data(geom_data), body_part,
+        block.skin_instance = rigid_skin_instance(
+            root_node, bone_node, rigid_skin_data(geom_data), body_part,
             plain)
         skinned += 1
     return skinned

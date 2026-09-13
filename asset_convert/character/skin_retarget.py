@@ -141,7 +141,7 @@ def m44_to_np(m) -> np.ndarray:
     ], dtype=np.float64)
 
 
-def _np_to_nif_node(node, M: np.ndarray):
+def write_node_transform(node, M: np.ndarray):
     """Write numpy 4×4 (row-vector) to a NiNode's local transform."""
     node.rotation.m_11 = float(M[0, 0]); node.rotation.m_12 = float(M[0, 1]); node.rotation.m_13 = float(M[0, 2])
     node.rotation.m_21 = float(M[1, 0]); node.rotation.m_22 = float(M[1, 1]); node.rotation.m_23 = float(M[1, 2])
@@ -863,7 +863,7 @@ def _bake_geoms_to_bind_pose(skinned_geoms, skel_root):
         # With G neutralised the chain S @ B_i @ W_i reduces to S = identity
         # and B_i = inv(W_i).
         if not G_is_identity:
-            _np_to_nif_node(block, np.eye(4))
+            write_node_transform(block, np.eye(4))
         write_skin_transform(skin_data.skin_transform, np.eye(4))
         for bi, W in bone_worlds.items():
             write_skin_transform(skin_data.bone_list[bi].skin_transform,
@@ -1210,7 +1210,7 @@ def retarget_skin_to_skyrim(data, src_path: str = '', prn_out: set | None = None
             if bone_node is not None:
                 sk_name, W_sk = _resolve_sk_target(prn_bone_name, sk_skel, src_map)
                 if sk_name is not None:
-                    _np_to_nif_node(bone_node, W_sk)
+                    write_node_transform(bone_node, W_sk)
 
     parent_map = _build_parent_map(skel_root)
 
@@ -1239,7 +1239,7 @@ def retarget_skin_to_skyrim(data, src_path: str = '', prn_out: set | None = None
             except (ValueError, RuntimeError):
                 new_local = W_sk
 
-        _np_to_nif_node(bone, new_local)
+        write_node_transform(bone, new_local)
 
 
     # --- Phase C+D: Recompute skin data and regenerate partitions ---

@@ -27,6 +27,8 @@ import os
 from asset_convert.havok.behavior_vocabulary import movement_type_names
 import re
 import shutil
+
+from asset_convert.havok.creature_split_morrowind import split_creatures
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
@@ -537,50 +539,25 @@ def convert_guns(export_dir: str, out_meshes_dir: str, workers: int = None,
         return {}
     work = os.path.join(str(paths.EXPORT), 'skyrim_assets', 'humanoid_graph')
     return build_gun_graphs(manifest, out_meshes_dir, work, log)
+def _creature_folders(export_dir: str, meshes_root: str, names, log) -> list:
+    """(folder, leaf name, referenced by a CREA) for every animated creature folder.
 
-
-def convert_creatures(export_dir: str, out_meshes_dir: str,
-                      names: list = None, workers: int = None,
-                      log=print) -> dict:
-    """Convert every creature folder under <export_dir>/meshes/creatures.
-
-    Writes the actor projects + converted meshes, this plugin's animation
-    cache fragment (SKSE/Plugins/TESRuntime/animation/<plugin>.json) and
-    <export_dir>/creature_projects.json. The fragment is built from ALL of
-    this plugin's projects on disk, so a subset run (`names`) keeps every
-    other creature registered. A full run also retargets a FO3/FNV plugin's
-    gun clips (a no-op without gun WEAPs).
-
-    Returns {'projects': {name: manifest}, 'errors': {name: str}}.
-    See: docs/reference/tes_runtime_fragments.md#the-runtime-composer
+    A creature is ANY folder holding a skeleton.nif plus .kf animations, at
+    any depth: Morrowind_ob nests 67 such folders where Oblivion keeps them
+    flat, and a depth-1 scan found 16 of them.
+    See: docs/commentary/tes4_export_morrowind.md#creatures
     """
-    from asset_convert.havok.animation_data import write_fragment
-
-    meshes_root = str(assets_for(export_dir) / 'meshes')
-    if not os.path.isdir(meshes_root):
-        log(f'  No meshes folder at {meshes_root}')
-        return {'projects': {}, 'errors': {}}
-
-    # A creature is ANY folder holding a skeleton.nif plus .kf animations —
-    # not just the direct children of meshes\creatures.  Oblivion itself uses
-    # that flat layout, but plugins nest theirs freely: Morrowind_ob ships 67
-    # such folders under meshes\morro\creatures\<name>,
-    # meshes\morroblivion\creatures\<category>\<name> and deeper
-    # (…\symphony\fbr\fst), of which the old depth-1 scan of meshes\creatures
-    # found only 16 — the other 167 CREA records fell through to Skyrim race
-    # aliasing and shipped as BASE SKYRIM creatures.  Walking the whole mesh
-    # tree keys on the same last-path-component the record side derives from
-    # Model.MODL, so discovery and lookup agree for any layout.
     referenced = _crea_model_dirs(export_dir)
+    wanted = {n.lower() for n in names} if names else None
     candidates = []
-    for cdir, subdirs, files in os.walk(meshes_root):
+    for cdir, _subdirs, files in os.walk(meshes_root):
         lower = {f.lower() for f in files}
         if 'skeleton.nif' not in lower:
             continue
         name = os.path.basename(cdir)
-        if names and name.lower() not in {n.lower() for n in names}:
+        if wanted is not None and name.lower() not in wanted:
             continue
-        if name.lower() in _EXCLUDE and not names:
+        if name.lower() in _EXCLUDE and wanted is None:
             log(f'  [skip] {name}: excluded (test/cinematic asset)')
             continue
         if not any(f.endswith('.kf') for f in lower):
@@ -588,15 +565,18 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
             continue
         rel = os.path.relpath(cdir, meshes_root).lower().replace('/', '\\')
         candidates.append((cdir, name, rel in referenced))
+    return candidates
 
-    # Two folders can share a leaf name (Morrowind_ob ships both
-    # meshes\characters\draugr and meshes\creatures\aa_blood\draugr).  They
-    # would collide in the output tree (actors/tes4/<name>) and in the
-    # record-side lookup, which is keyed on that same leaf.  Prefer whichever
-    # folder the CREA records actually point at; otherwise fall back to the
-    # shallowest path, then alphabetical, so the choice is deterministic.
-    seen_names = {}
-    dirs = []
+
+def _pick_creature_dirs(candidates, log) -> list:
+    """(folder, name) per distinct leaf name, sorted by name.
+
+    Two folders can share a leaf name (Morrowind_ob ships both
+    meshes\\characters\\draugr and meshes\\creatures\\aa_blood\\draugr) and
+    would collide in the output tree and the record-side lookup; the one the
+    CREA records point at wins, then the shallowest path, then alphabetical.
+    """
+    seen_names, dirs = {}, []
     for cdir, name, is_ref in sorted(
             candidates,
             key=lambda c: (not c[2], c[0].count(os.sep), c[0].lower())):
@@ -608,28 +588,24 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
         seen_names[key] = cdir
         dirs.append((cdir, name))
     dirs.sort(key=lambda d: d[1].lower())
+    return dirs
 
-    # Distinct NIFZ part sets per folder (dog/wolf/skeletal-hound share a
-    # folder but each merges into its own whole-animal NIF).
+
+def _convert_pool(dirs, export_dir, out_meshes_dir, workers, namespace,
+                  log) -> tuple:
+    """Convert every creature folder in a process pool; (manifests, errors) by name.
+
+    Processes, not threads: the work is CPU-bound pure Python. Distinct NIFZ
+    part sets per folder each merge into their own whole-animal NIF; CSDT
+    sound slots are replayed as annotations and vocal idle states.
+    """
     part_sets = _part_sets_by_folder(export_dir)
-    # CSDT sound slots per folder — replayed as animation annotations and
-    # vocal idle states, which is how Skyrim voices a creature (see
-    # _sound_data_by_folder / hkx_behavior._apply_sound_slots /
-    # generate_creature_project's vocal states).
     sound_data = _sound_data_by_folder(export_dir)
     sound_slots = {f: {t: e for t, (e, _c) in s.items()}
                    for f, s in sound_data.items()}
     sound_chances = {f: {t: c for t, (_e, c) in s.items()}
                      for f, s in sound_data.items()}
     speed_attrs = _speed_attr_by_folder(export_dir)
-    namespace = _namespace_for(out_meshes_dir)
-    _remove_unnamespaced_projects(out_meshes_dir, log)
-
-    log(f'  Converting {len(dirs)} creatures '
-        f'({workers or _WORKERS} workers, namespace {namespace})...')
-    # ProcessPoolExecutor: the per-creature work is CPU-bound pure Python
-    # (pyffi NIF conversion, KF decode, spline compression) — threads
-    # serialize on the GIL and give no speedup at all.
     projects, errors = {}, {}
     with ProcessPoolExecutor(max_workers=workers or _WORKERS) as pool:
         futs = {pool.submit(_convert_creature, cdir, name, out_meshes_dir,
@@ -652,15 +628,71 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
             log(f'  [ok] {name}: {len(manifest["clips"])} clips, '
                 f'{len(manifest["bodies"])} body nifs'
                 + (f', {n_fail} failures' if n_fail else ''))
+    return projects, errors
 
-    # Registration: merged singlefiles (vanilla base + ALL projects on disk).
-    # A subset run (--names) must not drop the other creatures' registrations,
-    # so pick up every previously generated project_manifest.json too.
+
+def _project_summary(all_manifests) -> dict:
+    """The tes5_import contract per project (RACE/ARMA/ARMO, MOVT, IDLE, BPTD).
+
+    `.get` defaults keep one manifest an interrupted run left without its
+    mesh keys from killing the summary for every other creature.
+    See: docs/reference/tes_runtime_fragments.md#the-runtime-composer
+    """
+    return {name: {
+        'project_hkx': m['project_hkx'],
+        'behavior_hkx': m['behavior_hkx'],
+        'body_dir': m['body_dir'],
+        'skeleton_nif': m['skeleton_nif'],
+        'bodies': m.get('bodies', []),
+        'body_map': m.get('body_map', {}),
+        'attacks': m.get('attacks', []),
+        'movement_types': m.get('movement_types', movement_type_names(name)),
+        'speeds': m.get('speeds', {}),
+        'has_ragdoll': m.get('has_ragdoll', False),
+        'dissolves_on_death': m.get('dissolves_on_death', False),
+        'death_duration': m.get('death_duration', 0.0),
+        'death_pile': m.get('death_pile'),
+        'has_cast': m.get('has_cast', False),
+        'has_block': m.get('has_block', False),
+        'clips': [c['name'] for c in m.get('clips', [])],
+        'bones': m.get('bones', []),
+        'ragdoll_bones': m.get('ragdoll_bones', []),
+        'vocal_events': m.get('vocal_events', []),
+    } for name, m in all_manifests.items()}
+
+
+def convert_creatures(export_dir: str, out_meshes_dir: str,
+                      names: list = None, workers: int = None,
+                      log=print) -> dict:
+    """Convert every creature folder; {'projects': {name: manifest}, 'errors': {name: str}}.
+
+    Writes the projects, meshes, the animation cache fragment (from ALL
+    projects on disk, so a subset run keeps the rest registered) and
+    <export_dir>/creature_projects.json. Morrowind creatures are split first,
+    which creates the tree for a plugin that ships no meshes.
+    See: docs/reference/tes_runtime_fragments.md#the-runtime-composer
+    """
+    from asset_convert.havok.animation_data import write_fragment
+    from tes5_import.base.artifact_schema import write_artifact
+
+    meshes_root = str(assets_for(export_dir) / 'meshes')
+    split_creatures(export_dir, meshes_root, log)
+    if not os.path.isdir(meshes_root):
+        log(f'  No meshes folder at {meshes_root}')
+        return {'projects': {}, 'errors': {}}
+    dirs = _pick_creature_dirs(
+        _creature_folders(export_dir, meshes_root, names, log), log)
+    namespace = _namespace_for(out_meshes_dir)
+    _remove_unnamespaced_projects(out_meshes_dir, log)
+    log(f'  Converting {len(dirs)} creatures '
+        f'({workers or _WORKERS} workers, namespace {namespace})...')
+    projects, errors = _convert_pool(dirs, export_dir, out_meshes_dir,
+                                     workers, namespace, log)
+
     all_manifests = dict(projects)
     for m in manifests_under(out_meshes_dir).values():
         if m.get('namespace') == namespace:
             all_manifests.setdefault(m['name'], m)
-
     appends = {} if names else convert_guns(export_dir, out_meshes_dir,
                                             workers, log)
     if all_manifests or appends:
@@ -669,52 +701,9 @@ def convert_creatures(export_dir: str, out_meshes_dir: str,
                               os.path.basename(plugin_out), appends, plugin_out)
         log(f'  Registered {len(all_manifests)} projects in '
             f'{os.path.relpath(path, plugin_out)}')
-
-    # Contract for tes5_import (RACE/ARMA/ARMO generation).
-    # .get defaults: an interrupted run can leave a manifest without the
-    # mesh keys (they are added after project generation) — don't let one
-    # stale file kill the summary for every other creature.
-    summary = {name: {
-        'project_hkx': m['project_hkx'],
-        # root behavior path: the engine matches creature IDLE roots to an
-        # actor by this (creature_idles DNAM)
-        'behavior_hkx': m['behavior_hkx'],
-        # directory the merged body NIFs sit in (ARMA MOD2)
-        'body_dir': m['body_dir'],
-        'skeleton_nif': m['skeleton_nif'],
-        'bodies': m.get('bodies', []),
-        'body_map': m.get('body_map', {}),
-        'attacks': m.get('attacks', []),
-        # engine movement-type registration contract (iState_* graph vars ↔
-        # MOVT MNAM); fallback derives the same names for stale manifests
-        'movement_types': m.get('movement_types',
-                                movement_type_names(name)),
-        # clip root-motion speeds (u/s) → per-creature MOVT SPED columns
-        'speeds': m.get('speeds', {}),
-        'has_ragdoll': m.get('has_ragdoll', False),
-        # authored dissolve (ghost/wraith): the death clip hides the
-        # actor's skin holder instead of dropping the body -> the import
-        # attaches TES4_GhostDissolve (Skyrim's native ash pile)
-        'dissolves_on_death': m.get('dissolves_on_death', False),
-        'death_duration': m.get('death_duration', 0.0),
-        # the extracted Oblivion ectoplasm pile (filename in the
-        # project dir), placed by the import as an ACTI
-        'death_pile': m.get('death_pile'),
-        # cast/block graph lanes -> their IDLE action routing (creature_idles)
-        'has_cast': m.get('has_cast', False),
-        'has_block': m.get('has_block', False),
-        'clips': [c['name'] for c in m.get('clips', [])],
-        'bones': m.get('bones', []),
-        # ragdoll part bone names -> per-creature BPTD (creature_races)
-        'ragdoll_bones': m.get('ragdoll_bones', []),
-        # vocal idle states -> import generates their ActionIdle/
-        # ActionIdleWarn IDLE entry records (creature_idles)
-        'vocal_events': m.get('vocal_events', []),
-    } for name, m in all_manifests.items()}
-    from tes5_import.base.artifact_schema import write_artifact
     write_artifact(os.path.join(export_dir, 'creature_projects.json'),
-                   os.path.basename(os.path.normpath(export_dir)), summary)
-
+                   os.path.basename(os.path.normpath(export_dir)),
+                   _project_summary(all_manifests))
     return {'projects': projects, 'errors': errors}
 
 

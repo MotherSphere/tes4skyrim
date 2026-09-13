@@ -913,7 +913,8 @@ def _capture_bow_masks(data, nif_basename, is_gnd, in_armor_dir):
     if 'bow' not in nif_basename or is_gnd or in_armor_dir:
         return False, {}
     for root in data.roots:
-        if root is not None and get_prn_bone(root) == 'BackWeapon':
+        if root is not None and (get_prn_bone(root)
+                                 or wp.mesh_weapon_prn()) == 'BackWeapon':
             from asset_convert.character.bow_rig import capture_string_masks
             return True, capture_string_masks(data)
     return False, {}

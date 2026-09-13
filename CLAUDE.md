@@ -331,6 +331,7 @@ real data, or a failing-then-passing test.
   working.
 - We aren't British. No "colour", "centre" or the like
 - No allowlist or blocklist, it's whitelist and blacklist
+- Never tell the user you can't look another session's transcript. They are files on disc. Yes you can.
 
 ### Assets and references
 

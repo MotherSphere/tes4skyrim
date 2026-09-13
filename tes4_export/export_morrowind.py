@@ -18,9 +18,12 @@ import struct
 import time
 from collections import Counter
 
-from output_layout import record_dir
+from output_layout import assets_for, record_dir
 from core.plugin_masters import masters_from_export_header
 
+from .morroblivion import (MORROBLIVION_PREFIX, MorroblivionModels,
+                           remap_vanilla_models)
+from .morrowind_armor import load_body_models
 from .morrowind_cell import parse_cell
 from .morrowind_ids import (IdIndex, exterior_key, interior_key, land_key,
                             load_master_doors, persistent_key,
@@ -57,9 +60,6 @@ SOURCE_MORROBLIVION = 'morroblivion'
 
 #: The vanilla ESMs Morroblivion replaces wholesale.
 VANILLA_MASTERS = ('morrowind.esm', 'tribunal.esm', 'bloodmoon.esm')
-
-#: Export names Morroblivion and its companion plugins share.
-MORROBLIVION_PREFIX = 'morrowind_ob'
 
 #: Derived ids live above Morroblivion's blocks so the two never collide.
 _DERIVED_BASE = 0x00200000
@@ -108,6 +108,9 @@ class MorrowindContext:
         self.index = index if index is not None else IdIndex()
         self.own_index = own_index
         self.master_bounds = None
+        self.body_models = {}
+        self.own_meshes = None
+        self.morroblivion = None
         self.derived = {}
         self.unresolved = Counter()
         self.own_ids = {}
@@ -479,7 +482,13 @@ def export_plugin(source_path: str, export_dir: str, masters=()) -> dict:
     plugin = os.path.basename(source_path)
     ctx = load_context(export_dir, masters)
     records = read_file(source_path)[1]
+    ctx.body_models = load_body_models(source_path, records, export_dir)
+    ctx.own_meshes = assets_for(record_dir(export_dir, plugin)) / 'meshes'
+    ctx.morroblivion = MorroblivionModels(export_dir, masters, source_path)
     out = convert_plugin(records, ctx)
+    remapped = remap_vanilla_models(out, ctx)
+    if remapped:
+        print(f'  Morroblivion models: {remapped} vanilla mesh references remapped')
     out_dir = str(record_dir(export_dir, plugin))
     counts = write_export(out, out_dir)
     write_header(out_dir, _master_list(masters), sum(counts.values()),
