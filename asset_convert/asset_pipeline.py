@@ -130,6 +130,25 @@ def _activate_namespace(rec_dir) -> str:
 # Mesh and texture conversion
 # ---------------------------------------------------------------------------
 
+def _persist_mesh_manifests(mesh_stats, manifest_dir, partial: bool) -> None:
+    """Persist the texture sets mesh conversion harvested, for later phases.
+
+    The prune and the texture pass both run after this, possibly in a separate
+    invocation. `partial` (a --mesh-subdirs run) MERGES rather than replaces:
+    that run saw only part of the tree, and overwriting would tell the prune
+    nothing outside those folders uses a texture, so it would delete the rest.
+
+    See: docs/commentary/asset_convert_shader.md#detail-overlay-diffuses
+    """
+    for key, name in (('textures_used', texture_prune.MANIFEST_NAME),
+                      ('overlay_diffuses',
+                       texture_prune.OVERLAY_MANIFEST_NAME)):
+        refs = set(mesh_stats.pop(key, set()))
+        if partial:
+            refs |= texture_prune.read_manifest(manifest_dir, name)
+        texture_prune.write_manifest(manifest_dir, refs, name)
+
+
 def _convert_mesh_tree(mesh_src, mesh_dst, asset_dir, rec_dir, mesh_subdirs,
                        parallax, textures_only):
     """Run the NIF batch over `mesh_src`; return its stats dict.
@@ -212,17 +231,8 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
             mesh_subdirs, parallax, textures_only)
         if parallax:
             _write_parallax_notice(plugin_dir)
-        # The textures the converted meshes reference, harvested as they were
-        # written.  Persisted because the prune runs in a later phase (after LOD
-        # and speedtrees add their own meshes), possibly a separate invocation.
-        #
-        # A --mesh-subdirs run only saw part of the tree, so it must ADD to the
-        # manifest rather than replace it: overwriting leaves the prune believing
-        # nothing outside those folders uses a texture, and it deletes the rest.
-        _used = stats['mesh_conversion'].pop('textures_used', set())
-        if mesh_subdirs:
-            _used = set(_used) | texture_prune.read_manifest(mesh_manifest_dir)
-        texture_prune.write_manifest(mesh_manifest_dir, _used)
+        _persist_mesh_manifests(stats['mesh_conversion'], mesh_manifest_dir,
+                                bool(mesh_subdirs))
     else:
         print(f"  No meshes found at {mesh_src}")
         stats['mesh_conversion'] = {'converted': 0, 'skipped': 0, 'errors': 0}

@@ -532,7 +532,8 @@ def _walk_geometry(node, fix_textures, stats):
     """Convert one shape, or None when it has no usable topology."""
     try:
         ts = process_geometry(node, fix_textures, stats,
-                              sky_type=(stats or {}).get('_sky_type'))
+                              sky_type=(stats or {}).get('_sky_type'),
+                              norm_tex_ref=_norm_tex_ref)
     except UnreconstructibleGeometry as e:
         name = (node.name.decode('latin-1', 'replace')
                 if isinstance(node.name, bytes) else str(node.name))
@@ -1303,6 +1304,7 @@ def convert_nif(src_path, dst_path, *, fix_textures=True, remap_skeleton=None,
         'root_rotation_baked': False,
         'version_upgraded': False,
         'textures': set(),         # texture paths this mesh references
+        'overlay_diffuses': set(), # of those, the APPLY_HILIGHT2 overlays
     }
 
     if not _PYFFI:
@@ -1323,6 +1325,7 @@ def convert_nif(src_path, dst_path, *, fix_textures=True, remap_skeleton=None,
     _run_post_passes(data, stats, result, src_path, dst_path, textures_only)
 
     _harvest_textures(data, result['textures'])
+    result['overlay_diffuses'] = stats.get('overlay_diffuses', set())
     if textures_only:
         return _finish_result(result, stats)
 

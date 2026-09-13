@@ -563,9 +563,10 @@ def strip_alpha_to_bc1(data: bytes):
     nothing to act on: nothing is being quantised, and decoding to RGB just to
     re-quantise would LOSE quality rather than gain it.
 
-    Only ever called for a diffuse whose alpha was classified ``height`` and
-    carried out to a `_p` map, so the channel being dropped is a height field,
-    never transparency.
+    Called only where the alpha is known not to be transparency: a diffuse
+    whose alpha was classified ``height`` and carried out to a `_p` map, or a
+    LOD tier's copy of an APPLY_HILIGHT2 overlay, whose alpha is a blend
+    weight (`lod_far_gen.redirect_overlay_diffuses`).
 
     Returns DDS bytes, or None if `data` is not DXT3/DXT5 (a DXT1 input is
     already stripped, which makes a re-run a no-op).

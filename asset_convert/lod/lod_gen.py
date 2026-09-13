@@ -1065,7 +1065,32 @@ def _far_owner_dirs(referenced_models, far_nif_dirs) -> dict:
     return by_dir
 
 
-def _derive_far_meshes(stats, output_dir, referenced_models, far_nif_dirs):
+def _overlays_by_asset_dir(far_nif_dirs, overlay_manifest_dirs) -> dict:
+    """Map each asset dir to the APPLY_HILIGHT2 diffuses of its own plugin.
+
+    The two lists are index-aligned by `create_lod._supplier_overlay_dirs`.
+    See: docs/commentary/asset_convert_shader.md#detail-overlay-diffuses
+    """
+    from asset_convert.texture import texture_prune
+    out: dict = {}
+    absent = []
+    for d, export_dir in zip(far_nif_dirs or (), overlay_manifest_dirs or ()):
+        name = texture_prune.OVERLAY_MANIFEST_NAME
+        if not (Path(export_dir) / name).is_file():
+            absent.append(Path(d).name)
+            continue
+        keys = texture_prune.read_manifest(Path(export_dir), name)
+        if keys:
+            out[Path(d)] = keys
+    if absent:
+        print(f"  NOTE: no detail-overlay manifest for {', '.join(absent)}"
+              " — re-run their meshes stage, or their overlay diffuses stay"
+              " see-through at distance")
+    return out
+
+
+def _derive_far_meshes(stats, output_dir, referenced_models, far_nif_dirs,
+                       overlay_manifest_dirs=None):
     """Derive every referenced model's LOD mesh into the bake tree.
 
     Generated files are written straight to `output_dir`; only a plugin's
@@ -1080,13 +1105,15 @@ def _derive_far_meshes(stats, output_dir, referenced_models, far_nif_dirs):
                                   force_regen_generated=True,
                                   tex_root=output_dir / 'textures')
         return
+    overlays = _overlays_by_asset_dir(far_nif_dirs, overlay_manifest_dirs)
     by_dir = _far_owner_dirs(referenced_models, far_nif_dirs)
     made = 0
     for d, models in by_dir.items():
         made += generate_missing_far_nifs(
             stats, d / 'meshes', referenced_models=models,
             force_regen_generated=True, tex_root=d / 'textures',
-            gen_meshes_dir=output_dir / 'meshes')
+            gen_meshes_dir=output_dir / 'meshes',
+            overlay_diffuses=overlays.get(Path(d)))
         for model in models:
             far_rel = far_nif_path(model, d / 'meshes')
             if has_authored_lod(d / 'meshes', far_rel):
@@ -1105,7 +1132,7 @@ def generate_lod(esm_path: Path, output_dir: Path,
                  master_dirs=None, master_texture_dirs=None,
                  master_mesh_dirs=None,
                  overlay_paths=None, only_cells=None,
-                 far_nif_dirs=None) -> bool:
+                 far_nif_dirs=None, overlay_manifest_dirs=None) -> bool:
     """
     Full LOD generation pipeline:
       1. Write LODSettings/<worldspace>.lod
@@ -1148,25 +1175,16 @@ def generate_lod(esm_path: Path, output_dir: Path,
                            in its OWN worldspace, and their textures exist only
                            in the master's output; the .bto tiles baked here
                            still reference them, so they are copied in.
-        far_nif_dirs:      Where newly DERIVED _far.nif meshes are written, as
-                           plugin output dirs. Each model's _far.nif goes to the
-                           dir that ships its full model, so the LOD meshes stay
-                           with the plugin that owns the asset.
-
-                           This exists because the standalone LOD mod is not an
-                           asset owner. It holds LODSettings and the baked tiles
-                           — data that belongs to the whole load order — while a
-                           _far.nif is a converted MESH and belongs beside the
-                           full model it was derived from, in the plugin whose
-                           Meshes step produced it. Writing them into the LOD
-                           mod would duplicate per-plugin mesh output into a
-                           shared folder and re-derive it on every LOD run.
-
-                           The meshes are still STAGED into `output_dir` for the
-                           bake (LODGen resolves everything under one PathData
-                           root) and dropped afterwards, exactly as master
-                           meshes already are. None means write them under
+        far_nif_dirs:      Plugin output dirs receiving newly DERIVED _far.nif
+                           meshes: each model's goes to the dir shipping its
+                           full model, is STAGED into `output_dir` for the bake
+                           and dropped after. None writes them under
                            `output_dir` — the single-plugin behaviour.
+                           See: docs/commentary/asset_convert_terrain.md#generated-far-nif-belong-to-the-lod-mod
+        overlay_manifest_dirs: Per-plugin EXPORT asset dirs holding the
+                           APPLY_HILIGHT2 diffuse manifests, index-aligned with
+                           `far_nif_dirs`.
+                           See: docs/commentary/asset_convert_shader.md#detail-overlay-diffuses
 
     Returns True on success.
     """
@@ -1338,7 +1356,8 @@ def generate_lod(esm_path: Path, output_dir: Path,
                   f"generating only this plugin's "
                   f"{len(referenced_models)}")
 
-    _derive_far_meshes(stats, output_dir, referenced_models, far_nif_dirs)
+    _derive_far_meshes(stats, output_dir, referenced_models, far_nif_dirs,
+                       overlay_manifest_dirs)
 
     # Write LOD input (all LOD-flagged objects) and run LODGenx64 once.
     # LODGen resolves every mesh under the single PathData root (output_dir),

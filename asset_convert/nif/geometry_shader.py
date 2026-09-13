@@ -517,8 +517,20 @@ def _apply_glow_or_parallax(ts, shader, tex_set, si, stats):
 
 
 # ---------------------------------------------------------------------------
-# Alpha bookkeeping
+# Alpha and overlay bookkeeping
 # ---------------------------------------------------------------------------
+
+def _record_overlay(tex_set, tex_apply_mode, stats, norm_tex_ref):
+    """Note this shape's diffuse as an overlay source for the texture pass.
+
+    See: docs/commentary/asset_convert_shader.md#detail-overlay-diffuses
+    """
+    if tex_apply_mode != APPLY_HILIGHT2 or stats is None:
+        return
+    key = norm_tex_ref(tex_set.textures[0])
+    if key:
+        stats.setdefault('overlay_diffuses', set()).add(key)
+
 
 def _carry_alpha(ts, tex_set, si, stats):
     """Carry the Oblivion NiAlphaProperty across, unless HILIGHT2 drops it.
@@ -550,7 +562,8 @@ def _mark_skinned(ts):
         active.shader_flags_1.slsf_1_skinned = 1
 
 
-def process_geometry(strips_or_shape, fix_textures, stats=None, sky_type=None):
+def process_geometry(strips_or_shape, fix_textures, stats=None, sky_type=None,
+                     norm_tex_ref=None):
     """Convert a NiTriStrips or NiTriShape into a ready Skyrim NiTriShape.
 
     Returns the shape, which is a NEW object when the input was uncontrolled
@@ -587,6 +600,8 @@ def process_geometry(strips_or_shape, fix_textures, stats=None, sky_type=None):
         _apply_glow_or_parallax(ts, shader, tex_set, si, stats)
         ts.bs_properties[0] = shader
 
+    if norm_tex_ref is not None:
+        _record_overlay(tex_set, si.tex_apply_mode, stats, norm_tex_ref)
     _carry_alpha(ts, tex_set, si, stats)
     attach_tex_transform_ctrls(ts.bs_properties[0], si.tex_transforms)
     _mark_skinned(ts)

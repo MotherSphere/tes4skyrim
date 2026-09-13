@@ -148,6 +148,8 @@ def _empty_batch_stats(total):
         'parallax': _collections.Counter(),
         #: Diffuses some shape reads as opacity; never stripped to BC1.
         'alpha_opacity_diffuse': set(),
+        #: Of those, the APPLY_HILIGHT2 overlays: alpha is a blend weight.
+        'overlay_diffuses': set(),
     }
 
 
@@ -173,6 +175,7 @@ def _merge_result(stats, skipped_list, mesh_path, nif_str, r):
     stats['textures_used'].update(r.get('textures', ()))
     stats['parallax'].update(r.get('parallax') or {})
     stats['alpha_opacity_diffuse'].update(r.get('alpha_opacity_diffuse') or ())
+    stats['overlay_diffuses'].update(r.get('overlay_diffuses', ()))
     rel = str(Path(nif_str).relative_to(mesh_path))
     if r.get('error'):
         stats['errors'] += 1

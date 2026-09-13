@@ -47,6 +47,7 @@ from core.worker_budget import worker_count
 from asset_convert.game_paths import (current_namespace,
                                       set_namespace, win_join)
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
+from asset_convert.texture.parallax import strip_alpha_to_bc1
 apply_patches()
 from pyffi.formats.nif import NifFormat
 from asset_convert.lod.mesh_decimate import (compute_tangents,
@@ -630,7 +631,8 @@ def _report_far_nif_error(what: str, exc: Exception) -> None:
 def generate_far_nif(src_path: Path, dst_path: Path,
                      decimate_ratio: float = _DECIMATE_RATIO,
                      cap: int = _NO_CAP,
-                     max_dev_frac: float = MAX_DEV_FRAC) -> bool:
+                     max_dev_frac: float = MAX_DEV_FRAC,
+                     tex_root=None, overlays=None) -> bool:
     """Generate dst_path (_far.nif) by decimating each shape in src_path.
 
     Only processes NIFs already in Skyrim format (v20.2.0.7).
@@ -648,7 +650,8 @@ def generate_far_nif(src_path: Path, dst_path: Path,
     if nif_data is None:
         return False
     return _decimate_and_write(nif_data, src_path.stem, dst_path,
-                               decimate_ratio, cap, max_dev_frac)
+                               decimate_ratio, cap, max_dev_frac,
+                               tex_root, overlays)
 
 
 def _read_skyrim_nif(src_path: Path):
@@ -709,22 +712,109 @@ def strip_parallax(nif_data) -> int:
     return cleared
 
 
+#: Suffix of a LOD tier's own opaque copy of a detail-overlay diffuse.
+LOD_DIFFUSE_SUFFIX = '_lod.dds'
+
+BS = chr(92)
+
+
+def lod_diffuse_rel(diffuse_rel: str) -> str:
+    """`a/rock.dds` -> `a/rock_lod.dds`: the LOD tier's own opaque copy."""
+    stem = (diffuse_rel[:-4] if diffuse_rel.lower().endswith('.dds')
+            else diffuse_rel)
+    return stem + LOD_DIFFUSE_SUFFIX
+
+
+def _write_opaque_copy(src: Path, dst: Path) -> bool:
+    """Write `src` minus its alpha to `dst`; True if dst is usable after."""
+    if dst.exists():
+        return True
+    try:
+        data = src.read_bytes()
+    except OSError:
+        return False
+    blob = strip_alpha_to_bc1(data)
+    if blob is None:
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix('.%d.tmp' % os.getpid())
+    try:
+        tmp.write_bytes(blob)
+        os.replace(tmp, dst)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        return False
+    return True
+
+
+def _shader_properties(nif_data):
+    """Every BSLightingShaderProperty, from a read NIF or a built one.
+
+    `Data.blocks` is filled by the READER, so a graph assembled in memory has
+    an empty list; walking the roots covers both.
+    """
+    seen = set()
+    for root in nif_data.roots:
+        if root is None:
+            continue
+        for block in root.tree():
+            if (isinstance(block, NifFormat.BSLightingShaderProperty)
+                    and id(block) not in seen):
+                seen.add(id(block))
+                yield block
+
+
+def redirect_overlay_diffuses(nif_data, tex_root: Path, overlays) -> int:
+    """Point a LOD mesh at opaque copies of its detail-overlay diffuses.
+
+    `overlays` is the AUTHORED APPLY_HILIGHT2 set mesh conversion recorded,
+    whose diffuse alpha is a blend weight the LOD object shader would read as
+    opacity. The copy takes its OWN `_lod.dds` name rather than shadowing the
+    plugin's texture, which one-file-per-path would hand to full meshes too.
+    See: docs/commentary/asset_convert_shader.md#detail-overlay-diffuses
+    """
+    pre = 'textures' + BS
+    done = 0
+    for block in _shader_properties(nif_data):
+        ts = block.texture_set
+        if ts is None or not len(ts.textures):
+            continue
+        raw = bytes(ts.textures[0]).decode('latin-1', 'replace')
+        key = raw.replace('/', BS).lower()
+        if key.startswith(pre):
+            key = key[len(pre):]
+        if key.replace(BS, '/') not in overlays:
+            continue
+        lod_rel = lod_diffuse_rel(key)
+        if _write_opaque_copy(win_join(tex_root, key),
+                              win_join(tex_root, lod_rel)):
+            ts.textures[0] = (pre + lod_rel).encode('latin-1')
+            done += 1
+    return done
+
+
 def _decimate_and_write(nif_data, src_stem: str, dst_path: Path,
                         decimate_ratio: float, cap: int,
-                        max_dev_frac: float) -> bool:
+                        max_dev_frac: float, tex_root=None,
+                        overlays=None) -> bool:
     """Decimate an already-parsed NIF in place and write it to dst_path."""
     if not _decimate_nif_inplace(nif_data, decimate_ratio, cap, max_dev_frac):
         return False
-    return _write_decimated(nif_data, src_stem, dst_path)
+    return _write_decimated(nif_data, src_stem, dst_path, tex_root, overlays)
 
 
+def _write_decimated(nif_data, src_stem: str, dst_path: Path, tex_root=None,
+                     overlays=None) -> bool:
+    """Write an already-decimated NIF to dst_path (+ its .generated marker).
 
-def _write_decimated(nif_data, src_stem: str, dst_path: Path) -> bool:
-    """Write an already-decimated NIF to dst_path (+ its .generated marker)."""
-    # Whatever this was derived from, it ships as LOD â€” never with parallax.
-    # Here rather than in _decimate_and_write so BOTH callers are covered: the
-    # coarser `_far8`/`_far16` tiers are written straight through this.
+    Whatever this was derived from, it ships as LOD: never with parallax, and
+    never reading a detail overlay's blend weight as opacity. Both live here
+    rather than in `_decimate_and_write` so BOTH callers are covered -- the
+    coarser `_far8`/`_far16` tiers are written straight through this.
+    """
     strip_parallax(nif_data)
+    if tex_root is not None and overlays:
+        redirect_overlay_diffuses(nif_data, tex_root, overlays)
 
     # Rename root to <stem>_far
     for root in nif_data.roots:
@@ -772,7 +862,7 @@ def has_authored_lod(src_meshes_dir, far_rel) -> bool:
 
 
 def _plan_far_tasks(stats, src_meshes_dir, gen_meshes_dir, referenced_models,
-                    force_regen_generated, tex_root):
+                    force_regen_generated, tex_root, overlays=None):
     """(_far_nif_worker task tuples, models seen) for one plugin tree.
 
     Full models and AUTHORED _far.nif resolve against `src_meshes_dir`; the
@@ -810,7 +900,7 @@ def _plan_far_tasks(stats, src_meshes_dir, gen_meshes_dir, referenced_models,
             continue
         need8 = need16 = (not tree) and obnd_max_dim(stat) >= LOD8_MIN_SIZE
         tasks.append((src, dst, tree, stat.get('obnd'), rel, tex_root,
-                      need8, need16))
+                      need8, need16, overlays))
     return tasks, seen
 
 
@@ -819,22 +909,19 @@ def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
                                workers: int = None,
                                force_regen_generated: bool = False,
                                tex_root: 'Path | None' = None,
-                               gen_meshes_dir: 'Path | None' = None) -> int:
+                               gen_meshes_dir: 'Path | None' = None,
+                               overlay_diffuses: 'set | None' = None) -> int:
     """Generate _far.nif files for all LOD-flagged stats that lack one.
 
-    TREE-type stats get a crossed-quad billboard card; everything else is
-    QEM-decimated from the full mesh. `output_meshes_dir` is the SOURCE tree
-    (full models and authored _far.nif); `gen_meshes_dir` receives the
+    TREE-type stats get a billboard card; everything else is QEM-decimated.
+    `output_meshes_dir` is the SOURCE tree; `gen_meshes_dir` receives the
     GENERATED ones and defaults to it. `tex_root` defaults to
     <output_meshes_dir>/../textures. `force_regen_generated` rewrites files
-    carrying a .nif.generated marker; authored files are never overwritten.
-
-    Runs on multiprocessing.Pool for true CPU parallelism (PyFFI is GIL-bound),
-    each worker seeded with the parent's asset namespace.
+    with a .nif.generated marker; authored files are never overwritten.
+    `overlay_diffuses` is this plugin's APPLY_HILIGHT2 set, redirected by
+    `redirect_overlay_diffuses`. Returns the number created.
 
     See: docs/commentary/asset_convert_terrain.md#generated-far-nif-belong-to-the-lod-mod
-
-    Returns the number of _far.nif files successfully created.
     """
     import multiprocessing as mp
 
@@ -847,7 +934,7 @@ def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
 
     tasks, seen = _plan_far_tasks(stats, output_meshes_dir, gen_meshes_dir,
                                   referenced_models, force_regen_generated,
-                                  tex_root)
+                                  tex_root, overlay_diffuses)
 
     if not tasks:
         print(f'  LOD: all {len(seen)} unique models already have _far.nif')
@@ -930,7 +1017,7 @@ def _render_missing_billboard(src: Path, model_rel: str, tex_root: Path) -> bool
 
 def _far_nif_worker(args: tuple) -> bool:
     """Top-level worker for multiprocessing.Pool â€” must be picklable."""
-    src, dst, tree, obnd, model_rel, tex_root, need8, need16 = args
+    src, dst, tree, obnd, model_rel, tex_root, need8, need16, overlays = args
     if tree:
         if generate_tree_billboard_far(dst, obnd, model_rel, tex_root):
             return True
@@ -949,7 +1036,8 @@ def _far_nif_worker(args: tuple) -> bool:
     if not dst.exists() or _is_generated(dst):
         if not src.exists():
             return False
-        if not generate_far_nif(src, dst):
+        if not generate_far_nif(src, dst, tex_root=tex_root,
+                                overlays=overlays):
             return False
 
     # Far-ring tiers are decimated FROM the _far.nif (also works for the
@@ -1019,7 +1107,7 @@ def _far_nif_worker(args: tuple) -> bool:
                 except OSError:
                     pass
             continue
-        _write_decimated(nif_data, dst.stem, dst_tier, tex_root)
+        _write_decimated(nif_data, dst.stem, dst_tier, tex_root, overlays)
     return True
 
 

@@ -573,35 +573,65 @@ decided. That diffuse must keep its alpha and may not be stripped to BC1 later.
 Measured on the author's Nehrim parallax mod: **1** shape of **39,201**, but the
 converter runs on plugins nobody has measured.
 
-### <a id="detail-overlay-diffuses"></a>Detail-overlay diffuses: REMOVED, and why
+### <a id="detail-overlay-diffuses"></a>Detail-overlay diffuses get a LOD-only copy
 
-A `HILIGHT2` diffuse's alpha is a blend weight rather than a mask. Harmless in
-the full mesh, since nothing samples that channel as transparency — but object
-LOD does: LODGen stamps every baked shape `slsf_2_lod_objects` and the LOD
-shader reads diffuse alpha as opacity, so `RockGreatForest645` was solid up
-close and see-through at distance.
+**Code:** `redirect_overlay_diffuses` in `asset_convert/lod/lod_far_gen.py`
 
-The fix was `lod_gen._force_opaque_lod_diffuses`: mesh conversion recorded every
-HILIGHT2 diffuse to `export/<plugin>/overlay_diffuses.txt`, and the LOD stage
-wrote an alpha-flattened COPY into `output/AutoConvertLOD/`'s texture tree at
-the same relative path, relying on install order to shadow the plugin's file.
+`APPLY_HILIGHT2` marks a diffuse whose ALPHA the source reads as a per-texel
+DETAIL BLEND WEIGHT, not as transparency. Two readers want incompatible things
+from that one channel:
 
-**All of it is gone.** The copies were written with
-`Image.fromarray(...).save(format='DDS')` — uncompressed 32bpp with NO mipmap
-chain. Measured on a full build: 200 files, **401.6 MB** (~100 MB as DXT5), all
-200 mipless, and since the copy shadowed the original it was also the one the
-game sampled at distance. It additionally put 192 plugin-owned texture paths
-inside the LOD mod, where `drop_staged_meshes` — which sweeps only `meshes/` —
-never reclaimed them.
+- the **full-size mesh still needs that channel as authored** — confirmed in
+  game, where removing the LOD-side fix outright brought the bug straight back;
+- **object LOD must not have it.** LODGen stamps `slsf_2_lod_objects` on every
+  baked shape and the LOD object shader samples diffuse alpha as OPACITY, so
+  `RockGreatForest645` renders solid up close and see-through at distance.
 
-The record chain (`_record_overlay`, the `overlay_diffuses` stats key,
-`texture_prune.OVERLAY_MANIFEST_NAME`) was deleted with it: nothing else ever
-read the manifest, so it had become write-only.
+So one file cannot serve both, and two tempting fixes are both wrong:
 
-Object LOD therefore renders these overlays with their authored alpha again.
-If the see-through-at-distance symptom returns, fix it in the PLUGIN's own
-texture — `parallax.strip_diffuse_alpha` already re-containers DXT3/5 as DXT1
-losslessly and keeps every mip — never in a second shadowing copy.
+| attempt | why it fails |
+|---|---|
+| flatten the plugin's texture in place | destroys the blend weight the full mesh reads. **Shipped, and reverted before it built** |
+| remove the fix entirely | the transparency bug came straight back. **Confirmed in game** |
+| shadow a copy at the SAME path from the LOD mod | two mods hold one path, so install order decides. PIL wrote it **uncompressed and mipless**: 200 files, **401.6 MB** (~100 MB as DXT5), and 192 plugin-owned paths inside `AutoConvertLOD`, which `drop_staged_meshes` (meshes only) never reclaimed |
+
+The fix is a **distinct path**, applied while the `_far` mesh is generated:
+`redirect_overlay_diffuses` writes `<name>_lod.dds` beside the original and
+repoints the LOD mesh's slot 0 at it. Every file then has exactly one reader --
+the plugin's texture keeps its alpha for the full mesh, the `_lod.dds` copy is
+opaque for the tiles, and nothing is shadowed or swept. No `.bto` needs
+patching: LODGen bakes whatever path the mesh names.
+
+The manifest reaches it unchanged from the mesh stage: `_record_overlay`
+(`geometry_shader.py`) collects every `APPLY_HILIGHT2` diffuse into
+`stats['overlay_diffuses']`, `convert_meshes` writes it as
+`texture_prune.OVERLAY_MANIFEST_NAME` in the plugin's EXPORT asset dir, and
+`create_lod._supplier_overlay_dirs` hands those dirs to `generate_lod`
+index-aligned with `far_nif_dirs`, so `_overlays_by_asset_dir` can pair each
+plugin's output tree with its own set. Keys are the CONVERTED path
+(post-`tes4\` rewrite, forward slashes, lowercased), which is what the shipped
+mesh references.
+
+It runs from `_write_decimated`, beside `strip_parallax`, so the coarser
+`_far8`/`_far16` tiers are covered by the same call. `strip_alpha_to_bc1` does
+the conversion losslessly -- a DXT3/DXT5 block is 8 bytes of alpha followed by 8
+bytes of color in exactly BC1's layout, so the color half is copied verbatim and
+**every mip survives**; an existing `_lod.dds` is reused, so a re-run and a
+parallel worker are both safe.
+
+Verified on `anvilaltar01.nif` (10 slot-0 diffuses, Oblivion.esm): the **2**
+manifest-listed overlays were redirected and copied (DXT5 → DXT1, 9 and 10 mips
+preserved, each exactly half the source bytes), every original byte-identical
+afterwards, and `texture_prune.refs_from_assets` harvested both `_lod.dds`
+references back out of the generated `_far.nif`, so a packed build keeps them.
+
+The discriminator is the AUTHORED apply mode, never measured alpha. Two of the
+diffuses left alone on that same mesh — `rfdunxcolmlitebase01`,
+`rfdunxcolmdark003` — are **also DXT5**: alpha alone cannot tell an overlay from
+a cutout mask. Gating on "has an alpha channel" instead of the manifest was
+measured across 4,000 generated `_far` meshes and would have copied **2,044 of
+3,557** diffuses (~678 MB of sources) rather than the authored **64**
+(Oblivion.esm) and **128** (Nehrim.esm).
 
 The key is the CONVERTED path (post-`tes4\` rewrite), because that is what the
 shipped mesh — and therefore the baked `.bto` tile — actually references.
