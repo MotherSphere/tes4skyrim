@@ -57,6 +57,7 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [asset_convert_animation.md](commentary/asset_convert_animation.md) | asset_convert/havok/hkx_anim.py — animation and behaviour graphs |
 | [asset_convert_armor.md](commentary/asset_convert_armor.md) | asset_convert/character/body_wrap.py — worn armor, skin and fitting |
 | [asset_convert_audio.md](commentary/asset_convert_audio.md) | asset_convert/audio/audio_converter.py - sound and music |
+| [asset_convert_bsa.md](commentary/asset_convert_bsa.md) | asset_convert/sources/bsa_pack.py — BSA packing and staging |
 | [asset_convert_collision.md](commentary/asset_convert_collision.md) | asset_convert/collision/collision.py — Havok collision |
 | [asset_convert_creature.md](commentary/asset_convert_creature.md) | asset_convert/havok/creature_pipeline.py - creature conversion |
 | [asset_convert_facegen.md](commentary/asset_convert_facegen.md) | asset_convert/character/facegen_tri.py - faces, skin tone and tints |

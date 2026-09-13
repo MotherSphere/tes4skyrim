@@ -11,7 +11,7 @@
 - [Per-game asset namespace](#per-game-asset-namespace)
   - [A master is resolved by `record_dir`, never by joining its name](#master-resolved-by-record-dir)
     - [...and the ROOT it resolves against is found by marker, not by `.parent`](#export-root-by-marker)
-- [Tree billboards are named, never written down](#tree-billboards-are-named-never-written-down)
+- [The blacklist prune](#the-blacklist-prune)
 
 ## Oblivion parallax → Skyrim height maps (`asset_convert/texture/parallax.py`, opt-in, 2026-08-15)
 <a id="oblivion-parallax-skyrim-height-maps"></a>
@@ -860,40 +860,82 @@ harmless, explicit, and independent of environment inheritance.
 plugins must call `set_namespace` for each -- it is the phase's entry point
 that owns this, not the pool.
 
-## Tree billboards are named, never written down
-<a id="tree-billboards-are-named-never-written-down"></a>
+## The blacklist prune
+<a id="the-blacklist-prune"></a>
 
-**Code:** `refs_from_tree_billboards` in `asset_convert/texture/texture_prune.py`
+**Code:** `is_excluded` in `asset_convert/texture/texture_prune.py`
 
-A TREE record points at a SpeedTree model (MODL names a `.spt`), and the
-distant-LOD card is the shipped render of that same tree, found BY NAME:
-`<billboard dir>/<model stem>.dds`. Nothing writes that path down -- not the
-record, not a NIF -- so neither `refs_from_records` (which matches `.dds`
-literals) nor the mesh manifest (billboards belong to no mesh) can see it. The
-prune dropped 43 of Oblivion.esm's 245 billboards from the archive. The loose
-`output/` copy survives, so it only ever showed as missing distant trees in a
-PACKED build.
+The prune is a BLACKLIST of categories Skyrim cannot load, not a keep-set
+reconstructed from references. A blacklist can only ship a file nothing needs;
+a keep-set can WITHHOLD one something needs, and that failure is invisible in
+testing.
 
-Two producers cover it, and they must agree:
+### Why the keep-set was removed
 
-1. This function, from the plugin's own `TREE.txt`.
-2. The `late` `_far.nif` scan in `build_refs`, which reads the path the
-   generator actually embedded.
+It rebuilt each texture's name from the records, the mesh manifest and a scan
+of late assets, then packed only what it had predicted. Any name it failed to
+predict was dropped from the archive while surviving in `output/` -- so the
+mesh rendered untextured for anyone installing the BSA and looked perfect in
+loose-file testing. Three independent instances, all found in one session:
 
-`generate_tree_billboard_far` retries a stem without its leading digits --
-TWMP prefixes tree MESHES with load-order digits (`00llltreevwelmforestmosssu`)
-that the billboard TEXTURES do not carry. Measured: 8 TWMP `_far.nif` embed the
-stripped name. Only producer 2 saw those, so this function keeps the bare
-variant as well; otherwise removing the generator's retry would silently drop
-them from the archive.
+- **Tree billboards.** The generator names a card after the OUTPUT record's
+  model; the keep-set guessed from the EXPORT's `.spt` MODL. Import fans 14
+  source SPTs out into 30 per-record NIFs, so the two disagree by
+  construction: 58 of 63 billboards dropped from Unique Landscapes, 136 from
+  Nehrim, 33 from Oblivion. An earlier fix had reduced Oblivion's from 43 by
+  adding a second producer, which is the shape of the problem -- each new
+  producer covers one more way to spell a name it still has to guess.
+- **Creature textures.** `creatures/rat`, `bear`, `minotaur`, `chicken` and
+  others dropped across UL and Oblivion, cause never diagnosed.
+- **`obliviongate` and `fire`**, ~50% and ~20% dropped, never diagnosed.
 
-Measured against the authored source across 453 TREE records in 5 plugins, the
-MODL stem is the right key and EditorID adds nothing:
+Those last two were never explained because the design makes a drop
+unremarkable: every run dropped thousands of files legitimately, so a
+wrongly-dropped one had nowhere to stand out.
 
-```
-both=233  editorid_only=0  modl_only=192  neither=28
-```
+### The rules
 
-`editorid_only = 0` -- EditorID never rescues a record the MODL stem misses.
-Shared stems are genuine: `darkwoodgrosserbaumbelaubt` serves 6
-`TreeDarkwoodFreeVar*` records, none of which ship their own card.
+Each excludes a whole second-level subtree (below the game namespace), plus a
+non-texture extension rule. Verified against every path named by 36,128
+converted meshes across 8 plugins -- **zero** of the files these rules drop is
+named by any mesh:
+
+| rule | files | MB | false positives |
+|---|---|---|---|
+| `faces` | 11,068 | 496.6 | 0 |
+| `menus` | 6,701 | 400.0 | 0 |
+| `menus80` | 3,669 | 177.8 | 0 |
+| `menus50` | 3,787 | 52.9 | 0 |
+| `landscapelod` | 264 | 213.1 | 0 |
+| `distantlod` | 0 | 0.0 | 0 |
+| `lowres` | 758 | 1.5 | 0 |
+| non-`.dds`/`.tga` | 150 | 1,120.3 | 0 |
+
+`faces/` is FaceGen output keyed `<formid>_0.dds`, which Skyrim regenerates
+from NPC records; `landscapelod/` is superseded by our own bake into
+`AutoConvertLOD`; the `menus*` trees are Oblivion UI atlases.
+
+The extension rule exists because mods ship build junk under `textures/`: one
+nests an entire Oblivion `Data` folder (`.bsa`, `.esp`, `dlclist.txt` --
+1.1 GB) under an architecture path. The only extensions on disk across the
+corpus are `.dds` (62,170) and `.tga` (1); everything else is junk.
+
+### What is deliberately NOT excluded
+
+`characters/` holds 254 MB of Oblivion NPC art and we ship no NPC meshes, so
+nearly all of it is dead -- but not all. Measured, 52 files under it ARE named
+by shipped meshes: all of `characters/imperial/**` (44 files -- vanilla body
+maps: `footfemale`, `handmale`, `upperbodymale`, `underwear`), plus
+`characters/hair/**`, `characters/*/hair/**` (`ren/hair/rengrey.dds`, nested
+one level deeper than a top-level `hair` exemption would catch),
+`characters/frost zombie/**`, and `arenaspectator.dds` at the root. Excluding
+the subtree needs five exemptions carved back out of it, and `imperial` is
+only special because it happens to be the vanilla body race -- the next plugin
+could use `nord/`. A blacklist that needs a whitelist inside it is not a
+category rule, so `characters/` ships whole.
+
+Likewise `nehrim/nehrim/` (600 files, 191 MB, 0 named -- a mod author's
+dumping ground of `bell.dds`, `cube.dds`, `elevator01.dds`) is genuinely dead,
+but the rule to catch it would name one plugin's folder. Both are accepted
+dead weight: shipping a few hundred MB nothing reads is strictly cheaper than
+one texture that fails to ship.

@@ -423,8 +423,8 @@ def test_texture_manifests_live_beside_the_meshes_they_describe(tmp_path):
 
     They list textures the SHARED meshes reference, and asset_pipeline writes
     them beside those meshes. Treating them as per-plugin records stranded them
-    in a folder the prune never reads, which made `build_refs` abort the whole
-    BSA pack with "no mesh texture manifest".
+    in a folder nothing reads, which left the LOD stage without the overlay
+    diffuses it needs.
     """
     from asset_convert.texture import texture_prune
     from output_layout import assets_for

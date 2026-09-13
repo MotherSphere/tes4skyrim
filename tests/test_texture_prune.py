@@ -1,312 +1,108 @@
-"""The prune's keep-set must speak the same paths the importer writes.
+"""The pack filter must never withhold a texture something references.
 
-A texture the plugin references but the keep-set spells differently is left out
-of the BSA and never ships. That failure is invisible offline — the record is
-correct, the file is still on disk because the mesh phase re-copies the whole
-texture tree every run — and only shows in game as untextured terrain.
+The prune is a blacklist of categories Skyrim cannot load.  Its predecessor
+rebuilt a keep-set from references and packed only what it predicted, so any
+name it failed to predict was dropped from the BSA while surviving in
+`output/` -- invisible in loose-file testing, untextured in a packed install.
+These tests pin the categories and, above all, that ordinary asset paths and
+generated billboards are never excluded.
 """
 
-import re
-
-from asset_convert import game_paths as gp
-from asset_convert.nif.tex_paths import rewrite_tex_path
 from asset_convert.texture import texture_prune as tp
-from tes5_import.record_types.common import prefix_path
 
 
-def _write(tmp_path, name, body):
-    (tmp_path / name).write_text(body, encoding='utf-8')
+class TestExcludedCategories:
+    """Each blacklisted subtree, verified to drop zero mesh-named files."""
+
+    def test_facegen_bakes_are_excluded(self):
+        """FaceGen output is keyed by FormID; Skyrim regenerates its own."""
+        assert tp.is_excluded('tes4/faces/oblivion.esm/0001a2b3_0.dds')
+        assert tp.is_excluded('nehrim/faces/nehrim.esm/000f00d_1.dds')
+
+    def test_oblivion_ui_atlases_are_excluded(self):
+        """Skyrim's interface shares no art with Oblivion's."""
+        for d in ('menus', 'menus80', 'menus50'):
+            assert tp.is_excluded('tes4/%s/icons/quest.dds' % d)
+
+    def test_superseded_lod_is_excluded(self):
+        """Our own bake into AutoConvertLOD replaces the shipped tiles."""
+        assert tp.is_excluded('tes4/landscapelod/generated/tamriel.32.0.0.dds')
+        assert tp.is_excluded('tes4/distantlod/anything.dds')
+
+    def test_lowres_fallbacks_are_excluded(self):
+        """Oblivion's low-res copies; Skyrim uses mipmaps instead."""
+        assert tp.is_excluded('tes4/lowres/dungeons/fortruins/wall.dds')
+
+    def test_only_the_second_segment_matches(self):
+        """A blacklisted word deeper in the path is somebody's real asset."""
+        assert not tp.is_excluded('tes4/architecture/menus/signpost.dds')
+        assert not tp.is_excluded('tes4/clutter/faces/mask01.dds')
 
 
-class TestSharedMapSiblings:
-    """A variant diffuse borrows its base name's maps, and nothing records it.
+class TestNonTextureFiles:
+    """Mods ship build junk under textures/; only real textures are packed."""
 
-    `brumawoodpost_grey.dds` ships without its own normal map; the engine loads
-    `brumawoodpost_n.dds` from the same folder. `_companions` derives only from
-    the full name, so it invents `brumawoodpost_grey_n.dds` (which does not
-    exist) while the map actually in use is left out of the archive. Seen on
-    Nehrim as `armor/nehrimsoldier/cuirass_n.dds`, used by `cuirass_b.dds`.
+    def test_stray_data_folder_is_excluded(self):
+        """One mod nests a whole 1.1 GB Oblivion Data folder under textures/."""
+        base = 'tes4/morroblivion/improved/architecture/mournhold/data/'
+        for name in ('beautiful cities of morrowind - textures.bsa',
+                     'dlcshiveringisles - meshes.bsa',
+                     'beautiful cities of morrowind.esp',
+                     'dlclist.txt', 'credits.txt'):
+            assert tp.is_excluded(base + name)
+
+    def test_texture_formats_are_packed(self):
+        """The two extensions the engine loads from a textures archive."""
+        assert not tp.is_excluded('tes4/architecture/anvil/wall.dds')
+        assert not tp.is_excluded('tes4/architecture/anvil/wall.tga')
+
+    def test_extensionless_is_excluded(self):
+        """A file with no suffix at all is never a texture."""
+        assert tp.is_excluded('tes4/architecture/readme')
+
+
+class TestReferencedAssetsAlwaysShip:
+    """The regression the blacklist exists to prevent.
+
+    Generated tree billboards are named after the OUTPUT record, which the old
+    keep-set guessed from the EXPORT's `.spt` MODL.  Import fans one SPT out
+    into several per-record NIFs, so the two disagreed by construction: 58 of
+    63 billboards vanished from Unique Landscapes' archive, 136 from Nehrim.
+    Nothing about a generated name may affect whether it ships.
     """
 
-    @staticmethod
-    def _tree(tmp_path, names):
-        tex = tmp_path / 'textures' / 'armor' / 'nehrimsoldier'
-        tex.mkdir(parents=True)
-        for n in names:
-            (tex / n).write_bytes(b'DDS ')
-        return tmp_path
+    def test_generated_billboards_ship(self):
+        """Billboards named for the record, the model, or with a digit prefix."""
+        for stem in ('xulrhshrubeuonymus01', 'ulsvtreewhitepinesnowdead',
+                     '1treesnowgumfree', 'shrubeuonymussu'):
+            assert not tp.is_excluded('tes4/trees/billboards/%s.dds' % stem)
+            assert not tp.is_excluded('tes4/trees/billboards/%s_n.dds' % stem)
 
-    def test_variant_diffuse_keeps_the_base_normal_map(self, tmp_path):
-        self._tree(tmp_path, ['cuirass_b.dds', 'cuirass_n.dds'])
-        # only the variant is referenced; the base diffuse is not even shipped
-        refs = {'armor/nehrimsoldier/cuirass_b.dds'}
+    def test_creature_and_character_textures_ship(self):
+        """Body and hair maps shipped meshes name, including nested hair."""
+        for key in ('tes4/creatures/rat/rat.dds',
+                    'tes4/characters/imperial/male/upperbodymale.dds',
+                    'tes4/characters/hair/argonian.dds',
+                    'nehrim/characters/ren/hair/rengrey.dds'):
+            assert not tp.is_excluded(key)
 
-        rescued = tp._shared_maps_on_disk(tmp_path, refs)
-        assert 'armor/nehrimsoldier/cuirass_n.dds' in rescued
-
-    def test_an_unrelated_map_is_not_rescued(self, tmp_path):
-        """The rescue must not become 'keep every map in a used folder'."""
-        self._tree(tmp_path, ['cuirass_b.dds', 'cuirass_n.dds', 'helmet_n.dds'])
-        refs = {'armor/nehrimsoldier/cuirass_b.dds'}
-
-        rescued = tp._shared_maps_on_disk(tmp_path, refs)
-        assert 'armor/nehrimsoldier/helmet_n.dds' not in rescued
-
-    def test_rescue_only_covers_files_that_exist(self, tmp_path):
-        """It is disk-bounded: it can never invent a path."""
-        self._tree(tmp_path, ['cuirass_b.dds'])
-        refs = {'armor/nehrimsoldier/cuirass_b.dds'}
-
-        assert tp._shared_maps_on_disk(tmp_path, refs) == set()
+    def test_ordinary_assets_ship(self):
+        """Architecture, clutter, landscape and plugin-named folders."""
+        for key in ('tes4/architecture/anvil/anvilhouse01.dds',
+                    'tes4/clutter/books/book01.dds',
+                    'tes4/landscape/grass01_n.dds',
+                    'nehrim/nehrim/elevator01.dds'):
+            assert not tp.is_excluded(key)
 
 
-class TestRecordTexturePrefixes:
-    def test_ltex_icon_is_relative_to_the_landscape_folder(self, tmp_path):
-        """LTEX ICON omits `landscape\\`; the importer prepends it, so must we.
+class TestTextureRefsIn:
+    """The binary scanner still backs the mesh manifest and the LOD stage."""
 
-        Nehrim shipped 252 of 484 referenced landscape texture slots outside
-        every BSA because of exactly this: the keep-set held
-        `tes4/oblivion/terrainhd...dds` while the plugin asks for
-        `tes4/landscape/oblivion/terrainhd...dds`. Nothing matched, so they
-        were left out of the BSA and the terrain rendered untextured.
-        Mirrors tes5_import/record_types/world.py:111.
-        """
-        _write(tmp_path, 'LTEX.txt',
-               '---RECORD_BEGIN---\n'
-               'Signature=LTEX\n'
-               'EditorID=TerrainHDOblivionGrass\n'
-               'ICON=Oblivion\\\\TerrainHDOblivionLavaRock02.dds\n'
-               '---RECORD_END---\n')
-        refs = tp.refs_from_records(tmp_path)
+    def test_finds_paths_in_binary(self):
+        """The walk back stops only at a byte illegal in a path."""
+        raw = b'\x00\x04\x00textures\\architecture\\wall.dds\x00junk'
+        assert tp.texture_refs_in(raw) == [b'textures\\architecture\\wall.dds']
 
-        # what the plugin actually asks for
-        assert 'tes4/landscape/oblivion/terrainhdoblivionlavarock02.dds' in refs
-        # the un-prefixed spellings stay too — harmless, and a plugin that
-        # already spells the folder out must keep matching
-        assert 'tes4/oblivion/terrainhdoblivionlavarock02.dds' in refs
-
-    def test_a_plain_icon_record_gets_no_folder_prefix(self, tmp_path):
-        """Only LTEX is folder-relative; nothing else may gain a prefix."""
-        _write(tmp_path, 'BOOK.txt',
-               '---RECORD_BEGIN---\n'
-               'Signature=BOOK\n'
-               'ICON=Clutter\\\\Books\\\\Book01.dds\n'
-               '---RECORD_END---\n')
-        refs = tp.refs_from_records(tmp_path)
-
-        assert 'tes4/clutter/books/book01.dds' in refs
-        assert not any(r.startswith('tes4/landscape/') for r in refs)
-
-    def test_referenced_landscape_texture_survives_the_keep_set(self, tmp_path):
-        """End to end: the LTEX texture must be in build_refs, so it ships."""
-        export = tmp_path / 'export'
-        export.mkdir()
-        _write(export, 'LTEX.txt',
-               '---RECORD_BEGIN---\n'
-               'Signature=LTEX\n'
-               'ICON=TerrainMud02.dds\n'
-               '---RECORD_END---\n')
-        plugin_dir = tmp_path / 'out'
-        plugin_dir.mkdir()
-        # A non-empty manifest is required: build_refs refuses to build a
-        # keep-set without one, so a missing mesh pass cannot strip the
-        # textures that are in use out of the archive.
-        tp.write_manifest(export, {'tes4/clutter/unrelated.dds'})
-
-        refs = tp.build_refs(plugin_dir, export)
-        assert 'tes4/landscape/terrainmud02.dds' in refs
-        # the normal map rides along via _companions
-        assert 'tes4/landscape/terrainmud02_n.dds' in refs
-
-
-class TestPackTimeFilter:
-    """The keep-set is applied when STAGING the BSA, never by deleting.
-
-    An earlier design pruned `output/` in its own phase. That was wrong twice
-    over: the mesh phase re-copies the whole texture tree every run, so the
-    deletions were silently undone (which is why a broken keep-set went
-    unnoticed for so long), and the user tests with loose files, so deleting
-    from `output/` removed the assets under test.
-    """
-
-    @staticmethod
-    def _tree(tmp_path):
-        tex = tmp_path / 'textures' / 'tes4' / 'landscape'
-        tex.mkdir(parents=True)
-        for n in ('kept.dds', 'unreferenced.dds'):
-            (tex / n).write_bytes(b'DDS ')
-        (tmp_path / 'meshes').mkdir()
-        (tmp_path / 'meshes' / 'a.nif').write_bytes(b'NIF')
-        return tmp_path
-
-    def test_unreferenced_texture_is_left_out_of_the_archive(self, tmp_path):
-        from asset_convert.sources import bsa_pack
-        plugin = self._tree(tmp_path)
-        keep = {'tes4/landscape/kept.dds'}
-
-        staged = bsa_pack._collect_files(plugin, ['textures'], keep)
-        names = {p.as_posix() for _src, p, _sz in staged}
-        assert 'textures/tes4/landscape/kept.dds' in names
-        assert 'textures/tes4/landscape/unreferenced.dds' not in names
-
-    def test_the_filter_never_deletes_from_output(self, tmp_path):
-        """Loose-file testing must keep the full tree."""
-        from asset_convert.sources import bsa_pack
-        plugin = self._tree(tmp_path)
-        bsa_pack._collect_files(plugin, ['textures'],
-                                {'tes4/landscape/kept.dds'})
-
-        tex = plugin / 'textures' / 'tes4' / 'landscape'
-        assert (tex / 'kept.dds').is_file()
-        assert (tex / 'unreferenced.dds').is_file(), \
-            'staging must not remove anything from output/'
-
-    def test_no_keep_set_packs_everything(self, tmp_path):
-        """Without an export dir the filter is off — never guess."""
-        from asset_convert.sources import bsa_pack
-        plugin = self._tree(tmp_path)
-
-        staged = bsa_pack._collect_files(plugin, ['textures'], None)
-        assert len(staged) == 2
-
-    def test_non_texture_dirs_are_never_filtered(self, tmp_path):
-        """The keep-set is about textures/ only; meshes/ passes through."""
-        from asset_convert.sources import bsa_pack
-        plugin = self._tree(tmp_path)
-
-        staged = bsa_pack._collect_files(plugin, ['meshes'], set())
-        names = {p.as_posix() for _src, p, _sz in staged}
-        assert names == {'meshes/a.nif'}
-
-
-class TestBinaryTextureScan:
-    r"""`texture_refs_in` replaced a lazy-star regex; it must match it exactly.
-
-    The old pattern was `[A-Za-z0-9_\\/ .()&+-]{3,200}?\.dds` (IGNORECASE).
-    Lazy + leftmost means it took the longest legal run ending at each `.dds`,
-    which is what the hand-rolled walk reproduces — byte-identical output over
-    3,189 real Oblivion meshes and LOD tiles, 12.7x faster.
-
-    The `{3,200}` bounds the run BEFORE `.dds`, so a whole match reaches 204
-    bytes. Capping the whole match at 200 instead silently truncated the
-    longest paths; that is what this class caught.
-    """
-
-    # Verbatim copy of the regex this replaced. The class needs FOUR
-    # backslashes: `\\\\` in a raw bytes literal is an escaped `\` to the regex
-    # engine, i.e. a literal backslash in the class. Write two and the class
-    # loses the backslash, so every path truncates at its last separator.
-    _OLD_RE = re.compile(rb'[A-Za-z0-9_\\\\/ .()&+-]{3,200}?\.dds',
-                         re.IGNORECASE)
-
-    @staticmethod
-    def _keys(matches):
-        return {tp._norm(m) for m in matches} - {''}
-
-    def _assert_same(self, raw):
-        assert self._keys(tp.texture_refs_in(raw)) == \
-            self._keys(self._OLD_RE.findall(raw)), raw[:80]
-
-    def test_matches_the_old_regex_on_realistic_blobs(self):
-        for raw in (
-            b'\x00\x00' + rb'textures\tes4\rocks\rock01.dds' + b'\x00junk',
-            rb'data\textures\tes4\land\a_n.dds' + b'\x00\x01' + b'bcd.dds',
-            b'no textures here at all',
-            b'.dds',                      # nothing before it
-            b'ab.dds',                    # 2 chars: below the {3,} floor
-            b'abc.dds',                   # exactly at the floor
-            b'name with spaces (1)&x+y-z.dds',
-            rb'UPPER\MiXeD\CaSe.DDS',
-            b'back\x00to\x00back.dds\x00' + rb'second\one.dds',
-            b'\xff\xfe' + rb'deep\path\here.dds',
-        ):
-            self._assert_same(raw)
-
-    def test_adjacent_paths_do_not_bleed_into_each_other(self):
-        """Non-overlapping, exactly like finditer."""
-        raw = rb'first\a01.dds' + rb'second\b02.dds'
-        keys = self._keys(tp.texture_refs_in(raw))
-        assert keys == self._keys(self._OLD_RE.findall(raw))
-        assert len(keys) == 2
-
-    def test_a_run_longer_than_the_cap_matches_the_regex(self):
-        """{3,200} counts the run BEFORE '.dds' — the match runs to 204."""
-        raw = b'x' * 400 + b'.dds'
-        got = tp.texture_refs_in(raw)
-        assert len(got[0]) == 204
-        self._assert_same(raw)
-
-
-class TestAssetNamespace:
-    """Unrelated games must not collide in one flat Data namespace.
-
-    Measured before the split: FalloutNV and Oblivion shipped 14 mesh paths
-    and 24 texture paths in common, every one with DIFFERENT content.
-    See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
-    """
-
-    def _plugin(self, root, name, masters=()):
-        """An export dir whose _HEADER.txt declares `masters`."""
-        d = root / 'export' / name
-        d.mkdir(parents=True, exist_ok=True)
-        lines = ['Signature=TES4']
-        lines += ['Master[%d]=%s' % (i, m) for i, m in enumerate(masters)]
-        (d / '_HEADER.txt').write_text('\n'.join(lines), encoding='utf-8')
-        return d
-
-    def test_a_masterless_plugin_names_its_own_namespace(self, tmp_path):
-        """A game with no masters roots its own namespace."""
-        d = self._plugin(tmp_path, 'FalloutNV.esm')
-        assert gp.namespace_for(d) == 'falloutnv'
-
-    def test_oblivion_keeps_tes4_so_shipped_output_stays_valid(self, tmp_path):
-        """Renaming the largest existing tree would buy nothing."""
-        d = self._plugin(tmp_path, 'Oblivion.esm')
-        assert gp.namespace_for(d) == gp.DEFAULT_NAMESPACE == 'tes4'
-
-    def test_a_dependent_inherits_its_masters_namespace(self, tmp_path):
-        """Knights must keep resolving Oblivion cathedral art."""
-        self._plugin(tmp_path, 'Oblivion.esm')
-        child = self._plugin(tmp_path, 'Knights.esp', ['Oblivion.esm'])
-        assert gp.namespace_for(child) == 'tes4'
-
-    def test_the_chain_is_followed_to_its_masterless_root(self, tmp_path):
-        """A master of a master still decides the namespace."""
-        self._plugin(tmp_path, 'FalloutNV.esm')
-        mid = self._plugin(tmp_path, 'Fallout3.esm', ['FalloutNV.esm'])
-        assert gp.namespace_for(mid) == 'falloutnv'
-
-    def test_a_master_cycle_cannot_hang(self, tmp_path):
-        """A malformed header must terminate, not spin."""
-        self._plugin(tmp_path, 'A.esm', ['B.esm'])
-        b = self._plugin(tmp_path, 'B.esm', ['A.esm'])
-        assert gp.namespace_for(b)
-
-
-class TestNamespaceSidesAgree:
-    """The record writer and the asset copy must spell the same prefix.
-
-    If they disagree every converted record names a path no archive ships.
-    """
-
-    def test_both_sides_produce_the_same_path(self):
-        """rewrite_tex_path and prefix_path agree per namespace."""
-        src = 'textures' + chr(92) + 'architecture' + chr(92) + 'x.dds'
-        try:
-            for ns in ('tes4', 'falloutnv', 'nehrim'):
-                gp.set_namespace(ns)
-                asset = rewrite_tex_path(src.encode())
-                record = prefix_path(src)
-                assert asset.lower() == ('textures' + chr(92) + record).lower()
-        finally:
-            gp.set_namespace(gp.DEFAULT_NAMESPACE)
-
-    def test_another_games_prefix_is_still_namespaced(self):
-        """The idempotence check keys on the ACTIVE namespace, not a literal."""
-        try:
-            gp.set_namespace('falloutnv')
-            got = rewrite_tex_path(('Textures' + chr(92) + 'tes4' + chr(92)
-                                    + 'x.dds').encode())
-            assert got.lower().startswith('textures' + chr(92) + 'falloutnv')
-        finally:
-            gp.set_namespace(gp.DEFAULT_NAMESPACE)
+    def test_rejects_a_stub_shorter_than_three_bytes(self):
+        """Fewer than 3 bytes before '.dds' is noise, not a path."""
+        assert tp.texture_refs_in(b'\x00\x00.dds\x00') == []

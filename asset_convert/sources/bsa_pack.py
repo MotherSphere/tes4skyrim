@@ -7,10 +7,10 @@ Produces BSAs in ``output/<plugin>/``, alongside the converted ESM:
 Uses BSArch.exe (from xEdit / SSEEdit) for BSA5 (SSE) format creation.
 BSArch is searched in common locations; pass ``bsarch_path`` to override.
 
-Unreferenced textures
----------------------
+Excluded textures
+-----------------
 Oblivion's BSAs carry textures for content the conversion never emits, so the
-textures archive is filtered against ``texture_prune.build_refs`` as it is
+textures archive is filtered against ``texture_prune.is_excluded`` as it is
 staged.  The filter runs HERE and nowhere else: packing is the only phase that
 decides what ships, and a phase that deleted from ``output/`` instead would
 fight the mesh phase (which re-copies the whole texture tree every run) and
@@ -49,6 +49,7 @@ from pathlib import Path
 from core.subprocess_flags import POPEN_FLAGS, windows_cmd, to_wine_path
 from tes5_import.base.writer import pack_tes4_header
 from asset_convert import paths
+from asset_convert.texture import texture_prune
 
 # ---------------------------------------------------------------------------
 # Size limits
@@ -68,27 +69,42 @@ BSA_SIZE_LIMIT = BSA_HARD_LIMIT - BSA_OVERHEAD_BUDGET   # ~2.0 GiB of payload
 # Staging helpers
 # ---------------------------------------------------------------------------
 
+def long_path(path) -> str:
+    """Render a path for Win32 APIs that would otherwise stop at MAX_PATH.
+
+    Staged paths run `output/<plugin>/_bsa_staging_<type>/<subdir>/<rel>`, and
+    a long plugin name plus creature animdata takes that past 260 characters:
+    BSArch then reports `EAggregateException` under `-mt`, and "cannot find the
+    path specified" without it.  Verified: with 381-character staged paths the
+    prefix on BSArch's INPUT root packs the archive, and its absence fails.
+    See: docs/commentary/asset_convert_bsa.md#staging-past-the-path-limit
+    """
+    s = str(path)
+    if sys.platform != 'win32' or s.startswith('\\\\?\\') or not os.path.isabs(s):
+        return s
+    return '\\\\?\\' + os.path.normpath(s)
+
+
 def _link_or_copy(src: Path, dst: Path) -> None:
     """Create a hardlink dst → src; fall back to copy on cross-device error."""
+    long_dst = long_path(dst)
     try:
-        os.link(src, dst)
+        os.link(long_path(src), long_dst)
     except OSError:
-        shutil.copy2(src, dst)
+        shutil.copy2(long_path(src), long_dst)
 
 
-def _collect_files(plugin_dir: Path, subdir_names: 'list[str]',
-                   texture_keep: set = None) -> 'list[tuple[Path, Path, int]]':
+def _collect_files(plugin_dir: Path, subdir_names: 'list[str]'
+                   ) -> 'list[tuple[Path, Path, int]]':
     """Enumerate every file under plugin_dir/<subdir>/ for packing.
 
     Returns a list of (absolute_source, archive_relative_path, size_bytes),
     sorted by archive path so binning is deterministic across runs.
 
-    texture_keep: if given, the set of textures-root-relative keys the plugin
-    can actually ask for (see texture_prune.build_refs).  Anything under
-    textures/ outside that set is left out of the archive.  This is the ONLY
-    place the prune applies — it filters what gets packed and never deletes
-    from output/, so loose-file testing keeps the full tree and re-running the
-    pack is idempotent.
+    Anything under textures/ that `texture_prune.is_excluded` rejects is left
+    out of the archive.  This is the ONLY place the prune applies — it filters
+    what gets packed and never deletes from output/, so loose-file testing
+    keeps the full tree and re-running the pack is idempotent.
     """
     out: 'list[tuple[Path, Path, int]]' = []
     for name in subdir_names:
@@ -99,10 +115,9 @@ def _collect_files(plugin_dir: Path, subdir_names: 'list[str]',
         for f in src.rglob('*'):
             if not f.is_file():
                 continue
-            if is_textures and texture_keep is not None:
-                key = f.relative_to(src).as_posix().lower()
-                if key not in texture_keep:
-                    continue
+            if is_textures and texture_prune.is_excluded(
+                    f.relative_to(src).as_posix().lower()):
+                continue
             # Archive path keeps the top-level dir (meshes/..., textures/...)
             rel = Path(name) / f.relative_to(src)
             try:
@@ -149,11 +164,15 @@ def _stage_bin(
     entries: 'list[tuple[Path, Path, int]]',
     stage_root: Path,
 ) -> int:
-    """Hardlink one bin's files into stage_root, preserving archive paths."""
+    """Hardlink one bin's files into stage_root, preserving archive paths.
+
+    Directories are created through `long_path` for the same reason the links
+    are: a staged path can exceed MAX_PATH even where its source does not.
+    """
     count = 0
     for src, rel, _size in entries:
         dst = stage_root / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        os.makedirs(long_path(dst.parent), exist_ok=True)
         _link_or_copy(src, dst)
         count += 1
     return count
@@ -240,14 +259,18 @@ def _run_bsarch(
     compress: bool,
     results: dict,
 ) -> bool:
-    """Invoke BSArch on a staged directory.  Returns True on success."""
+    """Invoke BSArch on a staged directory.  Returns True on success.
+
+    Both paths go through `to_wine_path`, because BSArch resolves a plain
+    '/'-leading output path relative to the input directory rather than as
+    absolute (verified under Wine 11.0: without it BSArch wrote
+    "Z:<stage_root><bsa_path>" and failed "Path not found"); it no-ops on
+    Windows.  They then go through `long_path`, which lifts the staging root
+    past MAX_PATH on Windows and no-ops elsewhere.
+    """
     bsa_name = bsa_path.name
-    # BSArch resolves a plain '/'-leading output path relative to the input
-    # directory instead of as absolute (verified under Wine 11.0: without
-    # this it wrote "Z:\<stage_root>\<bsa_path>" and failed "Path not
-    # found") -- to_wine_path no-ops on Windows.
-    cmd = [bsarch, 'pack', to_wine_path(str(stage_root)),
-           to_wine_path(str(bsa_path)), '-sse', '-mt']
+    cmd = [bsarch, 'pack', long_path(to_wine_path(str(stage_root))),
+           long_path(to_wine_path(str(bsa_path))), '-sse', '-mt']
     if compress:
         cmd.append('-z')
 
@@ -333,11 +356,10 @@ def pack_bsas(
     additional archives, each paired with a generated dummy ESL loader plugin
     (``<stem>_loader.esl``, ``<stem>_loader_1.esl``, …) so Skyrim mounts it.
 
-    Textures nothing the plugin ships can reference are left OUT of the
-    textures archive (see ``texture_prune.build_refs``).  This is a pack-time
-    filter, not a delete: ``output/<plugin>/textures/`` keeps the full tree, so
-    loose-file testing is unaffected and re-packing is idempotent.  Without
-    ``export_dir``, or when the mesh manifest is missing, everything is packed.
+    Texture categories Skyrim cannot load are left OUT of the textures archive
+    (see ``texture_prune.is_excluded``).  This is a pack-time filter, not a
+    delete: ``output/<plugin>/textures/`` keeps the full tree, so loose-file
+    testing is unaffected and re-packing is idempotent.
 
     The source folder structure is NOT modified; original folders are left intact.
 
@@ -415,18 +437,6 @@ def pack_bsas(
 
     results: dict = {'packed': [], 'skipped': [], 'errors': [], 'loaders': []}
 
-    # The texture keep-set.  Building it needs the export text, so a caller
-    # without one (or a build whose mesh pass never ran) packs the full tree
-    # rather than guessing — the prune must never be the reason a texture in
-    # use goes missing.
-    texture_keep = None
-    if export_dir is not None:
-        from asset_convert.texture import texture_prune
-        try:
-            texture_keep = texture_prune.build_refs(plugin_dir, export_dir)
-        except RuntimeError as e:
-            print(f"  Texture prune SKIPPED, packing everything: {e}")
-
     # Overflow archives are mounted by generated loader ESLs.  A loader plugin
     # mounts both '<stem>.bsa' and '<stem> - Textures.bsa', so each spec keeps
     # its own overflow counter and they share the loader plugins by index.
@@ -435,7 +445,7 @@ def pack_bsas(
     for subdir_names, bsa_suffix, compress in specs:
         base_name = f"{stem} - {bsa_suffix}.bsa" if bsa_suffix else f"{stem}.bsa"
 
-        files = _collect_files(plugin_dir, subdir_names, texture_keep)
+        files = _collect_files(plugin_dir, subdir_names)
         if not files:
             print(f"  SKIP  {base_name} (no source content)")
             results['skipped'].append(base_name)
@@ -474,7 +484,7 @@ def pack_bsas(
                 f"_bsa_staging_{(bsa_suffix or 'main').lower()}_{bin_idx}"
             )
             if stage_root.exists():
-                shutil.rmtree(stage_root)
+                shutil.rmtree(long_path(stage_root))
             stage_root.mkdir(parents=True)
 
             try:
@@ -489,7 +499,7 @@ def pack_bsas(
                 results['errors'].append(err_msg)
             finally:
                 if stage_root.exists():
-                    shutil.rmtree(stage_root, ignore_errors=True)
+                    shutil.rmtree(long_path(stage_root), ignore_errors=True)
 
     # Generate one dummy ESL per overflow slot so the game mounts those BSAs.
     for i in range(loaders_needed):
