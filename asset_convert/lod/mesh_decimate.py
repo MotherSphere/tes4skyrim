@@ -13,10 +13,44 @@ See: docs/commentary/asset_convert_terrain.md#qem-decimation-tuning
 """
 
 import heapq
+import json
 import math
+import os
 from typing import Optional, Tuple
 
 import numpy as np
+
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+#: Detail presets: (stitch fraction, ratio, level-4 floor, far-ring floor).
+LOD_DETAIL_PRESETS = (
+    (0.008, 0.050, 24, 24),
+    (0.009, 0.050, 48, 32),
+    (0.009, 0.050, 72, 40),
+    (0.008, 0.050, 96, 48),
+    (0.005, 0.080, 96, 48),
+    (0.004, 0.100, 96, 48),
+    (0.003, 0.130, 96, 48),
+)
+
+#: Index into LOD_DETAIL_PRESETS used when nothing is configured.
+LOD_DETAIL_DEFAULT = 4
+
+
+def _configured_detail() -> int:
+    """`lodDetail` from conversion_config.json, clamped to a valid preset.
+
+    Read at import so every worker process picks it up without pickling state.
+    See: docs/commentary/asset_convert_terrain.md#object-lod-detail-presets
+    """
+    try:
+        with open(os.path.join(_REPO, 'conversion_config.json'),
+                  encoding='utf-8') as fh:
+            v = int(json.load(fh).get('lodDetail', LOD_DETAIL_DEFAULT))
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return LOD_DETAIL_DEFAULT
+    return max(0, min(v, len(LOD_DETAIL_PRESETS) - 1))
+
 
 #: Position weld tolerance, game units.
 WELD_EPS = 1e-3
@@ -34,7 +68,7 @@ _BOUNDARY_WEIGHT = 1.0
 _STITCH_MAX_EDGE_MULT = 1.0
 
 #: Proximity-stitch tolerance, as a fraction of the model diagonal.
-_STITCH_FRAC = 0.008
+_STITCH_FRAC = LOD_DETAIL_PRESETS[_configured_detail()][0]
 
 #: Edge-length regularization, multiplied by mean face area.
 _EDGE_LEN_REG = 0.5

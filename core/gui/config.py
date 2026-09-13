@@ -126,6 +126,29 @@ WINDING_CONFIG_KEY = "collisionWindingFix"
 WINDING_AUTO, WINDING_ON, WINDING_OFF = "auto", "on", "off"
 WINDING_MODES = (WINDING_AUTO, WINDING_ON, WINDING_OFF)
 
+#: conversion_config.json key for the object-LOD detail preset index.
+LOD_DETAIL_CONFIG_KEY = "lodDetail"
+
+
+def lod_detail_labels() -> tuple:
+    """One menu label per detail preset: its distant-LOD triangle multiplier.
+
+    Measured against preset 0, which is the pre-preset behaviour. No absolute
+    size: the setting applies to every worldspace and each bakes differently.
+    See: docs/commentary/asset_convert_terrain.md#object-lod-detail-presets
+    """
+    from asset_convert.lod.mesh_decimate import LOD_DETAIL_DEFAULT
+    out = []
+    for i, tri in enumerate(LOD_DETAIL_STEPS):
+        tag = "  (default)" if i == LOD_DETAIL_DEFAULT else ""
+        note = "  (old default)" if i == 0 else ""
+        out.append(f"{tri:.1f}x triangles{tag}{note}")
+    return tuple(out)
+
+
+#: Distant-LOD triangle multiplier per preset, measured against preset 0.
+LOD_DETAIL_STEPS = (1.00, 1.35, 2.60, 3.04, 3.48, 3.95, 4.74)
+
 #: (key, label, tooltip, short, row); `row` None means Tools menu, no button.
 GLOBAL_ACTIONS = [
     ("create_lod", "Create LOD",

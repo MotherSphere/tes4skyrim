@@ -29,7 +29,7 @@ rims drifted apart, and the gap was the hole.  Welding makes the shared rim one
 graph node, so a collapse moves both sides at once.
 
 BSLightingShaderProperty is COPIED from the source (correct flags, no
-recreation) — this fixes the missing ZBufferTest flag that caused objects to
+recreation) â€” this fixes the missing ZBufferTest flag that caused objects to
 not render in-game.
 """
 
@@ -52,9 +52,10 @@ from pyffi.formats.nif import NifFormat
 from asset_convert.lod.mesh_decimate import (compute_tangents,
                                              is_boundary_fraction,
                                              qem_decimate, vertex_normals,
+                                             LOD_DETAIL_PRESETS,
                                              MAX_DEV_FRAC,
                                              TOPO_BOUNDARY_WEIGHT,
-                                             WELD_EPS)
+                                             WELD_EPS, _configured_detail)
 
 
 # ---------------------------------------------------------------------------
@@ -74,11 +75,11 @@ def billboard_tex_dir() -> str:
 _SKYRIM_VER = 0x14020007
 _NIF_FLAGS  = 14
 
-#: Share of source verts to keep, targeting vanilla object-LOD density +25%.
-_DECIMATE_RATIO = 0.05
+#: Share of source verts to keep; paired with the stitch ceiling bounding it.
+_DECIMATE_RATIO = LOD_DETAIL_PRESETS[_configured_detail()][1]
 
 #: Floor on a model's combined budget: small props must still read as themselves.
-_MIN_TOTAL_TARGET = 24
+_MIN_TOTAL_TARGET = LOD_DETAIL_PRESETS[_configured_detail()][2]
 
 #: The base tier is bounded by the ratio alone; only _far8/_far16 cap verts.
 _NO_CAP = 1 << 30
@@ -94,8 +95,11 @@ _SF2_VERTEX_COLORS = 0x20
 
 _TIER_MIN_GAIN = 0.90
 
-TIER8  = dict(ratio=0.5,  cap=250, dev=0.08, suffix='_far8')
-TIER16 = dict(ratio=0.25, cap=120, dev=0.12, suffix='_far16')
+#: Far-ring tiers decimate FROM the _far.nif and carry their own vertex floor.
+_FAR_FLOOR = LOD_DETAIL_PRESETS[_configured_detail()][3]
+
+TIER8  = dict(ratio=0.5,  cap=250, dev=0.08, floor=_FAR_FLOOR, suffix='_far8')
+TIER16 = dict(ratio=0.25, cap=120, dev=0.12, floor=_FAR_FLOOR, suffix='_far16')
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +172,7 @@ def _write_shape_geometry(shape, d_v: np.ndarray, d_t: np.ndarray,
         except Exception:
             f_uv = None  # fall back: no UVs
 
-    # Vertex colors — remove
+    # Vertex colors â€” remove
     d.has_vertex_colors = False
     if hasattr(d, 'vertex_colors'):
         d.vertex_colors.update_size()
@@ -194,7 +198,7 @@ def _write_shape_geometry(shape, d_v: np.ndarray, d_t: np.ndarray,
                 if hasattr(d, 'tangents'):   d.tangents.update_size()
                 if hasattr(d, 'bitangents'): d.bitangents.update_size()
         else:
-            # No UVs — resize to new vert count with zero vectors
+            # No UVs â€” resize to new vert count with zero vectors
             if hasattr(d, 'tangents'):   d.tangents.update_size()
             if hasattr(d, 'bitangents'): d.bitangents.update_size()
 
@@ -266,26 +270,17 @@ def _shape_world_transform(root, shape):
     return walk(root, np.eye(4, dtype=np.float64))
 
 
-def _decimate_nif_inplace(nif_data, ratio: float,
-                          cap: int = _NO_CAP,
-                          max_dev_frac: float = MAX_DEV_FRAC) -> bool:
-    """Decimate all geometry in the NIF in-place as ONE welded topology.
+def _collect_decimatable(nif_data) -> List[tuple]:
+    """Solid shapes worth decimating, as (shape, data, verts, tris, uvs, world).
 
-    Every shape is transformed to root space and concatenated into a single
-    soup tagged per triangle with its source shape, decimated together so a
-    shared rim is one topology node, then split back out by tag so each shape
-    keeps its own texture and shader.  The budget counts WELDED nodes and
-    scales with the model's open-rim fraction.
-
-    Returns True if at least one shape survived.
-    See: docs/commentary/asset_convert_terrain.md#qem-topology-budget
+    Skips skinned shapes and anything without real geometry; `world` is the
+    shape's root-space transform, or None when no root reaches it.
     """
-    # ---- collect valid shapes ---------------------------------------------
     all_shapes: list = []
     for root in nif_data.roots:
         _collect_shapes(root, all_shapes)
 
-    valid: List[tuple] = []          # (shape, data, verts, tris, uvs, world)
+    valid: List[tuple] = []
     for shape in all_shapes:
         d = getattr(shape, 'data', None)
         if (d is None
@@ -312,7 +307,23 @@ def _decimate_nif_inplace(nif_data, ratio: float,
             if world is not None:
                 break
         valid.append((shape, d, v, t, uv, world))
+    return valid
 
+
+def _decimate_nif_inplace(nif_data, ratio: float,
+                          cap: int = _NO_CAP,
+                          max_dev_frac: float = MAX_DEV_FRAC,
+                          floor: int = 0) -> bool:
+    """Decimate all geometry in the NIF in-place as ONE welded topology.
+
+    Shapes are welded into one soup, decimated together, then split back out by
+    material tag.  The budget counts WELDED nodes, scales with the open-rim
+    fraction, and is clamped to `floor` (0 uses `_MIN_TOTAL_TARGET`) and `cap`.
+
+    Returns True if at least one shape survived.
+    See: docs/commentary/asset_convert_terrain.md#qem-topology-budget
+    """
+    valid = _collect_decimatable(nif_data)
     if not valid:
         return False
 
@@ -348,7 +359,7 @@ def _decimate_nif_inplace(nif_data, ratio: float,
                                axis=0))
     b_frac = float(is_boundary_fraction(verts, tris))
     topo_scale = 1.0 + TOPO_BOUNDARY_WEIGHT * b_frac
-    total_target = min(max(_MIN_TOTAL_TARGET,
+    total_target = min(max(floor or _MIN_TOTAL_TARGET,
                            int(weld_nodes * ratio * topo_scale)), cap)
 
     d_v, d_t, d_uv, d_m = qem_decimate(verts, tris, uvs, total_target,
@@ -436,7 +447,7 @@ def _write_billboard_flat_normal(path: Path, size: int = 128) -> None:
 
 
 def _billboard_geometry(width: float, z_bottom: float, z_top: float):
-    """Crossed-quad card verts/normals/uvs/tris (two quads at 90°)."""
+    """Crossed-quad card verts/normals/uvs/tris (two quads at 90Â°)."""
     hw = width / 2.0
     verts = np.array([
         (-hw, 0.0, z_bottom), (hw, 0.0, z_bottom),
@@ -457,7 +468,7 @@ def generate_tree_billboard_far(dst_path: Path, obnd, model_rel: str,
     """Write a crossed-quad billboard _far.nif for a TREE model.
 
     Uses Oblivion's own shipped billboard render
-    (textures\\tes4\\trees\\billboards\\<model stem>.dds — a full-tree render
+    (textures\\tes4\\trees\\billboards\\<model stem>.dds â€” a full-tree render
     including the trunk).  Card size comes from OBND, which the importer
     derived from the billboard dimensions, so proportions match.  Returns
     False if the billboard texture doesn't exist (caller falls back to
@@ -466,7 +477,7 @@ def generate_tree_billboard_far(dst_path: Path, obnd, model_rel: str,
     stem = os.path.splitext(os.path.basename(
         model_rel.replace('\\', '/')))[0].lower()
     # Some plugins prefix their tree MESHES with load-order digits that the
-    # shipped billboard TEXTURES do not carry — TWMP Valenwood/Elsweyr ships
+    # shipped billboard TEXTURES do not carry â€” TWMP Valenwood/Elsweyr ships
     # `00llltreevwelmforestmosssu.nif` against `llltreevwelmforestmosssu.dds`.
     # A miss here silently falls through to geometry decimation, which is how
     # 5,471-vertex trees ended up baked into every tile that places them:
@@ -663,9 +674,9 @@ def _read_skyrim_nif(src_path: Path):
 def strip_parallax(nif_data) -> int:
     """Clear the heightmap shader from a mesh about to be written as LOD.
 
-    🔴 A distant-LOD mesh must never carry parallax, and this is the only place
+    ðŸ”´ A distant-LOD mesh must never carry parallax, and this is the only place
     that can guarantee it. `_decimate_and_write` reduces the FULL model in
-    place and copies its shader properties verbatim — so a parallax source
+    place and copies its shader properties verbatim â€” so a parallax source
     hands its shader type 3, its `SLSF1_Parallax` flag and its slot-3 height
     map straight to the LOD tier, while the decimation rebuilds the geometry
     and drops the vertex colors that shader requires. The result renders
@@ -710,7 +721,7 @@ def _decimate_and_write(nif_data, src_stem: str, dst_path: Path,
 
 def _write_decimated(nif_data, src_stem: str, dst_path: Path) -> bool:
     """Write an already-decimated NIF to dst_path (+ its .generated marker)."""
-    # Whatever this was derived from, it ships as LOD — never with parallax.
+    # Whatever this was derived from, it ships as LOD â€” never with parallax.
     # Here rather than in _decimate_and_write so BOTH callers are covered: the
     # coarser `_far8`/`_far16` tiers are written straight through this.
     strip_parallax(nif_data)
@@ -864,8 +875,8 @@ def generate_missing_far_nifs(stats: dict, output_meshes_dir: Path,
     return success
 
 
-def _tier_path(far_path: Path, suffix: str) -> Path:
-    """foo_far.nif → foo<suffix>.nif (e.g. foo_far8.nif).
+def tier_path(far_path: Path, suffix: str) -> Path:
+    """foo_far.nif â†’ foo<suffix>.nif (e.g. foo_far8.nif).
 
     Strips whichever LOD suffix the base carries: FO3/FNV resolve to `_lod`,
     and assuming `_far` there would yield `foo_lodfar8.nif`.
@@ -918,23 +929,23 @@ def _render_missing_billboard(src: Path, model_rel: str, tex_root: Path) -> bool
 
 
 def _far_nif_worker(args: tuple) -> bool:
-    """Top-level worker for multiprocessing.Pool — must be picklable."""
+    """Top-level worker for multiprocessing.Pool â€” must be picklable."""
     src, dst, tree, obnd, model_rel, tex_root, need8, need16 = args
     if tree:
         if generate_tree_billboard_far(dst, obnd, model_rel, tex_root):
             return True
-        # No shipped billboard for this tree — RENDER one rather than falling
+        # No shipped billboard for this tree â€” RENDER one rather than falling
         # through to decimation.  Decimating a canopy is catastrophic at LOD
         # scale: the card is 8 verts, the decimated tree is 25-330 KB, and it
         # is baked once per placement.  Censused across the load order, 113
         # such trees accounted for 3.35 GB of baked geometry that becomes
-        # 0.05 GB as cards — 63x lighter — and one of them
+        # 0.05 GB as cards â€” 63x lighter â€” and one of them
         # (`dementiatree10l`, 8,006 placements in a single level-16 tile)
         # drove that tile to 663 MB on its own.
         if _render_missing_billboard(src, model_rel, tex_root):
             if generate_tree_billboard_far(dst, obnd, model_rel, tex_root):
                 return True
-        # Still nothing to draw with — fall back to decimation.
+        # Still nothing to draw with â€” fall back to decimation.
     if not dst.exists() or _is_generated(dst):
         if not src.exists():
             return False
@@ -945,17 +956,17 @@ def _far_nif_worker(args: tuple) -> bool:
     # hand-crafted vanilla _far meshes, which are already low-poly).
     #
     # Decimation mutates the parsed tree in place, so each tier needs its own
-    # parse — but they can all come from ONE disk read of the _far.nif we just
+    # parse â€” but they can all come from ONE disk read of the _far.nif we just
     # wrote, instead of re-reading (and re-stat'ing) the file per tier.  PyFFI
     # parsing is ~65% of this stage's runtime and 48% of all reads were these
     # tier re-reads.
     tiers = []
     if need8:
-        p8 = _tier_path(dst, TIER8['suffix'])
+        p8 = tier_path(dst, TIER8['suffix'])
         if not p8.exists() or _is_generated(p8):
             tiers.append((p8, TIER8))
     if need16:
-        p16 = _tier_path(dst, TIER16['suffix'])
+        p16 = tier_path(dst, TIER16['suffix'])
         if not p16.exists() or _is_generated(p16):
             tiers.append((p16, TIER16))
     if not tiers:
@@ -977,7 +988,7 @@ def _far_nif_worker(args: tuple) -> bool:
     except Exception:
         parent_verts = 0
 
-    for tier_path, tier in tiers:
+    for dst_tier, tier in tiers:
         nif_data = NifFormat.Data()
         try:
             fh = io.BytesIO(far_bytes)
@@ -988,27 +999,27 @@ def _far_nif_worker(args: tuple) -> bool:
         except Exception:
             continue
         if not _decimate_nif_inplace(nif_data, tier['ratio'], tier['cap'],
-                                     tier['dev']):
+                                     tier['dev'], tier['floor']):
             continue
         # A tier only earns its place if it is meaningfully lighter than the
         # mesh it would replace.  Many models are already at their floor after
-        # the base pass — every component is down to its minimum and the
-        # isolation guard refuses to go further — so asking for half of that
+        # the base pass â€” every component is down to its minimum and the
+        # isolation guard refuses to go further â€” so asking for half of that
         # returns the same geometry.  Writing it anyway costs generation time
         # and ships a duplicate mesh for LODGen to bake; leaving it absent
         # makes `_lod_meshes_for` fall back to the _far.nif, which is the same
         # geometry by a shorter route.
         tier_verts = _reachable_vert_count(nif_data)
         if parent_verts and tier_verts >= parent_verts * _TIER_MIN_GAIN:
-            if tier_path.exists() and _is_generated(tier_path):
+            if dst_tier.exists() and _is_generated(dst_tier):
                 try:
-                    tier_path.unlink()
-                    tier_path.with_suffix('.nif.generated').unlink(
+                    dst_tier.unlink()
+                    dst_tier.with_suffix('.nif.generated').unlink(
                         missing_ok=True)
                 except OSError:
                     pass
             continue
-        _write_decimated(nif_data, dst.stem, tier_path)
+        _write_decimated(nif_data, dst.stem, dst_tier, tex_root)
     return True
 
 

@@ -34,6 +34,7 @@ from core.gui.config import (
     REPO_ROOT,
     STEPS,
     WINDING_AUTO,
+    LOD_DETAIL_CONFIG_KEY,
     WINDING_CONFIG_KEY,
     WINDING_MODES,
     default_on_steps,
@@ -245,6 +246,7 @@ class GuiApp:
         self.status_var = self.timer_var = None
         self.cache_dl_var = self.pack_default_var = None
         self.winding_mode_var = self.parallax_var = self.tex_only_var = None
+        self.lod_detail_var = None
         self.step_vars = {}
         self.mesh_subdir_vars = []
         self.all_plugins = []
@@ -449,6 +451,17 @@ def _initial_winding(cfg: dict) -> str:
     return mode if mode in WINDING_MODES else WINDING_AUTO
 
 
+def _initial_lod_detail(cfg: dict) -> int:
+    """The saved LOD detail preset index, clamped to a real preset."""
+    from asset_convert.lod.mesh_decimate import (LOD_DETAIL_DEFAULT,
+                                                 LOD_DETAIL_PRESETS)
+    try:
+        idx = int(cfg.get(LOD_DETAIL_CONFIG_KEY, LOD_DETAIL_DEFAULT))
+    except (TypeError, ValueError):
+        return LOD_DETAIL_DEFAULT
+    return max(0, min(idx, len(LOD_DETAIL_PRESETS) - 1))
+
+
 def build_state(root, cfg: dict) -> GuiApp:
     """The carrier with every tk variable created and seeded from `cfg`.
 
@@ -470,6 +483,7 @@ def build_state(root, cfg: dict) -> GuiApp:
     app.pack_default_var = tk.BooleanVar(
         value=cfg.get(PACK_DEFAULT_CONFIG_KEY) is not False)
     app.winding_mode_var = tk.StringVar(value=_initial_winding(cfg))
+    app.lod_detail_var = tk.IntVar(value=_initial_lod_detail(cfg))
     app.parallax_var = tk.BooleanVar(value=False)
     app.tex_only_var = tk.BooleanVar(value=False)
 

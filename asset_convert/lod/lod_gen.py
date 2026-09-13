@@ -207,7 +207,7 @@ def _screenable_mesh_paths(refs, stats, cell_wrld, wrld_fid, keep_cells,
     turns out not to be used simply resolves to a missing file, which
     `_root_is_ninode` already handles.
     """
-    from asset_convert.lod.lod_far_gen import _tier_path, TIER8, TIER16
+    from asset_convert.lod.lod_far_gen import tier_path, TIER8, TIER16
     out = []
     seen_base = set()
     for ref in refs:
@@ -237,8 +237,8 @@ def _screenable_mesh_paths(refs, stats, cell_wrld, wrld_fid, keep_cells,
         if not (stat.get('lod4') or stat.get('lod8') or stat.get('lod16')):
             far = far_nif_path(model, *search_roots)
             out.append(far)
-            out.append(str(_tier_path(Path(far), TIER8['suffix'])))
-            out.append(str(_tier_path(Path(far), TIER16['suffix'])))
+            out.append(str(tier_path(Path(far), TIER8['suffix'])))
+            out.append(str(tier_path(Path(far), TIER16['suffix'])))
     return out
 
 
@@ -428,18 +428,11 @@ def _root_is_ninode_slow(full: Path) -> bool:
         return False
 
 
-# Objects smaller than this (max OBND dimension, game units) are only baked
-# into the near LOD-4 tiles.  A level-8 tile starts ~2 cells out; small
-# clutter is invisible there but its baked geometry still costs disk/VRAM.
-#
-# 400 sat just below the median reference size, so it kept 74% of Tamriel's
-# 327,096 references at level 8 — and the gate feeds level 16 as well, so the
-# two coarse rings together carried 57% of the bake's bytes.  Censused across
-# the real bake input, reference sizes run p25=386, p50=548, p75=1011: 600 is
-# the knee of that curve (400->600 drops 118k references, 600->900 only 35k
-# more) and still keeps everything hut-sized and larger.  At level-8 distance
-# (8,000+ units) a 600-unit object is well under a pixel of silhouette.
-LOD8_MIN_SIZE = 600.0
+#: Min OBND dimension (units) to reach the level-8 ring; level 4 has no gate.
+LOD8_MIN_SIZE = 800.0
+
+#: Same for level 16, the ring the WORLD MAP renders.
+LOD16_MIN_SIZE = 1200.0
 
 
 def obnd_max_dim(stat: dict) -> float:
@@ -593,12 +586,13 @@ def _drop_staged_master_meshes() -> int:
 def _lod_meshes_for(stat: dict, output_meshes_dir: Path, master_meshes=None):
     """Return (lod4, lod8, lod16) mesh paths for a stat record.
 
-    Every LOD object gets lod4. Objects of LOD8_MIN_SIZE or more also get
-    lod8 and lod16 (their `_far8`/`_far16` tiers when derived, else `_far`);
-    trees reuse their billboard card at every level. `master_meshes` are
-    searched for LOD meshes generated only into a master's output; each one
-    found is staged into this plugin's tree so LODGen can resolve it.
-    See: docs/commentary/asset_convert_terrain.md#level-16-is-gated-by-size
+    Every LOD object gets lod4. LOD8_MIN_SIZE gates lod8 and LOD16_MIN_SIZE
+    gates lod16, but an AUTHORED _far.nif bypasses both: shipping one is a
+    decision that the object belongs at distance. Trees pass every gate,
+    reusing their 8-vert billboard at each level.
+    `master_meshes` are searched for LOD meshes generated only into a master's
+    output; each is staged into this plugin's tree so LODGen resolves it.
+    See: docs/commentary/asset_convert_terrain.md#coarse-ring-size-gates
     """
     lod4  = stat.get('lod4', '')
     lod8  = stat.get('lod8', '')
@@ -615,20 +609,26 @@ def _lod_meshes_for(stat: dict, output_meshes_dir: Path, master_meshes=None):
     if not _import_master_mesh(far, output_meshes_dir, master_meshes):
         return '', '', ''
 
-    from asset_convert.lod.lod_far_gen import is_tree_model, _tier_path, TIER8, TIER16
+    from asset_convert.lod.lod_far_gen import (has_authored_lod,
+                                              is_tree_model,
+                                              tier_path,
+                                              TIER8, TIER16)
     is_tree = is_tree_model(stat)
 
-    if obnd_max_dim(stat) < LOD8_MIN_SIZE:
+    dim = obnd_max_dim(stat)
+    authored = has_authored_lod(output_meshes_dir, far)
+    if dim < LOD8_MIN_SIZE and not authored:
         return far, '', ''
     if is_tree:
         return far, far, far
 
     def tier(spec):
         """The tier's mesh path if it resolves, else the base `_far` mesh."""
-        path = str(_tier_path(Path(far), spec['suffix']))
+        path = str(tier_path(Path(far), spec['suffix']))
         return (path if _import_master_mesh(path, output_meshes_dir,
                                             master_meshes) else far)
-    return far, tier(TIER8), tier(TIER16)
+    lod16 = tier(TIER16) if (authored or dim >= LOD16_MIN_SIZE) else ''
+    return far, tier(TIER8), lod16
 
 
 # ---------------------------------------------------------------------------

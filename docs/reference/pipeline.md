@@ -26,6 +26,26 @@ Each stage has a `--<step>-only` flag. The steps are: `export`, `import`,
 `modify-body-meshes`, `pack`, `pack-zip`. Read `convert.py`'s module docstring
 for the authoritative list — it changes more often than this doc.
 
+### 🛑 LOD is NOT built with `convert.py --lod-only`
+
+**`tools/release/create_lod.py` is the entry point for all LOD generation.** A
+worldspace is baked ONCE from the plugin that owns it plus every other plugin
+as an overlay, so `-f <plugin> --lod-only` bakes the wrong content: it misses
+the overlays that supply most of the worldspace's objects.
+
+```bash
+python tools/release/create_lod.py --worldspaces WrldMorrowind --dry-run
+python tools/release/create_lod.py --worldspaces WrldMorrowind
+```
+
+**Always `--dry-run` first and read the plan** — it names the owner and every
+overlay, which is the only confirmation that the target is the one you meant.
+`WrldMorrowind` is owned by `Morrowind_ob.esm` with `Tamriel_Data.esm` and
+`TR_Mainland.esm` overlaid; baking `Morrowind_ob.esm` alone drops all Tamriel
+Rebuilt content. `--worldspaces` only ever REMOVES work, so it is a scope, not
+a filter on what is buildable. Full behaviour:
+[python_tools.md](python_tools.md#terrain--lod--world).
+
 ### Asset-only mods are pseudo-plugins — they still take `-f`
 
 A mod with no ESP/ESM (texture/mesh replacer, resource pack) is a legitimate

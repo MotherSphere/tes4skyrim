@@ -1059,9 +1059,10 @@ that commit on every worldspace baked all-empty level-16 tiles: WrldMorrowind
 produced 87 tiles of 236 bytes each, and the LODGen input carried zero level-16
 model paths across 286,612 rows.
 
-The gate is now the same size gate level 8 uses (`LOD8_MIN_SIZE`): anything
-large enough to be baked two cells out is baked into the far ring as well,
-using its `_far16` tier when one was derived. Trees already worked this way.
+The gate is now a size gate, but its OWN: `LOD16_MIN_SIZE`, separate from
+`LOD8_MIN_SIZE` because level 16 sits ~4x further out. Trees already worked this
+way, and an authored `_far.nif` bypasses both --
+[coarse-ring size gates](#coarse-ring-size-gates).
 
 ## The parsed-ESM cache
 <a id="parsed-esm-cache"></a>
@@ -1116,6 +1117,174 @@ total_target = clamp(weld_nodes * ratio * topo_scale, _MIN_TOTAL_TARGET, cap)
 
 A mostly-closed model keeps the base ratio; a rim-heavy one gets
 proportionally more vertices, which is what it needs to still read as itself.
+
+### Object LOD detail presets
+<a id="object-lod-detail-presets"></a>
+
+**Code:** `mesh_decimate.LOD_DETAIL_PRESETS`, selected by `lodDetail` in
+`conversion_config.json` and by Settings > Distant LOD detail in the GUI.
+
+A preset is `(stitch fraction, ratio, level-4 floor, far-ring floor)`. These are
+ONE lever, not four, and moving any alone makes LOD worse, so they all derive
+from the same index and can never drift apart.
+
+The proximity stitch runs BEFORE QEM and sets a geometry CEILING; the ratio sets
+the TARGET; the floor sets the MINIMUM. Measured on `houselower01` (8,011 source
+verts), target vs delivered:
+
+| stitch | ratio | target | delivered |
+|---|---|---|---|
+| 0.008 | 0.05 | 479 | 479 |
+| 0.008 | 0.20 | 1,917 | **610** -- ceiling, ratio wasted |
+| 0.002 | 0.20 | 1,917 | 1,620 |
+
+At a stitch of 0.008 the weld crushes 8,011 verts to 636 nodes, so raising the
+ratio alone changes nothing. Lowering the stitch alone LOWERS triangle count,
+because the budget is computed FROM weld nodes: 0.008 to 0.001 took
+`houselower01` from 723 to 315 triangles. Large architecture is where the
+ceiling binds hardest -- `outerwallgate01` welds 4,473 to 707 and will not
+exceed 651 output verts at ANY target or `MAX_DEV_FRAC`.
+
+| preset | stitch | ratio | L4 | far | triangles | WrldMorrowind LOD |
+|---|---|---|---|---|---|---|
+| 0 | 0.008 | 0.050 | 24 | 24 | 1.0x | **3.45 GB (MEASURED)** |
+| 1 | 0.009 | 0.050 | 48 | 32 | 1.4x | ~3.9 GB |
+| 2 | 0.009 | 0.050 | 72 | 40 | 2.6x | ~5.3 GB |
+| 3 | 0.008 | 0.050 | 96 | 48 | 3.0x | ~5.8 GB |
+| 4 (default) | 0.005 | 0.080 | 96 | 48 | 3.5x | **5.23 GB (MEASURED)** |
+| 5 | 0.004 | 0.100 | 96 | 48 | 4.0x | ~6.9 GB |
+| 6 | 0.003 | 0.130 | 96 | 48 | 4.7x | ~7.8 GB |
+
+**Preset 0 reproduces the pre-preset settings exactly**, so it is the "same size
+as before" option rather than a reduced one. Multipliers are against preset 0.
+
+Size is near-linear in TRIANGLES: fitting three measured WrldMorrowind bakes
+(3,482.5 MB / 19.4M tris, 5,187.1 MB / 40.7M, 6,381.0 MB / 67.4M) gives
+`MB = 2482 + 59.7 * Mtri`, within 5% on all three. A per-VERTEX model does NOT
+work -- marginal cost falls from 180 to 95 MB/Mtri across that range because
+seam duplication shrinks as the budget grows, and vertex-ratio estimates ran
+25-35% low twice.
+
+Object LOD duplicates each mesh into every tile referencing it -- level-4
+`.bto` totalled **5,577 MB against a 163 MB `_far.nif` corpus, 34x** -- so a
+detail change costs far more on disk than the mesh corpus suggests. A `.bto` is
+near-pure vertex data at a measured **64 bytes/vertex** (six level-4 tiles:
+14.6 MB / 240,190 verts).
+
+### The vertex floor is the lever for SMALL meshes, and it is the cheap one
+<a id="lod-vertex-floor"></a>
+
+Stitch and ratio only move a mesh whose budget clears `_MIN_TOTAL_TARGET`, so at
+the old floor of 24 a full **38% of meshes were pinned** and no preset change
+touched them. `tr_terr_rock_rr_18` (97 source verts) emitted a byte-identical
+LOD at presets 0 through 3.
+
+Measured over 897 LOD source meshes at one fixed stitch/ratio, raising the floor
+from 24 to 64 costs **+3.8% vertices overall** while changing **40.9% of
+meshes**, and on those it delivers **1.76x verts / 1.95x triangles**. Floor 96
+ALONE, with stitch and ratio untouched, gives **1.86x triangles for 4.43 GB**
+where the stitch/ratio pair alone gave 2.10x for 5.07 GB. Per vertex the cost is
+identical; the floor simply aims it at the meshes that are visually broken.
+
+The floor binds rocks and non-rocks about equally (22.1% vs 23.2% at one
+preset) -- it is a SMALL-MESH problem, not a rock-specific one. Rocks are where
+it is noticed because they are numerous and read as silhouettes.
+
+A mesh already under the floor is returned untouched: `_collapse_loop` runs
+`while m.alive > target`, so an 8-vertex cube at target 1000 stays 8 verts / 12
+tris. The floor never subdivides or inflates.
+
+The far ring carries its OWN floor. `TIER16` caps at 120 verts, so a floor of 96
+pins it against that cap and it cannot decimate at all -- which is why level 16
+once cost nearly as much as level 8. Holding level 4 at 96 while dropping the
+far ring to 48 left level-4 tiles **byte-identical** (114 triangles of merge
+noise out of 38M) and cut 520 MB: level 8 to 0.92x, level 16 to 0.76x.
+
+### Decimation DUPLICATES vertices at UV seams
+<a id="qem-seam-duplication"></a>
+
+Output size tracks EMITTED vertices, and that count does not fall monotonically
+with the budget. `_rebuild` keys output vertices by (weld node, UV, material),
+so one position on a UV seam becomes several output vertices. Interior vertices
+collapse freely while seam vertices are pinned by the boundary guard, so the
+survivors of a hard decimation are disproportionately seam vertices. Measured on
+`tr_terr_rock_rr_18` (source 97 verts / 97 unique positions -- no duplication):
+
+| target | emitted verts | unique positions | dup factor | tris |
+|---|---|---|---|---|
+| 16 | 64 | 16 | 4.00x | 23 |
+| 64 | 128 | 64 | 2.00x | 111 |
+| 96 | 99 | 96 | 1.03x | 172 |
+| 128 | 97 | 97 | 1.00x | 174 |
+
+So a HIGHER preset can emit a SMALLER file with MORE triangles. **This is not a
+quantization bug**: the duplicate UVs differ by a median of **0.121** against a
+`_UV_QUANT` step of 0.000244, and **0 of 19** clusters sit within one step, so
+no loosening merges them. `uv_at` reprojects a moved corner barycentrically per
+surviving face, and a vertex absorbing neighbours from different parts of the
+chart genuinely lands on different texture coordinates -- collapsing them would
+tear the texture. Fixing it needs UV-aware collapse costs, a change to the QEM
+contract rather than a bug fix.
+
+The floor is a WELD-NODE budget, so a floor of 96 emits roughly 100-200 actual
+vertices once seams are expanded.
+
+### Coarse-ring size gates
+<a id="coarse-ring-size-gates"></a>
+
+**Code:** `lod_gen.LOD8_MIN_SIZE`, `lod_gen.LOD16_MIN_SIZE`,
+`lod_gen._lod_meshes_for`.
+
+Level 4 has no gate; everything LOD-flagged is drawn there. Level 8 and level 16
+each have their own minimum OBND dimension. They were ONE gate at 600 feeding
+both rings, which is why level 16 cost almost as much as level 8 despite sitting
+~4x further out.
+
+Censused on TES4Tamriel's 606 level-16 qualifying bases (113,129 placed
+instances, 1,343 MB of level-16 tiles):
+
+| class | bases | instances | verts/instance | % of tier bytes |
+|---|---|---|---|---|
+| rock/cliff | 152 | 17,723 | 268 | **67.1%** |
+| architecture | 358 | 3,842 | 269 | 14.6% |
+| tree (billboard) | 60 | 89,840 | **8** | 10.2% |
+| other | 36 | 1,724 | 331 | 8.1% |
+
+**Trees are not the cost.** 89,840 tree instances are billboards at 8 verts each
+and carry 10% of the tier; 23,289 non-tree instances carry the other 90% as real
+decimated geometry. Rocks alone are two thirds of it, and half of them have an
+OBND under 1,390.
+
+Measured savings on TES4Tamriel: level 8 at gate 800 is 1,500 MB (from 2,225);
+level 16 at gate 1200 is 474 MB (from 1,343). Together that took the worldspace
+from 9.61 GB to 8.05 GB with level-4 tiles byte-identical.
+
+An empty tier column is legal in the LODGen input: `LODApp.cs:939` draws a level
+only `if (curStat.staticModels[level].Contains(".nif"))`, so a gated-out object
+is simply absent from that ring rather than falling back to a heavier mesh.
+
+### An AUTHORED `_far.nif` bypasses every gate
+<a id="authored-lod-bypasses-gates"></a>
+
+Shipping a hand-made LOD mesh IS the decision that the object belongs at
+distance, so a size gate must not override it. `has_authored_lod` (no
+`.generated` marker beside the file) is the authored signal, and it applies to
+every class rather than to any one folder.
+
+Level 16 is what the WORLD MAP renders, so hiding a landmark there removes it
+from the map, not just the horizon. Of the 93 architecture bases / 689 instances
+the 600-1200 band drops on TES4Tamriel, the authored rule recovers 10 bases / 75
+instances -- `ChorrolLODHouse01`, `BravilHouseLOD` and `AnvilHouseGeneric01`
+among them, all purpose-built LOD meshes. It cost 76 MB and returned 35% more
+level-16 triangles.
+
+It does NOT recover the other 614: `FarmHouse01`, `SkCastleBase01`,
+`AnvilDock01` and `SkBridgeSmallEnd` have only generated LOD. A class-aware
+exemption was measured for those -- holding architecture at the level-8 gate
+keeps all 3,842 instances for ~90 MB -- using `is_architecture`, a PATH SEGMENT
+test for Bethesda's own top-level `Architecture` mesh folder (the record type
+cannot help: 4,253 of the LOD-flagged bases are STAT, 119 TREE, 10 MSTT).
+Not shipped pending an in-game look at the authored rule alone.
 
 ## The DDS block codec
 <a id="dds-block-codec"></a>

@@ -7,5 +7,6 @@
   "files": [
     "Oblivion.esm"
   ],
-  "logRunsKept": 20
+  "logRunsKept": 20,
+  "lodDetail": 4
 }

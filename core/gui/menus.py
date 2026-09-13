@@ -34,11 +34,13 @@ from core.gui.config import (
     PACK_DEFAULT_CONFIG_KEY,
     PACKING_STEPS,
     REPO_ROOT,
+    LOD_DETAIL_CONFIG_KEY,
     WINDING_AUTO,
     WINDING_CONFIG_KEY,
     WINDING_OFF,
     WINDING_ON,
     load_config,
+    lod_detail_labels,
     save_config,
     save_setting,
     scan_converted,
@@ -130,13 +132,34 @@ def _add_winding_menu(app, settings_menu, menu_opts) -> None:
                               menu=winding_menu)
 
 
+def _add_lod_detail_menu(app, settings_menu, menu_opts) -> None:
+    """Settings > Distant LOD detail: a radio group over the detail presets.
+
+    Each label carries its measured triangle multiplier and the LOD size it
+    lands on, so the choice is a number rather than an adjective. Applies on the
+    NEXT LOD bake -- the meshes are decimated at generation time.
+
+    See: docs/commentary/asset_convert_terrain.md#object-lod-detail-presets
+    """
+    def _changed():
+        """Persist the chosen preset index."""
+        save_setting(LOD_DETAIL_CONFIG_KEY, app.lod_detail_var.get())
+
+    lod_menu = tk.Menu(settings_menu, **menu_opts)
+    for idx, label in enumerate(lod_detail_labels()):
+        lod_menu.add_radiobutton(label=label, value=idx,
+                                 variable=app.lod_detail_var, command=_changed)
+    settings_menu.add_cascade(label="Distant LOD detail", menu=lod_menu)
+
+
 def _build_settings_menu(app, menubutton, menu_opts) -> None:
-    """Settings: workers, cache download, packing, winding and Morrowind."""
+    """Settings: workers, cache download, packing, winding, LOD and Morrowind."""
     settings_menu = menubutton("Settings")
     _add_workers_menu(app, settings_menu, menu_opts)
     _add_cache_download(app, settings_menu)
     _add_pack_default(app, settings_menu)
     _add_winding_menu(app, settings_menu, menu_opts)
+    _add_lod_detail_menu(app, settings_menu, menu_opts)
     add_source_menu(settings_menu, menu_opts, app.cfg, load_config,
                     save_config, EXPORT_DIR, app.out_root)
 
