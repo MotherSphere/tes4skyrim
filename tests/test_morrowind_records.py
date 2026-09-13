@@ -20,6 +20,8 @@ from tes4_export.record_types.morrowind import (export_ARMO, export_DOOR,
 from tes4_export.record_types.morrowind_actors import export_LEVI, export_NPC_
 from tes4_export.record_types.morrowind_scripts import export_SCPT
 from tes4_export.morroblivion import MorroblivionModels
+from tes4_export.morrowind_cell import parse_cell as _parse
+from tes4_export.morrowind_pathgrid import pathgrid_records
 from tes4_export.morrowind_patch import PATCH_NAME, build_patch, patch_formid
 
 #: Struct layouts of the fixed subrecords the tests author.
@@ -493,7 +495,8 @@ def test_gap_patch_builds_the_plugin_itself(tmp_path):
 
     flags, masters = read_header(str(plugin))
     assert masters == ['Skyrim.esm'], 'a standalone patch masters nothing else'
-    assert not flags & 0x1, 'built as an ESP, like every other converted plugin'
+    assert flags & 0x1, 'ESM-flagged: dependent plugins declare it a master'
+    assert PATCH_NAME.lower().endswith('.esp'), 'the .esp extension is kept'
     assert PATCH_NAME in converted_plugins(out_root), (
         'the patch registers as a converted plugin like any other')
 
@@ -602,3 +605,204 @@ def test_door_carries_the_flags_subrecord_tes5_requires():
     lines = export_DOOR(door, MorrowindContext())
     assert 'FNAM.Flags=0' in lines, 'the flags subrecord is always written'
     assert _value(lines, 'FULL') == 'Hut Door',         "TES3's FNAM is the name, and stays the name"
+
+
+def _pathgrid(grid, points, edges, name=''):
+    """A TES3 PGRD: S32 point coords, U32 PGRC targets grouped by degree."""
+    degrees = [sum(1 for a, b in edges if a == i) for i in range(len(points))]
+    pgrp = b''.join(
+        struct.pack('<iiiBBxx', int(x), int(y), int(z), 0, degrees[i])
+        for i, (x, y, z) in enumerate(points))
+    flat = [b for i in range(len(points)) for a, b in edges if a == i]
+    rec = reader.Tes3Record(type='PGRD', flags=0, record_id=name)
+    rec.subrecords = [
+        _sub('DATA', struct.pack('<iiHH', grid[0], grid[1], 1024,
+                                 len(points))),
+        _text('NAME', name),
+        _sub('PGRP', pgrp),
+        _sub('PGRC', struct.pack('<%dI' % len(flat), *flat))]
+    return rec
+
+
+def test_interior_pathgrid_keeps_its_graph_whole():
+    """An interior never splits, so every edge stays an edge.
+
+    TES3 stores an edge directed and often only from one end; TES4 reads the
+    graph undirected, so each pair has to reappear on BOTH points.
+    """
+    ctx = MorrowindContext()
+    ctx.note_cell(_parse(_cell('Hut')))
+    grid = _pathgrid((0, 0), [(0, 0, 8), (100, 0, 8), (100, 100, 8)],
+                     [(0, 1), (1, 2)], name='Hut')
+    records = pathgrid_records([grid], ctx)
+
+    assert len(records) == 1, 'one interior cell, one pathgrid'
+    lines = records[0][1]
+    assert _value(lines, 'DATA.PointCount') == '3'
+    assert _value(lines, 'ParentCELL') == ctx.interior_cell_id('Hut')
+    assert not any(l.startswith('ParentWRLD') for l in lines),         'an interior names no worldspace, which is how the importer knows'
+    assert _value(lines, 'Point[0].X') == '0.0', 'S32 coords become floats'
+    assert _value(lines, 'Point[1].Connections') == '2',         'the middle point is reached from both sides'
+    assert _value(lines, 'Point[0].Edge[0]') == '1'
+    assert _value(lines, 'Point[2].Edge[0]') == '1',         'the edge authored only as 1->2 still appears on point 2'
+
+
+def test_exterior_pathgrid_splits_into_quadrants():
+    """One Morrowind cell's grid is shared out over the four cells it covers.
+
+    Positions are unscaled, so a point lands in the quadrant its own world
+    position falls in -- the same rule the references follow.
+    """
+    ctx = MorrowindContext()
+    points = [(100.0, 100.0, 8.0), (200.0, 200.0, 8.0),
+              (5000.0, 100.0, 8.0), (5100.0, 200.0, 8.0)]
+    grid = _pathgrid((0, 0), points, [(0, 1), (2, 3), (1, 2)])
+    records = pathgrid_records([grid], ctx)
+
+    assert len(records) == 2, 'points fall in two of the four quadrants'
+    by_cell = {_value(lines, 'ParentCELL'): lines for _, lines in records}
+    left = by_cell[ctx.exterior_cell_id((0, 0))]
+    right = by_cell[ctx.exterior_cell_id((1, 0))]
+
+    assert _value(left, 'DATA.PointCount') == '2'
+    assert _value(right, 'DATA.PointCount') == '2'
+    assert _value(left, 'ParentWRLD') == ctx.worldspace_id()
+    assert _value(left, 'Point[0].X') == '100.0',         'world positions carry across unscaled'
+
+
+def test_edge_crossing_a_quadrant_becomes_an_intercell_exit():
+    """An edge whose ends land in different cells cannot stay an edge.
+
+    TES4 carries a crossing as a PGRI entry naming the local point and the
+    FOREIGN node's world position, which is what stitches the navmesh
+    corridors of neighbouring cells together.
+    """
+    ctx = MorrowindContext()
+    points = [(100.0, 100.0, 8.0), (5000.0, 100.0, 8.0)]
+    grid = _pathgrid((0, 0), points, [(0, 1)])
+    records = pathgrid_records([grid], ctx)
+
+    by_cell = {_value(lines, 'ParentCELL'): lines for _, lines in records}
+    left = by_cell[ctx.exterior_cell_id((0, 0))]
+
+    assert _value(left, 'InterCellCount') == '1'
+    assert _value(left, 'InterCell[0].LocalPoint') == '0'
+    assert _value(left, 'InterCell[0].X') == '5000.0',         'the entry names where the edge goes, not where it starts'
+    assert not any(l.startswith('Point[0].Edge') for l in left),         'the crossing is no longer an ordinary edge'
+
+
+def test_pathgrid_survives_garbage_the_construction_set_leaves():
+    """A self-edge or an out-of-range target is dropped, not propagated.
+
+    Both appear in shipped Morrowind data and an out-of-range target would
+    index off the end of the TES4 point array.
+    """
+    ctx = MorrowindContext()
+    ctx.note_cell(_parse(_cell('Hut')))
+    grid = _pathgrid((0, 0), [(0, 0, 8), (100, 0, 8)],
+                     [(0, 0), (0, 99), (0, 1)], name='Hut')
+    lines = pathgrid_records([grid], ctx)[0][1]
+
+    assert _value(lines, 'Point[0].Connections') == '1',         'only the one real edge is counted'
+    assert _value(lines, 'Point[0].Edge[0]') == '1'
+
+
+def test_named_exterior_pathgrid_is_not_mistaken_for_an_interior():
+    """An exterior pathgrid carries a NAME too, so the name cannot route it.
+
+    All 3436 of TR_Mainland.esm's pathgrids are named -- an exterior's NAME is
+    its region or cell name -- so routing on "has a NAME" sent every one down
+    the interior path and produced zero exteriors.
+    """
+    ctx = MorrowindContext()
+    ctx.note_cell(_parse(_rec(
+        'CELL', 'Anashbibi',
+        _sub('DATA', struct.pack('<iii', 0, -21, -25)))))
+    grid = _pathgrid((-21, -25),
+                     [(-21 * 8192.0 + 10, -25 * 8192.0 + 10, 8.0),
+                      (-21 * 8192.0 + 20, -25 * 8192.0 + 20, 8.0)],
+                     [(0, 1)], name='Anashbibi')
+    records = pathgrid_records([grid], ctx)
+
+    assert records, 'the pathgrid converts'
+    for _fid, lines in records:
+        assert 'ParentWRLD' in '\n'.join(lines),             'a pathgrid over a named EXTERIOR cell still belongs to the world'
+
+
+def test_quadrant_leads_with_a_point_that_kept_an_edge():
+    """Point 0 must carry an edge or the importer discards the whole topology.
+
+    from_pgrd.py probes Point[0].Edge[0] alone and falls back to
+    nearest-neighbour edges for the ENTIRE record when it is missing --
+    which splitting a cell causes whenever point 0's every edge became a
+    crossing. Here point 0 leaves the quadrant and points 1 and 2 do not.
+    """
+    ctx = MorrowindContext()
+    points = [(100.0, 100.0, 8.0), (300.0, 300.0, 8.0), (400.0, 400.0, 8.0),
+              (5000.0, 100.0, 8.0)]
+    grid = _pathgrid((0, 0), points, [(0, 3), (1, 2)])
+    records = pathgrid_records([grid], ctx)
+
+    by_cell = {_value(lines, 'ParentCELL'): lines for _, lines in records}
+    left = by_cell[ctx.exterior_cell_id((0, 0))]
+
+    assert 'Point[0].Edge[0]' in '\n'.join(left),         'the record leads with a point whose edge survived the split'
+    assert _value(left, 'InterCellCount') == '1',         'the crossing is still carried, just not on point 0'
+
+
+def test_exterior_points_are_lifted_out_of_the_cells_own_frame():
+    """An exterior pathgrid stores points relative to its own cell origin.
+
+    Measured on TR_Mainland.esm, every exterior point falls in 0..8192
+    whatever the cell's grid. Bucketing those raw values put every exterior
+    in quadrant (0,0): 4 FormIDs repeated ~280 times each, and 1188 of 4125
+    records lost to the collision.
+    """
+    ctx = MorrowindContext()
+    grid = _pathgrid((-21, -25), [(100.0, 200.0, 8.0), (300.0, 400.0, 8.0)],
+                     [(0, 1)], name='Velothi Mountains Region')
+    records = pathgrid_records([grid], ctx)
+
+    assert len(records) == 1, 'both points sit in one quadrant'
+    _fid, lines = records[0]
+    assert _value(lines, 'ParentCELL') == ctx.exterior_cell_id((-42, -50)),         'the cell is the quadrant the SHIFTED point falls in'
+    assert _value(lines, 'Point[0].X') == str(-21 * 8192.0 + 100.0),         'the cell origin is added, so the point is in world space'
+
+
+def test_two_exterior_cells_never_share_a_pathgrid_formid():
+    """Distinct cells must land on distinct quadrants, hence distinct ids.
+
+    The FormID is keyed on the quadrant, so leaving points in the cell's own
+    frame collapsed every cell onto the same quadrant and the same id.
+    """
+    ctx = MorrowindContext()
+    points = [(100.0, 100.0, 8.0), (200.0, 200.0, 8.0)]
+    first = pathgrid_records(
+        [_pathgrid((-21, -25), points, [(0, 1)])], ctx)
+    second = pathgrid_records([_pathgrid((7, 3), points, [(0, 1)])], ctx)
+
+    assert first and second
+    assert first[0][0] != second[0][0],         'two different Morrowind cells get two different pathgrid FormIDs'
+
+
+def test_two_cells_reaching_one_quadrant_merge_into_one_record():
+    """A quadrant holds ONE pathgrid however many cells reach into it.
+
+    Morrowind tolerates a point lying outside its own cell, so two cells can
+    both land points in one Oblivion quadrant. Emitting a record each gave
+    them the same quadrant-keyed FormID -- 63 collisions over TR_Mainland --
+    and a cell can hold only one navmesh anyway.
+    """
+    ctx = MorrowindContext()
+    here = [(100.0, 100.0, 8.0), (200.0, 200.0, 8.0)]
+    stray = [(-8092.0, -8092.0, 8.0), (-7992.0, -7992.0, 8.0)]
+    records = pathgrid_records(
+        [_pathgrid((0, 0), here, [(0, 1)]),
+         _pathgrid((1, 1), stray, [(0, 1)])], ctx)
+
+    quad = ctx.exterior_cell_id((0, 0))
+    mine = [lines for _fid, lines in records
+            if _value(lines, 'ParentCELL') == quad]
+    assert len(mine) == 1, 'the quadrant gets exactly one pathgrid'
+    assert _value(mine[0], 'DATA.PointCount') == '4',         'both cells contributed their points to it'
+    assert len({fid for fid, _lines in records}) == len(records),         'no two records may share a FormID'

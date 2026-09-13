@@ -339,6 +339,104 @@ is byte-identical. Measured: TXST diffuse files missing on disk went from
 `tx_lavacrust00`) are in no Morrowind BSA at all and are referenced by zero
 terrain layers — dead LTEX records Bethesda shipped without assets.
 
+## <a id="pathgrids"></a>Pathgrids become PGRD, then navmesh
+
+**Code:** `tes4_export/morrowind_pathgrid.py`
+
+TES3 and TES4 pathgrids hold the same graph in different encodings. Confirmed
+against both `wbDefinitionsTES3.pas:1989` and OpenMW `esm3/loadpgrd.cpp`:
+
+| | TES3 | TES4 |
+|---|---|---|
+| Point position | `PGRP` S32 x3 | `PGRP` float x3 |
+| Edge target | `PGRC` U32 | `PGRR` S16 |
+| Cell link | `NAME` (interior) / `DATA` grid | `ParentCELL` FormID |
+| Inter-cell | *none* | `PGRI` |
+
+`PGRC` is a flat run grouped by each point's connection count, exactly as
+`PGRR` is. Edges are stored directed and often asymmetrically -- Morrowind
+walks an edge from either end regardless -- so each pair is normalized to
+`(lo, hi)` and re-expanded symmetrically.
+
+### Which cell a pathgrid belongs to
+
+**A PGRD carries no interior flag, and its NAME does not classify it.** An
+exterior's NAME is the cell or REGION name -- 311 of TR_Mainland's name a
+region that is no cell at all, so no name lookup can place them. Routing on
+"has a NAME" sent all 3,436 down the interior path and produced 0 exteriors.
+
+The **DATA grid** is the indicator, and is what xEdit keys its own
+`GetGridCellCallback` on. Measured over TR_Mainland.esm's 3,436 pathgrids:
+
+| Cell kind | grid (0,0) | non-zero grid |
+|---|---|---|
+| interior | 2,930 | 0 |
+| exterior | 0 | 195 |
+| NAME is not a cell | 0 | 311 |
+
+The split is total, so only the origin square is ambiguous -- an interior has
+no grid to record and leaves DATA at (0,0) -- and there the cell name settles
+it.
+
+### The two coordinate frames
+
+**An exterior pathgrid's points are CELL-LOCAL, an interior's are already in
+its own frame.** Measured on TR_Mainland: every exterior point falls in
+0..8192 whatever its cell's grid, so the cell origin has to be added before
+the points mean anything in world space. Bucketing raw values instead
+collapsed every exterior into quadrant (0,0), which showed up as 4 FormIDs
+repeated ~280 times each and 1,188 of 4,125 records lost to collision.
+
+Once shifted, positions carry across unscaled like every other Morrowind world
+coordinate, so only the owning cell changes: an exterior pathgrid is bucketed
+into the four quadrants of [cell splitting](#coordinates-and-cell-splitting)
+by the same `cell_grid()` the references use.
+
+**An edge crossing a quadrant boundary cannot stay an edge.** TES4 expresses a
+crossing as a `PGRI` entry naming the local point and the FOREIGN node's world
+position, which is what the navmesh corridor builder stitches cells together
+with. Splitting a cell four ways turns interior edges into crossings, so the
+converted graph carries `PGRI` entries Morrowind never had.
+
+### One quadrant, one pathgrid
+
+**A quadrant holds ONE PGRD however many Morrowind cells reach into it.** A
+point may lie outside its own cell -- Morrowind tolerates that for references
+too -- so two cells can land points in one Oblivion cell. Emitting a record
+each gave them the same quadrant-keyed FormID: 63 collisions over TR_Mainland,
+and a cell can carry only one navmesh anyway. `pathgrid_records()` therefore
+takes EVERY pathgrid at once and merges per quadrant, rebasing point indices
+onto each quadrant's own running list.
+
+### Leading with an edge-bearing point
+
+`from_pgrd.py` probes **`Point[0].Edge[0]` alone** and falls back to
+nearest-neighbour topology for the WHOLE record when it is missing -- which
+splitting a cell causes whenever point 0's every edge became a crossing.
+Each quadrant is rotated so a point keeping an in-cell edge leads, which cut
+the fallback from 173 records to 71 over TR_Mainland; the remainder are
+single-point cells where no in-cell edge can exist and the PGRI exits carry
+the connectivity instead.
+
+### Measured result
+
+Nothing is needed on the import side: `tes5_import/navmesh/from_pgrd.py`
+already builds NAVM from PGRD and has no source-game branch, so these records
+flow through the standard navmesh stage unchanged.
+
+TR_Mainland.esm (Morroblivion mode), from 3,436 source pathgrids:
+
+| | |
+|---|---|
+| PGRD records exported | 4,059 (2,929 interior, 1,130 exterior) |
+| Points / edges | 110,405 / 133,102 undirected pairs |
+| PGRI inter-cell entries | 3,730 |
+| Duplicate FormIDs | 0 |
+| NAVM generated | 4,059 cells, 0 errors |
+| Edge links | 5,294 portals over 955 cells (85% of exteriors) |
+| Door links (XNDP) | 9,421 |
+| NAVI registered | 4,246 navmeshes |
+
 ## <a id="nif-4002"></a>Morrowind NIFs are version 4.0.0.2
 
 pyffi does **not** read them out of the box — measured **0 of 60** vanilla
@@ -569,9 +667,15 @@ The build has two doors, because the refusal that sends a user to it fires on
 the command line too: the GUI menu, and `convert.py --build-morrowind-patch
 "<Morrowind>/Data Files"`. Both run `build_patch`, so neither can drift.
 
-It is written as an **ESP**, like every other converted plugin -- the ESM bit is
-a separate, deliberate user action (`tools/esm/make_master.py`), which enforces
-that a plugin and its masters are flagged together. Because the build now lands
+It is written **ESM-flagged**, keeping its `.esp` extension -- the one converted
+plugin that does not wait for `tools/esm/make_master.py`. Every Morroblivion-mode
+plugin declares it as a master, and the engine honors a master only if the file
+carries the ESM bit; the extension is not what decides. It is also what
+`make_master.py` demands: that tool hard-errors on an ESM that masters a plain
+ESP, so flagging any Morroblivion-mode plugin was impossible while the patch
+underneath it stayed unflagged. Load order is unaffected -- the sorters that read
+the extension (`morroblivion_exports`, `sibling_lod`) still see `.esp`, and
+`converted_master_dirs` places the patch positionally. Because the build now lands
 `<folder>/<folder>` plus a manifest, `converted_plugins` finds the patch, so it
 appears in the converted list, the LOD selection and the make-master panel
 where it previously could not.
@@ -971,8 +1075,17 @@ Two things kept the master's cell invisible to the export:
   filed as the real cell at grid (0, 0). `_add_cell` now checks the Persistent
   bit first and keys it under `persistent_key(<worldspace>)`.
 * `persistent_cell_id` derived unconditionally. It now prefers
-  `index.lookup_persistent`, and `persistent_cell_record` emits nothing when
-  `owns_persistent_cell()` is false.
+  `index.lookup_persistent`, so a dependent plugin names the MASTER's cell.
+
+**The cell is written either way.** A plugin that rehomes a persistent
+reference defines the cell holding it, re-emitting a master's as an OVERRIDE at
+the master's FormID -- what `worldspace_record` already does for the WRLD, and
+what the TES4 exporter does (ElsweyrAnequina.esp and Knights.esp both re-emit
+Tamriel's `00023777`). Skipping it because the master owned one parented
+TR_Mainland's 3,465 rehomed doors to a cell no record defined: the importer
+could not bucket them back to their grid squares, so every exterior door lost
+its navmesh door triangle while the interior side kept its own -- load doors
+that pathfind one way only. Measured exterior XNDP links: 56 of 9,421.
 
 ### A door's partner may belong to a master
 

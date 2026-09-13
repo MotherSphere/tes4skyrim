@@ -247,10 +247,9 @@ def _convert_creatures(export_dir: str, out_root, progress) -> None:
 def _import_records(export_dir: str, out_root, progress) -> tuple:
     """Build the patch plugin itself from the records just exported.
 
-    Returns (path, '') on success and ('', refusal) otherwise. An ESP, not an
-    ESM: it declares no TES4 master, and the export it reads carries no
-    `Master[N]=` line, so the importer's own reconciliation leaves the list at
-    Skyrim.esm alone.
+    Returns (path, '') on success and ('', refusal) otherwise. ESM-flagged
+    under its `.esp` extension.
+    See: docs/commentary/tes4_export_morrowind.md#the-patch-builds-its-own-plugin
 
     Imported inside the function to keep the export package from loading the
     whole import stage just to answer where the patch lives.
@@ -263,7 +262,7 @@ def _import_records(export_dir: str, out_root, progress) -> tuple:
     try:
         _converted, errors = import_plugin(
             export_dir=patch_dir(export_dir), output_path=str(dest),
-            masters=['Skyrim.esm'], is_esm=False, output_root=str(out_root))
+            masters=['Skyrim.esm'], is_esm=True, output_root=str(out_root))
     except Exception as exc:
         return '', _import_failed_message(f'{type(exc).__name__}: {exc}')
     if not dest.is_file():

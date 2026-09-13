@@ -29,6 +29,7 @@ from .morrowind_ids import (IdIndex, exterior_key, interior_key, land_key,
                             load_master_doors, persistent_key,
                             load_index, marker_formid)
 from .morrowind_markers import MarkerBuilder, marker_lines
+from .morrowind_pathgrid import pathgrid_records
 from .morrowind_patch import PATCH_NAME
 from .morrowind_grass import (GrassTally, grass_records, is_grass_model,
                               ltex_grass_lines, master_ltex_fields,
@@ -182,10 +183,6 @@ class MorrowindContext:
         """
         return (self.index.lookup_persistent(self.worldspace_id())
                 or self.derive(persistent_key(WORLDSPACE_EDID)))
-
-    def owns_persistent_cell(self) -> bool:
-        """Whether this plugin has to define the persistent cell itself."""
-        return self.index.lookup_persistent(self.worldspace_id()) is None
 
     def interior_cell_id(self, name: str) -> str:
         """The FormID for an interior cell: a master's, else keyed on the name."""
@@ -537,18 +534,9 @@ def convert_plugin(records, ctx: MorrowindContext) -> dict:
     _register_groundcover(records, ctx)
     register_sound_gens(records, ctx)
 
-    out = {sig: [] for sig in ('CELL', 'REFR', 'ACHR', 'ACRE', 'LAND')}
-    for rec in records:
-        if rec.deleted:
-            continue
-        if rec.type == 'CELL':
-            _collect_cell(rec, ctx, out)
-        elif rec.type == 'LAND':
-            out['LAND'].extend(land_records(rec, ctx))
-        elif _is_convertible(rec, ctx):
-            sig = tes4_signature(rec)
-            out.setdefault(sig, []).append(
-                (ctx.resolve(rec.record_id, sig), export_record(rec, ctx)))
+    out = {sig: [] for sig in
+           ('CELL', 'REFR', 'ACHR', 'ACRE', 'LAND', 'PGRD')}
+    out['PGRD'] = pathgrid_records(_collect_records(records, ctx, out), ctx)
     teleport_records(ctx)
     out['PACK'], travel_markers = package_records(ctx)
     for sig in ('NPC_', 'CREA'):
@@ -559,6 +547,35 @@ def convert_plugin(records, ctx: MorrowindContext) -> dict:
     out['CELL'].extend(persistent_cell_record(ctx))
     _emit_groundcover(out, ctx)
     return out
+
+
+def _collect_records(records, ctx: MorrowindContext, out: dict) -> list:
+    """Route every record to its output bucket; return the pathgrids.
+
+    A pathgrid is held back rather than converted in place: it names the cell
+    it belongs to, so every CELL has to be claimed before one can resolve.
+    """
+    pathgrids = []
+    collectors = {'CELL': lambda rec: _collect_cell(rec, ctx, out),
+                  'LAND': lambda rec: out['LAND'].extend(
+                      land_records(rec, ctx)),
+                  'PGRD': pathgrids.append}
+    for rec in records:
+        if rec.deleted:
+            continue
+        collect = collectors.get(rec.type)
+        if collect is not None:
+            collect(rec)
+        elif _is_convertible(rec, ctx):
+            _collect_base(rec, ctx, out)
+    return pathgrids
+
+
+def _collect_base(rec, ctx: MorrowindContext, out: dict) -> None:
+    """Add one converted base record to the bucket for its TES4 signature."""
+    sig = tes4_signature(rec)
+    out.setdefault(sig, []).append(
+        (ctx.resolve(rec.record_id, sig), export_record(rec, ctx)))
 
 
 def _emit_groundcover(out: dict, ctx: MorrowindContext) -> None:
@@ -996,12 +1013,15 @@ def persistent_cell_record(ctx: MorrowindContext) -> list:
 
     It carries no grid: the importer files a cell flagged persistent directly
     under the worldspace group rather than in the block tree.
+
+    A MASTER's cell is re-emitted as an override rather than skipped. The
+    plugin's own rehomed references name it, so a plugin that leaves it out
+    parents them to a cell no record defines.
     See: docs/commentary/tes4_export_morrowind.md#teleport-doors
     """
-    form_id = ctx.persistent_cell_id()
-    if not ctx.rehomed_persistent or not ctx.owns_persistent_cell():
+    if not ctx.rehomed_persistent:
         return []
-    return [(form_id,
+    return [(ctx.persistent_cell_id(),
              [f'EditorID={WORLDSPACE_EDID}Persistent', 'DATA.Flags=2',
               f'ParentWRLD={ctx.worldspace_id()}',
               f'RecordFlags={_PERSISTENT}'])]
