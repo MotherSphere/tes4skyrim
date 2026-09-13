@@ -187,7 +187,7 @@ def _build_assoc_item_index(by_type: dict, ctx=None) -> tuple:
     return lvlc_first, sigs
 
 
-def _master_export_dirs(ctx) -> list:
+def master_export_dirs(ctx) -> list:
     """The export directory of each TES4 master, in _HEADER.txt order.
 
     `load_master_export` resolves masters exactly this way (sibling directories
@@ -201,20 +201,16 @@ def _master_export_dirs(ctx) -> list:
     header = os.path.join(export_dir, '_HEADER.txt')
     if not os.path.isfile(header):
         return []
-    dirs = []
     from .overrides.nested import export_root, master_export_dir
     root = export_root(export_dir)
     try:
         with open(header, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.startswith('Master['):
-                    _, _, val = line.partition('=')
-                    mdir = master_export_dir(root, val.strip())
-                    if os.path.isdir(mdir):
-                        dirs.append(mdir)
+            names = [line.partition('=')[2].strip() for line in f
+                     if line.startswith('Master[')]
     except OSError:
         return []
-    return dirs
+    dirs = [master_export_dir(root, n) for n in names]
+    return [d for d in dirs if os.path.isdir(d)]
 
 
 def _adopt_master_special_records(ctx) -> None:
@@ -269,7 +265,7 @@ def _adopt_master_special_records(ctx) -> None:
     except ImportError:
         load_race_voices = None     # asset_convert unavailable — fixed set only
     if load_race_voices is not None:
-        for mdir in _master_export_dirs(ctx):
+        for mdir in master_export_dirs(ctx):
             try:
                 races = load_race_voices(mdir)
             except OSError:
@@ -709,7 +705,7 @@ def _prescan_furniture_and_actors(by_type: dict, ctx, writer, export_dir: str, _
     See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
     """
     from .record_types.items import load_furniture_models
-    load_furniture_models(str(assets_for(export_dir) / 'meshes'), by_type)
+    load_furniture_models(str(assets_for(export_dir) / 'meshes'), by_type, ctx)
     _step_done('furniture seats')
 
     from .dialogue.objective_text import load_objective_text
@@ -817,7 +813,7 @@ def _prescan_outfits_hair_skin(by_type: dict, ctx, export_dir: str):
     try:
         from .actors import hair_variants
         hair_variants.load(getattr(ctx, 'export_dir', None) or export_dir,
-                           _master_export_dirs(ctx) if ctx else ())
+                           master_export_dirs(ctx) if ctx else ())
         print(f"  Hair length variants: "
               f"{sum(len(v) for v in hair_variants._BUCKETS.values())} baked "
               f"lengths across {len(hair_variants._BUCKETS)} hair records")
@@ -828,7 +824,7 @@ def _prescan_outfits_hair_skin(by_type: dict, ctx, export_dir: str):
         from .actors.npc_face_mapper import load_race_skin_tones, RACE_SKIN_RGB
         _skin_dirs = [getattr(ctx, 'export_dir', None) or export_dir]
         if ctx:
-            _skin_dirs.extend(_master_export_dirs(ctx))
+            _skin_dirs.extend(master_export_dirs(ctx))
         _skin_by_type = dict(by_type)
         if ctx and getattr(ctx, 'master_export', None):
             _m_races = [r for r in ctx.master_export.values()

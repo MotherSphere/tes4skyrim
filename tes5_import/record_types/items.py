@@ -1,7 +1,10 @@
 """Item/object converters: STAT, ACTI, MISC, KEYM, DOOR, FLOR, FURN, GRAS, TREE, LIGH, SLGM, ANIO, CONT."""
 
 from asset_convert.game_paths import current_namespace
+import os
 import struct
+
+from output_layout import assets_for
 
 from ..base.constants import LOD_SIZE_THRESHOLD
 from ..base.mesh_bounds import get_mesh_physics_flags
@@ -370,20 +373,58 @@ def get_base_origin_shift(base_fid: str) -> float:
     return _BASE_ORIGIN_SHIFT.get(base_fid.upper(), 0.0)
 
 
-def load_furniture_models(meshes_dir, by_type) -> int:
+def master_mesh_dirs(ctx) -> list:
+    """Each TES4 master's source mesh tree, in _HEADER.txt order."""
+    from ..pipeline import master_export_dirs
+    return [str(assets_for(d) / 'meshes') for d in master_export_dirs(ctx)]
+
+
+def _index_origin_shifts(pairs, model_shift: dict) -> int:
+    """Register every (base FormID, record) whose model is re-origined.
+
+    `pairs` yields (fid, rec) with fid ALREADY in this plugin's index space —
+    for a master that is its `master_export` key, never `rec['FormID']`.
+    """
+    shifted = 0
+    for fid, rec in pairs:
+        modl = get_str(rec, 'Model.MODL')
+        if not modl or not fid:
+            continue
+        shift = model_shift.get(_furn_model_key(modl))
+        if shift and abs(shift) > 1e-4:
+            _BASE_ORIGIN_SHIFT[fid.upper()] = shift
+            shifted += 1
+    return shifted
+
+
+def _scan_marker_models(mesh_dirs, scan_marker_nifs) -> list:
+    """(model key, absolute NIF path) for every marker-bearing model.
+
+    Earlier directories win, so this plugin's own mesh shadows a master's
+    copy of the same path.
+    """
+    jobs, seen = [], set()
+    for mdir in mesh_dirs:
+        if not os.path.isdir(mdir):
+            continue
+        for key in sorted(scan_marker_nifs(mdir)):
+            if key in seen:
+                continue
+            seen.add(key)
+            jobs.append((key, os.path.join(mdir, key.replace('/', os.sep))))
+    return jobs
+
+
+def load_furniture_models(meshes_dir, by_type, ctx=None) -> int:
     """Compute seat lists + origin shifts for every marker-bearing model.
 
-    meshes_dir: <export_dir>/meshes (source Oblivion NIFs from BSA extraction).
-    by_type: full record dict (sig -> [records]) — every record type whose
-    model is a marker-bearing NIF gets an origin-shift entry so its REFRs
-    can be compensated.
+    meshes_dir is <export_dir>/meshes; by_type maps sig -> records.  Both the
+    meshes and the base records of `ctx`'s masters are indexed too, so a
+    plugin that only PLACES a master's furniture still compensates.  A model
+    whose NIF is unreadable is skipped, leaving its REFRs unshifted.
 
-    Returns the number of models resolved.  FURN models whose NIF is
-    missing or unreadable fall back to a conservative single-seat FURN at
-    convert time (their REFRs are left unshifted, matching the unshifted /
-    missing mesh).
+    See: docs/commentary/asset_convert_nif.md#master-owned-furniture
     """
-    import os
     _FURN_SEATS.clear()
     _BASE_ORIGIN_SHIFT.clear()
     try:
@@ -392,19 +433,17 @@ def load_furniture_models(meshes_dir, by_type) -> int:
     except ImportError as exc:
         print(f"  Furniture seats: asset_convert unavailable ({exc}), using fallback")
         return 0
-    if not os.path.isdir(meshes_dir):
-        print(f"  Furniture seats: meshes dir not found ({meshes_dir}), using fallback")
-        return 0
 
-    marker_models = scan_marker_nifs(meshes_dir)
-    # PyFFI parsing is CPU-bound pure Python — run the per-NIF parses across
-    # a process pool (threads would serialise on the GIL).
-    jobs = [(key, os.path.join(meshes_dir, key.replace('/', os.sep)))
-            for key in sorted(marker_models)]
+    mesh_dirs = [meshes_dir] + master_mesh_dirs(ctx)
+    jobs = _scan_marker_models(mesh_dirs, scan_marker_nifs)
+    if not jobs:
+        print(f"  Furniture seats: no marker models under {meshes_dir}, using fallback")
+        return 0
     model_shift: dict = {}
     resolved = 0
 
     def _consume(results):
+        """Record each parsed model; PyFFI is CPU-bound so the caller pools."""
         nonlocal resolved
         for key, info, err in results:
             if err is not None:
@@ -423,18 +462,11 @@ def load_furniture_models(meshes_dir, by_type) -> int:
         with ProcessPoolExecutor(max_workers=workers) as ex:
             _consume(ex.map(furniture_model_info_job, jobs))
 
-    shifted_bases = 0
-    for recs in by_type.values():
-        for rec in recs:
-            modl = get_str(rec, 'Model.MODL')
-            if not modl:
-                continue
-            shift = model_shift.get(_furn_model_key(modl))
-            if shift and abs(shift) > 1e-4:
-                fid = get_str(rec, 'FormID')
-                if fid:
-                    _BASE_ORIGIN_SHIFT[fid.upper()] = shift
-                    shifted_bases += 1
+    master_export = getattr(ctx, 'master_export', None) or {}
+    shifted_bases = _index_origin_shifts(master_export.items(), model_shift)
+    shifted_bases += _index_origin_shifts(
+        ((get_str(rec, 'FormID'), rec)
+         for recs in by_type.values() for rec in recs), model_shift)
     print(f"  Furniture seats: {resolved} marker models resolved, "
           f"{shifted_bases} base records need REFR z compensation")
     return resolved

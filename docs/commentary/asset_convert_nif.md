@@ -945,6 +945,25 @@ the REFRs of every base record using the model by the same amount, so
 world-space visuals are unchanged. The shift is absorbed into the rigid body
 along with the rotation.
 
+#### <a id="master-owned-furniture"></a>The REFR half must index the MASTERS
+
+The mesh half and the REFR half are one contract: lift the model, lower the
+refs. `load_furniture_models` originally scanned only the plugin's own
+`meshes/` and keyed `_BASE_ORIGIN_SHIFT` off its own `by_type`, so a plugin
+that merely PLACES a master's furniture got neither — the mesh rose and the
+refs stayed. Measured on Tamriel Rebuilt (masters Morrowind_ob.esm,
+Morrowind-Morroblivion-Compatibility.esp, Tamriel_Data.esm): TR owns 0 marker
+models and 0 FURN records, while Morroblivion owns 87 marker models. Three
+placed refs floated by exactly their model's shift — `furnucomustoolu02`
++16.19, `furnucomubenchu02` +18.80, `activeudeubedu03` +55.00.
+
+So both halves index the masters: `master_mesh_dirs(ctx)` adds each master's
+source mesh tree (the plugin's own copy of a shared path wins), and the base
+sweep walks `ctx.master_export` before `by_type`. 🛑 A master's record is keyed
+on its **`master_export` KEY**, never `rec['FormID']` — that field is in the
+master's own index space
+(see [pipeline](tes5_import_pipeline.md#phase-0-master-key-not-formid)).
+
 ### <a id="root-named-controlled-blocks"></a>Root-named controlled blocks are stripped
 
 A NiControllerManager on the BSFadeNode root may hold controlled blocks

@@ -227,13 +227,13 @@ def test_master_lookups_all_agree_on_the_export_root(tmp_path):
 
 
 def test_import_main_master_dirs_match_load_master_export(tmp_path):
-    """`_master_export_dirs` exists to mirror `load_master_export` exactly.
+    """`master_export_dirs` exists to mirror `load_master_export` exactly.
 
     Its own docstring says so, and it stopped being true: it returned [] for
     every grouped plugin, so the voice-type adoption loop never ran and every
     actor fell through to the Imperial default.
     """
-    from tes5_import.pipeline import _master_export_dirs
+    from tes5_import.pipeline import master_export_dirs
     from tes5_import.overrides.nested import export_root, master_export_dir
 
     exp = _fake_group(tmp_path, ['A.esm', 'B.esp'])
@@ -246,7 +246,7 @@ def test_import_main_master_dirs_match_load_master_export(tmp_path):
     class _Ctx:
         export_dir = str(rec)
 
-    got = _master_export_dirs(_Ctx())
+    got = master_export_dirs(_Ctx())
     assert got == [master_export_dir(export_root(str(rec)), 'Oblivion.esm')]
     assert got != []
 
