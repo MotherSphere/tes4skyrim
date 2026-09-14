@@ -78,6 +78,7 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [ingame_testing.md](commentary/ingame_testing.md) | tools/dialog/ - in-game test methodology |
 | [performance.md](commentary/performance.md) | the whole pipeline - performance and parallelism |
 | [script_convert.md](commentary/script_convert.md) | script_convert/ - TES4 script to Papyrus |
+| [script_convert_morrowind.md](commentary/script_convert_morrowind.md) | script_convert/ - what TES3 scripts do differently |
 | [tes4_export_falloutnv.md](commentary/tes4_export_falloutnv.md) | tes4_export/record_types/falloutnv.py - FO3/FNV export deltas |
 | [tes4_export_morrowind.md](commentary/tes4_export_morrowind.md) | tes4_export/tes3_reader.py, export_morrowind.py - TES3 export and Morroblivion compatibility |
 | [tes5_import_conditions.md](commentary/tes5_import_conditions.md) | tes5_import/base/conditions.py - CTDA translation |

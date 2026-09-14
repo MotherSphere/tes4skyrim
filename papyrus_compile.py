@@ -241,15 +241,38 @@ class _Compiler:
         return ok_count, errors
 
 
-def _master_source_dirs(file_name: str, out_root: Path) -> list:
-    """Header dirs for the masters' converted scripts.
+def _master_chain(file_name: str, export_root: str) -> list:
+    """Every plugin `file_name` inherits from, nearest master first.
 
+    The walk is transitive and cycle-safe. A master is resolved through
+    `record_dir`, never by joining its name onto the export root: plugins
+    imported from one mod archive share a folder named for the MOD, so a
+    plain join misses them.
     See: docs/commentary/script_convert.md#vanilla-headers
     """
     from script_convert.cross_ref import master_names
+    ordered, seen, queue = [], {file_name.lower()}, [file_name]
+    while queue:
+        for name in master_names(record_dir(export_root, queue.pop(0))):
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            ordered.append(name)
+            queue.append(name)
+    return ordered
+
+
+def _master_source_dirs(file_name: str, out_root: Path) -> list:
+    """Header dirs for the masters' converted scripts, ancestors included.
+
+    A plugin two levels from the masterless root still needs that root's
+    static scripts -- TES4Polyfill is owned by the masterless plugin alone,
+    and every generated body calls it.
+    See: docs/commentary/script_convert.md#vanilla-headers
+    """
     export_root = str(SCRIPT_DIR / "export")
     dirs = []
-    for m in master_names(record_dir(export_root, file_name)):
+    for m in _master_chain(file_name, export_root):
         d = plugin_out_root(out_root, m, export_root) / "scripts" / "source"
         if d.is_dir():
             dirs.append(d)

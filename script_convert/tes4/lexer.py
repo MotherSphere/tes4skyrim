@@ -60,17 +60,16 @@ class Token:
         return f'{self.kind.name}({self.text!r})@{self.line}:{self.col}'
 
 
-# Longest-first: `==` must beat `=`, `<=` must beat `<`.  `:=` is not TES4 but
-# costs nothing to recognise and keeps a mis-typed script from lexing as two
-# tokens that silently reparse.
+#: Operators, LONGEST FIRST. See: docs/commentary/script_convert.md#operator-table
 _OPERATORS = (
-    # `<>` is TES4's inequality; it MUST be matched before `<` or it lexes as
-    # two comparisons and `x <> 5` comes out `x < >` -- not an expression.
-    '==', '!=', '<>', '<=', '>=', '&&', '||', ':=',
+    '==', '!=', '<>', '<=', '>=', '&&', '||', ':=', '->',
     '+=', '-=', '*=', '/=',
     '<', '>', '=', '+', '-', '*', '/', '%', '$',
     '(', ')', '[', ']', ',', '.', ':',
 )
+
+#: One game's operator spelling -> the TES4 form the tree speaks.
+_OPERATOR_ALIASES = {'->': '.'}
 
 #: Binary precedence, loosest tier first; parser binds and emitter parens by it.
 PRECEDENCE = (
@@ -195,7 +194,8 @@ def tokenize(source: str) -> list[Token]:
 
         for op in _OPERATORS:
             if text.startswith(op, i):
-                out.append(Token(T.OP, op, line, col))
+                out.append(Token(T.OP, _OPERATOR_ALIASES.get(op, op),
+                                 line, col))
                 i += len(op)
                 break
         else:

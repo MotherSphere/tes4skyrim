@@ -4526,6 +4526,31 @@ frequently dragged into a batch failure by a *dependency's* error and compiles
 perfectly well alone. Only a batch that cannot name any new failing file gives
 up and falls back to the per-file path.
 
+### <a id="operator-table"></a>The lexer operator table is longest-first
+
+`lexer._OPERATORS` is scanned in order and the first prefix match wins, so a
+two-character operator MUST precede its one-character prefix:
+
+| operator | must beat | or else |
+|---|---|---|
+| `<>` (TES4 inequality) | `<` | `x <> 5` lexes `x < >` — not an expression |
+| `->` (TES3 member) | `-` | `player->GetPos` lexes `player - >` |
+
+`:=` is not TES4 at all, but costs nothing to recognise and keeps a mis-typed
+script from lexing as two tokens that silently reparse.
+
+**`->` is TES3's explicit-reference operator and means exactly what TES4 spells
+`.`** — OpenMW's scanner lexes it as `S_ref` (`scanner.cpp:524-538`) and
+`exprparser.cpp:475-485` consumes `S_ref` and `S_member` identically. So
+`_OPERATOR_ALIASES` rewrites the token text to `.` at lex time and every
+`Member` path downstream is untouched; no parser or emitter knows two
+spellings.
+
+Measured: 8,164 uses across 1,508 of TR_Mainland's 3,569 scripts, which failed
+with "invalid right operand in infix expression" before the token existed.
+**Zero** occurrences in Oblivion.esm's scripts, and no `- >` (spaced) anywhere
+in either corpus, so the longest-first match is unambiguous.
+
 ### <a id="vanilla-headers"></a>Where the vanilla headers come from
 
 The CK ships the vanilla `.psc` sources in one of two loose layouts —
@@ -4540,6 +4565,22 @@ scripts (`TES4_NQ16Script Property …`) because the record they name carries
 that master's SCRI, and those `.psc` live in the master's own output — 198 of
 Translation.esp's scripts fail with "undefined type" without them. They are
 headers only; the master's own run compiles and ships the `.pex`.
+
+**The walk is TRANSITIVE, not one level.** `TES4Polyfill` is owned by the
+MASTERLESS plugin alone (see the static-script deploy in `pipeline.py`), and
+every generated body calls it, so a plugin whose own master is itself a
+dependent never sees it. Resolving one level left TR_Mainland
+(TR → `Morrowind_ob.esm` → `Oblivion.esm`, and only `Oblivion.esm` is
+masterless) with 2,324 scripts failing on `undefined identifier TES4Polyfill`;
+walking the whole chain took it from 64 to 850 compiled. Nothing about this is
+Morrowind-specific — any plugin two or more levels from the masterless root
+hit it.
+
+Order is **nearest master first, then its masters**, so a nearer plugin's
+override of a script still wins the `-h` search ahead of the root's copy.
+Each master is resolved through `record_dir`, never by joining its name onto
+the export root: plugins imported from one mod archive share a folder named
+for the MOD, so a plain join misses them.
 
 ## The Say fallback line length
 <a id="say-line-fallback-duration"></a>
