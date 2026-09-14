@@ -603,6 +603,47 @@ record's mesh and every ownerless vanilla mesh (animation pairs and
 that keeps the vanilla path finds the patch's conversion. The plugin's own
 tree always wins, and CREA models take the creature table above instead.
 
+### <a id="morroblivion-origin-shift"></a>A partly re-seated replacement hovers
+
+**Code:** `tes4_export/morroblivion_origin.py`; applied by `remap_vanilla_models`.
+
+Morrowind rests an object on its `RootCollisionNode` when it has one, else on
+its render geometry — the two live in different frames, and vanilla
+`o\contain_barrel10.nif` is an extreme case: render at +20.38, collision at
+−64.01. The converted Skyrim mesh has only render geometry to sit on. So when
+the remap above substitutes a Morroblivion mesh, the authored Z stays right
+only if the replacement's render bottom lands on the vanilla RESTING plane.
+
+Morroblivion re-seated the barrel from +20.38 toward −64.01 but stopped at
+−36.15 — **27.86 short**, which is exactly how far its references hover (a
+visible quarter of the barrel's 85-unit height, confirmed in-game). The shift
+is `replacement render bottom − vanilla collision bottom`.
+
+**The gate is the fix.** Emit nothing unless the replacement actually moved the
+render frame. Measured over the 91 meshes Tamriel Data records name:
+
+| Class | Count | Shifted |
+|---|---|---|
+| Render frame preserved | 68 | no |
+| Re-seated cleanly onto the collision plane | 2 | no |
+| Partial re-seat — hovers | 5 | **yes** |
+| Geometry replaced outright, no vanilla collision | 16 | no |
+
+Without that gate the 68 preserved meshes would all move, because vanilla
+collision often sits far from render: `x_ex_t_tower_seedling` would shift
+−1048.80, `d_ex_colony_door06` +508.45. The five that hover are the barrel
+(+27.86) and `contain_com_sack_01/02/03` and `contain_com_chest_02`, all under
+2.2 units.
+
+Morroblivion's own 313 barrel placements were authored in the CK against its
+own mesh — their Z fractions are scattered, not snapped — so they are already
+correct, and the shift rides only REMAPPED records, never Morroblivion's.
+
+The value travels as `Model.OriginShift` on the base record; the importer
+subtracts it from every placed reference through the same `_BASE_ORIGIN_SHIFT`
+path the furniture re-origin uses, which already handles scale and rotation
+(see [asset_convert_nif.md](asset_convert_nif.md#master-owned-furniture)).
+
 ## <a id="morroblivion-gap-patch"></a>The Morroblivion gap patch
 
 **Code:** `tes4_export/morrowind_patch.py`.

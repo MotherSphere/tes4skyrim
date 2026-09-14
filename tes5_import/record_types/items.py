@@ -382,16 +382,23 @@ def master_mesh_dirs(ctx) -> list:
 def _index_origin_shifts(pairs, model_shift: dict) -> int:
     """Register every (base FormID, record) whose model is re-origined.
 
-    `pairs` yields (fid, rec) with fid ALREADY in this plugin's index space —
-    for a master that is its `master_export` key, never `rec['FormID']`.
+    Two independent sources add up: the furniture floor re-origin measured
+    from the converted NIF, and `Model.OriginShift` authored by the Morrowind
+    export when it substituted a Morroblivion mesh sitting at a different
+    origin.  `pairs` yields (fid, rec) with fid ALREADY in this plugin's index
+    space — for a master that is its `master_export` key, never
+    `rec['FormID']`.
+
+    See: docs/commentary/tes4_export_morrowind.md#morroblivion-origin-shift
     """
     shifted = 0
     for fid, rec in pairs:
-        modl = get_str(rec, 'Model.MODL')
-        if not modl or not fid:
+        if not fid:
             continue
-        shift = model_shift.get(_furn_model_key(modl))
-        if shift and abs(shift) > 1e-4:
+        modl = get_str(rec, 'Model.MODL')
+        shift = model_shift.get(_furn_model_key(modl)) if modl else None
+        shift = (shift or 0.0) + get_float(rec, 'Model.OriginShift')
+        if abs(shift) > 1e-4:
             _BASE_ORIGIN_SHIFT[fid.upper()] = shift
             shifted += 1
     return shifted
@@ -415,35 +422,26 @@ def _scan_marker_models(mesh_dirs, scan_marker_nifs) -> list:
     return jobs
 
 
-def load_furniture_models(meshes_dir, by_type, ctx=None) -> int:
-    """Compute seat lists + origin shifts for every marker-bearing model.
+def _load_marker_seats(mesh_dirs) -> tuple:
+    """(models resolved, {model key: floor re-origin}) over `mesh_dirs`.
 
-    meshes_dir is <export_dir>/meshes; by_type maps sig -> records.  Both the
-    meshes and the base records of `ctx`'s masters are indexed too, so a
-    plugin that only PLACES a master's furniture still compensates.  A model
-    whose NIF is unreadable is skipped, leaving its REFRs unshifted.
-
-    See: docs/commentary/asset_convert_nif.md#master-owned-furniture
+    PyFFI parsing is CPU-bound pure Python, so the per-NIF parses run across a
+    process pool; threads would serialise on the GIL.
     """
-    _FURN_SEATS.clear()
-    _BASE_ORIGIN_SHIFT.clear()
     try:
         from asset_convert.nif.furniture_markers import (furniture_model_info_job,
                                                      scan_marker_nifs)
     except ImportError as exc:
         print(f"  Furniture seats: asset_convert unavailable ({exc}), using fallback")
-        return 0
-
-    mesh_dirs = [meshes_dir] + master_mesh_dirs(ctx)
+        return 0, {}
     jobs = _scan_marker_models(mesh_dirs, scan_marker_nifs)
     if not jobs:
-        print(f"  Furniture seats: no marker models under {meshes_dir}, using fallback")
-        return 0
+        return 0, {}
     model_shift: dict = {}
     resolved = 0
 
     def _consume(results):
-        """Record each parsed model; PyFFI is CPU-bound so the caller pools."""
+        """Record each parsed model, reporting the ones that would not read."""
         nonlocal resolved
         for key, info, err in results:
             if err is not None:
@@ -461,6 +459,25 @@ def load_furniture_models(meshes_dir, by_type, ctx=None) -> int:
         workers = min(worker_count(), len(jobs))
         with ProcessPoolExecutor(max_workers=workers) as ex:
             _consume(ex.map(furniture_model_info_job, jobs))
+    return resolved, model_shift
+
+
+def load_furniture_models(meshes_dir, by_type, ctx=None) -> int:
+    """Compute seat lists + origin shifts for every marker-bearing model.
+
+    meshes_dir is <export_dir>/meshes; by_type maps sig -> records.  Both the
+    meshes and the base records of `ctx`'s masters are indexed too, so a
+    plugin that only PLACES a master's furniture still compensates.  A model
+    whose NIF is unreadable is skipped, leaving its REFRs unshifted.  The
+    base sweep runs even with no marker model anywhere, because a record may
+    carry an authored `Model.OriginShift` instead.
+
+    See: docs/commentary/asset_convert_nif.md#master-owned-furniture
+    """
+    _FURN_SEATS.clear()
+    _BASE_ORIGIN_SHIFT.clear()
+    resolved, model_shift = _load_marker_seats(
+        [meshes_dir] + master_mesh_dirs(ctx))
 
     master_export = getattr(ctx, 'master_export', None) or {}
     shifted_bases = _index_origin_shifts(master_export.items(), model_shift)

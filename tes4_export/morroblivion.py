@@ -181,16 +181,22 @@ class MorroblivionModels:
         return self.creatures.get(editor_id.lower()) if editor_id else None
 
 
-def remap_vanilla_models(out: dict, ctx) -> int:
-    """Rewrite every non-creature model line to Morroblivion's model; how many changed.
+def remap_vanilla_models(out: dict, ctx) -> tuple:
+    """Rewrite every non-creature model line to Morroblivion's model.
 
-    A mesh the plugin ships itself is left alone, and so is one Morroblivion
-    does not replace: the compatibility patch converts those.
+    Returns (models changed, records given a Z shift). A mesh the plugin ships
+    itself is left alone, and so is one Morroblivion does not replace: the
+    compatibility patch converts those. A replacement that moved the render
+    frame off the vanilla resting plane carries `Model.OriginShift`, so the
+    importer can seat its references.
+
     See: docs/commentary/tes4_export_morrowind.md#morroblivion-meshes
+    See: docs/commentary/tes4_export_morrowind.md#morroblivion-origin-shift
     """
     if ctx.morroblivion is None:
-        return 0
-    changed = 0
+        return 0, 0
+    shifts = ctx.origin_shifts
+    changed = shifted = 0
     for sig, records in out.items():
         if sig == _CREATURE:
             continue
@@ -203,7 +209,12 @@ def remap_vanilla_models(out: dict, ctx) -> int:
                 if ctx.morroblivion.owns(path):
                     continue
                 model = ctx.morroblivion.replacement(path, ctx.index)
-                if model:
-                    lines[i] = f'{key}={model.replace(chr(92), chr(92) * 2)}'
-                    changed += 1
-    return changed
+                if not model:
+                    continue
+                lines[i] = f'{key}={model.replace(chr(92), chr(92) * 2)}'
+                changed += 1
+                shift = shifts.shift_for(path, model) if shifts else 0.0
+                if shift:
+                    lines.append(f'Model.OriginShift={shift!r}')
+                    shifted += 1
+    return changed, shifted

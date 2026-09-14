@@ -23,6 +23,7 @@ from core.plugin_masters import masters_from_export_header
 
 from .morroblivion import (MORROBLIVION_PREFIX, MorroblivionModels,
                            remap_vanilla_models)
+from .morroblivion_origin import OriginShifts
 from .morrowind_armor import load_body_models
 from .morrowind_cell import parse_cell
 from .morrowind_ids import (IdIndex, exterior_key, interior_key, land_key,
@@ -111,6 +112,7 @@ class MorrowindContext:
         self.master_bounds = None
         self.body_models = {}
         self.morroblivion = None
+        self.origin_shifts = None
         self.derived = {}
         self.unresolved = Counter()
         self.own_ids = {}
@@ -479,18 +481,21 @@ def export_plugin(source_path: str, export_dir: str, masters=()) -> dict:
     ctx = load_context(export_dir, masters)
     records = read_file(source_path)[1]
     ctx.body_models = load_body_models(source_path, records, export_dir)
+    own_meshes = assets_for(record_dir(export_dir, plugin)) / 'meshes'
     ctx.morroblivion = MorroblivionModels(
-        export_dir, masters, source_path,
-        assets_for(record_dir(export_dir, plugin)) / 'meshes')
+        export_dir, masters, source_path, own_meshes)
+    ctx.origin_shifts = OriginShifts(
+        export_dir, [own_meshes] + _master_mesh_roots(export_dir, masters))
     out = convert_plugin(records, ctx)
     owned = sum(1 for _f, lines in out.get('CREA', [])
                 if any(l.startswith('MorrowindModel') for l in lines))
     if out.get('CREA'):
         print(f"  Creatures: {owned} of {len(out['CREA'])} converted here, "
               f"the rest from a master")
-    remapped = remap_vanilla_models(out, ctx)
+    remapped, shifted = remap_vanilla_models(out, ctx)
     if remapped:
-        print(f'  Morroblivion models: {remapped} vanilla mesh references remapped')
+        print(f'  Morroblivion models: {remapped} vanilla mesh references remapped'
+              + (f', {shifted} re-seated' if shifted else ''))
     out_dir = str(record_dir(export_dir, plugin))
     counts = write_export(out, out_dir)
     write_header(out_dir, _master_list(masters), sum(counts.values()),
@@ -498,6 +503,13 @@ def export_plugin(source_path: str, export_dir: str, masters=()) -> dict:
     return {'plugin': plugin, 'output': out_dir, 'counts': counts,
             'dropped': sum(ctx.unresolved.values()),
             'unlinked_doors': ctx.unlinked_doors}
+
+
+def _master_mesh_roots(export_dir: str, masters) -> list:
+    """Each Morroblivion master's mesh tree, holding the replacement meshes."""
+    return [assets_for(record_dir(export_dir, name)) / 'meshes'
+            for name, _path in masters
+            if name.lower().startswith(MORROBLIVION_PREFIX)]
 
 
 def _master_list(masters) -> list:

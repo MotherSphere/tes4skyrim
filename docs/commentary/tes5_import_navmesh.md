@@ -3056,7 +3056,7 @@ think about where people actually walk, not a number to drive to zero.
 ### Known gap
 
 Six vanilla Skyrim clutter meshes placed in Bruma interiors fail to parse even
-after [Patch 16](asset_convert_nif.md#patch-16-body-flags-width) —
+after [Patch 16](asset_convert_nif.md#patch-16-sse-havok-layouts) —
 `MiscSackLargeFlat01`/`03`, `UpperChest01`, `NobleWardrobe01`, `Barrel01`,
 `StrongBox01`. On BrumaChapelHall that is **8 of 300 placements**, all small
 clutter; every wall, floor, pillar and door extracts. The editor draws what it
@@ -3100,7 +3100,7 @@ six meshes that failed from the SSE side:
 
 The SSE failures are pyffi layout bugs in the Havok blocks
 (`bhkConvexVerticesShape`, `bhkCompressedMeshShapeData`) that survive
-[Patch 16](asset_convert_nif.md#patch-16-body-flags-width) — Patch 16 fixes the
+[Patch 16](asset_convert_nif.md#patch-16-sse-havok-layouts) — Patch 16 fixes the
 `bhkRigidBody` Body Flags width, which is necessary but not sufficient. Rather
 than chase each remaining layout, the fetch order is now **Bruma archives → LE
 references → SSE BSAs**, and the LE copies sidestep the whole class.

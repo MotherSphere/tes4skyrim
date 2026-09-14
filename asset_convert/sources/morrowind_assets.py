@@ -70,6 +70,31 @@ def find_vanilla_mesh(export_root, rel: str):
     return cached
 
 
+def find_archived_mesh(export_root, rel: str):
+    """The vanilla mesh at `rel` AS SHIPPED, ignoring any loose replacer.
+
+    `find_vanilla_mesh` prefers a loose file because that is what the game
+    loads. Geometry a plugin's coordinates were authored against is the
+    opposite question: a user's mesh replacer must not change what we measure,
+    or two installs convert the same plugin differently.
+
+    See: docs/commentary/tes4_export_morrowind.md#morroblivion-origin-shift
+    """
+    data_dir = source_registry.directory_for(str(export_root), _ANCHOR_PLUGIN)
+    if not data_dir:
+        return None
+    rel = _normalize(rel)
+    cached = Path(export_root) / CACHE_DIR / _MESHES / rel
+    if cached.is_file():
+        return cached
+    entry = _archive_index(data_dir).get(_MESHES + chr(92) + rel)
+    if entry is None:
+        return None
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(read_entry(*entry))
+    return cached
+
+
 def resolve_mesh(roots, rel: str, export_root):
     """The first mesh root holding `rel`, then the vanilla install; else None."""
     rel = _normalize(rel)
