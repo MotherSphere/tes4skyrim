@@ -2371,40 +2371,104 @@ Note that `block_size_check` and `End of file not reached` are emitted at
 ERROR, not WARNING -- they are the highest-signal messages for `nif.xml`
 mismatches, and they are captured because ERROR outranks WARNING.
 
-## <a id="patch-16-body-flags-width"></a>Patch 16: `bhkRigidBody` Body Flags width is BSVER-dependent
+## <a id="patch-16-sse-havok-layouts"></a>Patch 16: SSE (BSVER 100) Havok collision layouts
 
-**Code:** `asset_convert/nif/pyffi_monkey_patch.py::_install_rigid_body_flags`.
+**Code:** `asset_convert/nif/pyffi_monkey_patch.py::_install_sse_havok_layouts`.
 
-`references/nifxml/nif.xml` declares the field once, gated two ways:
+PyFFI 2.2.3 predates Skyrim SE and has no BSVER 100 concept at all. That single
+fact produced three separate-looking crashes in the Havok blocks, so they are
+one patch, not three. `references/nifxml/nif.xml` is authoritative for every
+layout below — none of this was inferred from a stack trace.
+
+### The enumeration defect
+
+`HavokFilter` and `HavokMaterial` each declare three mutually exclusive
+game-gated variants:
+
+```xml
+<field name="Layer" suffix="SK" type="SkyrimLayer" vercond="(#VER# == 20.2.0.7) #AND# #BS_GT_FO3#" />
+<field name="Material" suffix="SK" ... vercond="(#VER# == 20.2.0.7) #AND# #BS_GT_FO3#" />
+```
+
+PyFFI flattens the Skyrim variant to a literal `user_version_2 == 83`, which
+**enumerates** the version instead of bounding it. SSE files carry BSVER 100, so
+no variant matches and the field reads **zero bytes**. A sweep over every
+`_attrs` entry in raw PyFFI, evaluating each `vercond` at BSVER 83 and again at
+100, finds exactly two fields live at 83 and dead at 100 —
+`HavokColFilter.layer` and `HavokMaterial.material`. The fix bounds all three
+variants (`< 16`, `== 34`, `>= 83`) rather than enumerating them.
+
+PyFFI's `Expression` evaluates only a SINGLE comparison; a multi-term `&&`/`||`
+condition silently returns False. That is why the Oblivion variant does not
+catch the fallthrough, and why each replacement must stay one comparison.
+
+### The unconditional-width defect
+
+The same field declared at two widths is the defect inverted:
 
 ```xml
 <field name="Body Flags" type="uint"   vercond="#BSVER# #LT#  76" />
 <field name="Body Flags" type="ushort" vercond="#BSVER# #GTE# 76" />
 ```
 
-PyFFI 2.2.3 flattens that into **two unconditional attributes**,
-`unknown_int_9` (UInt) followed by `unknown_int_91` (UShort) — verified by
-dumping `NifFormat.bhkRigidBody._attrs`, where both carry
-`ver1=None ver2=None cond=None`. So every SSE mesh (BSVER 100, which should
-read 2 bytes) is read **6 bytes long**. The overrun consumes the next block's
-header, and pyffi then reports a cascade that names the wrong culprit:
+PyFFI flattens that into two **unconditional** attributes, `unknown_int_9`
+(UInt) then `unknown_int_91` (UShort) — both carry `ver1=None ver2=None
+cond=None`. Every SSE mesh therefore reads 6 bytes where it should read 2.
+
+### Why the errors name the wrong block
+
+A short or long read shifts every later field, and the failure surfaces
+downstream:
 
 ```
 Reading <struct 'bhkRigidBody'> failed ... unpack requires a buffer of 4 bytes
 Reading <struct 'bhkConvexVerticesShape'> failed ... array too long (2147483648)
-Block size check failed: corrupt NIF file or bad nif.xml?
 ```
 
-The `array too long (2147483648)` is the giveaway: 0x80000000 is misaligned
-float bytes read as a count, not a corrupt file.
+`0x80000000` is the documented default of `bhkWorldObjCInfoProperty`'s
+`Capacity and Flags`; a misaligned read lands on it and reports it as an array
+count. **That constant is the signature of this whole class of bug** — it names
+the array, never the field upstream that actually shifted.
 
-Measured on vanilla Skyrim clutter placed in Bruma interiors —
-`Clutter\Barrel01.NIF`, `Clutter\Common\StrongBox01.nif`,
+### Verifying a layout instead of guessing it
+
+The arithmetic is checkable against the file's own block table.
+`bhkRigidBody` in `CasExFreeSmDoor02.nif` declares **250 bytes**; summing the
+`nif.xml` chain gives the same 250:
+
+| part | bytes |
+|---|---|
+| `bhkWorldObject`: Shape ref + `HavokFilter` + `bhkWorldObjectCInfo` | 28 |
+| `bhkEntityCInfo` | 4 |
+| `bhkRigidBodyCInfo2010` | 212 |
+| `Num Constraints` + `Body Flags` (ushort at BSVER ≥ 76) | 6 |
+| **total** | **250** |
+
+`bhkWorldObject`'s `Unknown Int` is `until="10.0.1.2"` and must NOT be counted;
+including it gives 254 and is the easy way to be four bytes wrong. PyFFI's own
+live-attribute walk totalled 457 for the same block, which is how far its
+flattened view had drifted.
+
+A flattened list holding each attribute twice is NOT a defect: 51 classes
+inherit `_attrs` from a `_`-prefixed customizer base, so `flat = 2 x own` is
+normal and those classes parse correctly. Chasing that duplication is a dead
+end.
+
+### Measured
+
+Before the patch, six vanilla Skyrim clutter meshes placed in Bruma interiors
+yielded **no collision at all**, silently — the extractor returned `None` and
+the objects simply had no walls: `Clutter\Barrel01.NIF`,
+`Clutter\Common\StrongBox01.nif`,
 `Clutter\Containers\MiscSackLargeFlat01.nif` / `03`,
-`Clutter\Upperclass\UpperChest01.nif`, `Furniture\Noble\NobleWardrobe01.nif`
-— all six yielded **no collision at all** before the patch, silently: the
-extractor returned `None` and the objects simply had no walls.
+`Clutter\Upperclass\UpperChest01.nif`, `Furniture\Noble\NobleWardrobe01.nif`.
 
-Note this is NOT the same defect as Patch 8, which adds SSE *geometry*
-(`BSTriShape`) read support. Patch 8 leaves the Havok blocks alone, so a mesh
-can parse its geometry and still lose every collision shape.
+Over the 104 meshes placed by the Bruma navmesh corpus cells, parsing the same
+set before and after the `HavokFilter` fix moved **103 -> 104 with nothing
+lost**; the mesh gained was
+`DLC01\Dungeons\Castle\LgHalls\CasExFreeSmDoor02.nif`, the last un-parseable
+mesh in the corpus.
+
+This is distinct from Patch 8, which adds SSE *geometry* (`BSTriShape`) read
+support and leaves the Havok blocks alone — a mesh can parse its geometry
+perfectly and still lose every collision shape here.

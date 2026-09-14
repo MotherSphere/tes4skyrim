@@ -151,9 +151,9 @@ def _apply_nifformat_patches(NifFormat):
     _install_legacy_block_types(NifFormat)
 
     # ------------------------------------------------------------------
-    # Patch 16: bhkRigidBody Body Flags width is BSVER-dependent
+    # Patch 16: SSE (BSVER 100) Havok collision layouts
     # ------------------------------------------------------------------
-    _install_rigid_body_flags(NifFormat)
+    _install_sse_havok_layouts(NifFormat)
 
 
 #: Block types that are a bare NiNode with no extra fields (nif.xml 0.9/0.10).
@@ -162,16 +162,38 @@ _LEGACY_NINODE_BLOCKS = ('NiCollisionSwitch',)
 #: BSVER at which bhkRigidBody's Body Flags narrows from uint to ushort.
 _BSVER_BODY_FLAGS_USHORT = 76
 
+#: `(class, field)` whose nif.xml variants PyFFI gates by enumerating BSVER.
+_SSE_VARIANT_FIELDS = (
+    ('HavokColFilter', 'layer'),
+    ('HavokMaterial', 'material'),
+)
 
-def _install_rigid_body_flags(NifFormat):
-    """Gate bhkRigidBody's two Body Flags fields on BSVER.
+#: One vercond per variant, in nif.xml order: Oblivion, FO3/FNV, Skyrim+.
+_SSE_VARIANT_CONDS = ('user_version_2 < 16', 'user_version_2 == 34',
+                      'user_version_2 >= 83')
 
-    PyFFI declares both widths unconditionally, so an SSE mesh reads 6 bytes
-    where it should read 2 and every later block fails.
 
-    See: docs/commentary/asset_convert_nif.md#patch-16-body-flags-width
+def _install_sse_havok_layouts(NifFormat):
+    """Make PyFFI's Havok structs read Skyrim SE (BSVER 100) meshes.
+
+    Rewrites the enumerated `== 83` variant gates of `_SSE_VARIANT_FIELDS` as
+    bounds, and gates `bhkRigidBody`'s two unconditional Body Flags widths.
+    Every vercond must stay a SINGLE comparison: PyFFI's `Expression`
+    silently evaluates a multi-term one as False.
+
+    See: docs/commentary/asset_convert_nif.md#patch-16-sse-havok-layouts
     """
     from pyffi.object_models.xml.expression import Expression
+
+    changed = [NifFormat.bhkRigidBody]
+    for cls_name, field in _SSE_VARIANT_FIELDS:
+        cls = getattr(NifFormat, cls_name, None)
+        variants = [a for a in cls._attrs if a.name == field] if cls else []
+        if len(variants) != len(_SSE_VARIANT_CONDS):
+            continue
+        for attr, cond in zip(variants, _SSE_VARIANT_CONDS):
+            attr.vercond = Expression(cond)
+        changed.append(cls)
 
     lo = Expression('user_version_2 < %d' % _BSVER_BODY_FLAGS_USHORT)
     hi = Expression('user_version_2 >= %d' % _BSVER_BODY_FLAGS_USHORT)
@@ -180,7 +202,7 @@ def _install_rigid_body_flags(NifFormat):
             attr.vercond = lo
         elif attr.name == 'unknown_int_91':
             attr.vercond = hi
-    _refresh_attribute_caches(NifFormat, (NifFormat.bhkRigidBody,))
+    _refresh_attribute_caches(NifFormat, tuple(changed))
 
 
 # ---------------------------------------------------------------------------
