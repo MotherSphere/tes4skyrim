@@ -12,7 +12,9 @@ See: docs/commentary/tes4_export_morrowind.md#morroblivion-meshes
 """
 
 import os
+from pathlib import Path
 
+from asset_convert.sources.morrowind_assets import source_meshes
 from output_layout import record_dir
 from source_paths import resolve_plugin_path
 from tes5_import.base.text_reader import parse_export_file
@@ -103,9 +105,17 @@ class MorroblivionModels:
     Morroblivion CREA EditorID -> (Model.MODL, [NIFZ]).
     """
 
-    def __init__(self, export_root: str, masters, source_path: str):
-        """Index the vanilla ESMs beside `source_path`'s install and the masters' exports."""
+    def __init__(self, export_root: str, masters, source_path: str,
+                 own_meshes=None):
+        """Index the vanilla ESMs beside `source_path` and the masters' exports.
+
+        `own_meshes` is this plugin's extracted mesh tree, which `owns`
+        falls back from onto the source archives when it does not exist.
+        """
         self.owners, self.models, self.creatures = {}, {}, {}
+        self.own_meshes = Path(own_meshes) if own_meshes else None
+        self._own_archive = None
+        self._source_path = source_path
         for esm in VANILLA_ESMS:
             path = resolve_plugin_path(esm, os.path.dirname(source_path), export_root)
             if os.path.isfile(path):
@@ -139,6 +149,22 @@ class MorroblivionModels:
                              for i in range(int(rec.get('NIFZCount', 0) or 0))]
                     self.creatures[(rec.get('EditorID') or '').lower()] = (
                         model.replace('\\\\', '\\'), parts)
+
+    def owns(self, path: str) -> bool:
+        """Whether THIS plugin's own source ships the mesh at `path`.
+
+        The extracted tree answers when it exists; otherwise the archives
+        beside the source do, because the GUI exports before it extracts.
+        See: docs/commentary/tes4_export_morrowind.md#who-owns-a-mesh
+        """
+        rel = archive_path(path)
+        if self.own_meshes is not None \
+                and (self.own_meshes / rel.replace(chr(92), '/')).is_file():
+            return True
+        if self._own_archive is None:
+            self._own_archive = source_meshes(self._source_path)
+        return rel in self._own_archive
+
 
     def replacement(self, path: str, index) -> str:
         """Morroblivion's model for vanilla mesh `path`, resolved through `index`, or ''."""
@@ -174,8 +200,7 @@ def remap_vanilla_models(out: dict, ctx) -> int:
                 if not sep or not key.endswith('MODL') or not value:
                     continue
                 path = value.replace('\\\\', '\\')
-                if ctx.own_meshes is not None and (
-                        ctx.own_meshes / path.replace('\\', '/').lstrip('/')).is_file():
+                if ctx.morroblivion.owns(path):
                     continue
                 model = ctx.morroblivion.replacement(path, ctx.index)
                 if model:

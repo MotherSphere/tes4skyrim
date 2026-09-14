@@ -35,7 +35,8 @@ from asset_convert.sources.source_registry import asset_root
 from output_layout import (DEFAULT_OUTPUT, plugin_esm, plugin_out_root,
                            record_dir)
 
-from .morroblivion import MORROBLIVION_CREATURES, archive_path
+from .morroblivion import (MORROBLIVION_CREATURES, MorroblivionModels,
+                           archive_path)
 from .morrowind_ids import BASE_TYPES, IdIndex, load_index
 from .record_types.morrowind import as_dds
 from .tes3_reader import get_string, get_subrecord, read_file
@@ -294,6 +295,12 @@ def _convert_assets(export_dir: str, out_root, progress) -> None:
              f"{stats.get('textures_copied', 0)} textures")
 
 
+def _patch_ownership(export_dir: str) -> MorroblivionModels:
+    """Ownership for the patch: the meshes it extracted, and no replacements."""
+    return MorroblivionModels(export_dir, [], '',
+                              asset_root(export_dir, PATCH_NAME) / 'meshes')
+
+
 def _write_records(gaps: dict, export_dir: str, progress) -> str:
     """Export every gap record under its shared derived FormID.
 
@@ -306,7 +313,7 @@ def _write_records(gaps: dict, export_dir: str, progress) -> str:
 
     ids = {key: patch_formid(key) for key in gaps}
     ctx = MorrowindContext(own_index=0)
-    ctx.own_meshes = asset_root(export_dir, PATCH_NAME) / 'meshes'
+    ctx.morroblivion = _patch_ownership(export_dir)
     for key, rec in gaps.items():
         signature = tes4_signature(rec)
         ctx.register_own(rec.record_id, signature)

@@ -78,3 +78,18 @@ def resolve_mesh(roots, rel: str, export_root):
         if path.is_file():
             return path
     return find_vanilla_mesh(export_root, rel)
+
+
+def source_meshes(source_path: str) -> frozenset:
+    """Mesh paths the archives beside `source_path` ship, relative to `meshes\\`.
+
+    Asked at EXPORT time, when the plugin's own extracted tree may not exist.
+    See: docs/commentary/tes4_export_morrowind.md#who-owns-a-mesh
+    """
+    data_dir = os.path.dirname(str(source_path))
+    if not os.path.isdir(data_dir):
+        return frozenset()
+    prefix = _MESHES + chr(92)
+    return frozenset(
+        key[len(prefix):] for key in _archive_index(data_dir)
+        if key.startswith(prefix))

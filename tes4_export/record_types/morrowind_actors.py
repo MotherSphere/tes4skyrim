@@ -248,8 +248,7 @@ def _emit_creature_model(lines: list, rec: Tes3Record, ctx) -> None:
     path = get_string(sub).replace('/', chr(92)).lstrip(chr(92)) if sub else ''
     if not path:
         return
-    own = ctx.own_meshes is not None and (
-        ctx.own_meshes / path.replace(chr(92), '/')).is_file()
+    own = ctx.morroblivion is not None and ctx.morroblivion.owns(path)
     replacement = (None if own or ctx.morroblivion is None
                    else ctx.morroblivion.creature(path))
     if replacement is not None:

@@ -110,7 +110,6 @@ class MorrowindContext:
         self.own_index = own_index
         self.master_bounds = None
         self.body_models = {}
-        self.own_meshes = None
         self.morroblivion = None
         self.derived = {}
         self.unresolved = Counter()
@@ -480,9 +479,15 @@ def export_plugin(source_path: str, export_dir: str, masters=()) -> dict:
     ctx = load_context(export_dir, masters)
     records = read_file(source_path)[1]
     ctx.body_models = load_body_models(source_path, records, export_dir)
-    ctx.own_meshes = assets_for(record_dir(export_dir, plugin)) / 'meshes'
-    ctx.morroblivion = MorroblivionModels(export_dir, masters, source_path)
+    ctx.morroblivion = MorroblivionModels(
+        export_dir, masters, source_path,
+        assets_for(record_dir(export_dir, plugin)) / 'meshes')
     out = convert_plugin(records, ctx)
+    owned = sum(1 for _f, lines in out.get('CREA', [])
+                if any(l.startswith('MorrowindModel') for l in lines))
+    if out.get('CREA'):
+        print(f"  Creatures: {owned} of {len(out['CREA'])} converted here, "
+              f"the rest from a master")
     remapped = remap_vanilla_models(out, ctx)
     if remapped:
         print(f'  Morroblivion models: {remapped} vanilla mesh references remapped')

@@ -558,6 +558,29 @@ whole archive) and extracted once into `export/morrowind_assets/meshes/`. The
 BODY records themselves are read from the master ESMs resolved the same way,
 by `resolve_plugin_path`.
 
+### <a id="who-owns-a-mesh"></a>Ownership is asked of the SOURCE, not the extracted tree
+
+**Code:** `source_meshes` in `asset_convert/sources/morrowind_assets.py`,
+`MorroblivionModels.owns`.
+
+Every routing decision below starts with "does this plugin ship this mesh
+itself?". The first implementation answered it by testing the plugin's
+extracted tree, `export/<plugin>/meshes`, which is wrong on a FIRST run: the
+GUI's step order is Export (1), Extract (2), Creatures (5), so at export time
+that tree does not exist yet. Measured on a fresh `Morrowind.esm`: every one
+of its creatures took the "a master converted this" branch, `CREA.txt`
+carried no `MorrowindModel` line, the creature stage split nothing, and the
+importer fell through to `resolve_creature_race` -- the reported symptom is
+BASE SKYRIM creatures. It never showed in development because those trees
+were already extracted.
+
+So ownership is read from the plugin's own SOURCE: its extracted tree when
+that exists (an imported mod's ingest writes it before any export), else the
+name tables of the archives beside the source ESM, which `read_index` reads
+without touching file data. `Morrowind.esm` sits beside `Morrowind.bsa`, so
+its creatures resolve identically on run 1 and run 2. The export prints the
+count it owns, because a silent zero is what hid this.
+
 ### <a id="morroblivion-meshes"></a>Vanilla meshes map through their records
 
 **Code:** `remap_vanilla_models` in `tes4_export/morroblivion.py`;

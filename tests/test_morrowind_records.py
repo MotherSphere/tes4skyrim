@@ -309,6 +309,24 @@ def test_ai_packages_become_pack_records():
     assert _value(marker_lines, 'ParentCELL') == ctx.interior_cell_id('Hall')
 
 
+def test_creature_owned_from_source_archive_before_extraction(tmp_path, monkeypatch):
+    """A first GUI run exports BEFORE extracting, so ownership reads the archives.
+
+    See: docs/commentary/tes4_export_morrowind.md#who-owns-a-mesh
+    """
+    from tes4_export import morroblivion
+    monkeypatch.setattr(morroblivion, 'source_meshes',
+                        lambda _p: frozenset({'r' + chr(92) + 'guar.nif'}))
+    ctx = MorrowindContext()
+    ctx.morroblivion = MorroblivionModels(str(tmp_path), [],
+                                          str(tmp_path / 'none.esm'),
+                                          tmp_path / 'not-extracted-yet')
+    guar = _rec('CREA', 'guar', _text('MODL', 'r/Guar.NIF'),
+                _sub('FLAG', struct.pack('<I', 0)))
+    lines = convert_plugin([guar], ctx)['CREA'][0][1]
+    assert _value(lines, 'MorrowindModel') == 'r' + chr(92) * 2 + 'Guar.NIF'
+
+
 def test_creature_names_its_split_folder_and_sounds(tmp_path):
     """A creature points at the split folder and carries its SNDG slots.
 
@@ -320,9 +338,11 @@ def test_creature_names_its_split_folder_and_sounds(tmp_path):
     guar = _rec('CREA', 'guar', _text('MODL', 'r/Guar.NIF'),
                 _sub('FLAG', struct.pack('<I', 0)))
     ctx = MorrowindContext()
-    ctx.own_meshes = tmp_path / 'meshes'
-    (ctx.own_meshes / 'r').mkdir(parents=True)
-    (ctx.own_meshes / 'r' / 'Guar.NIF').write_bytes(b'')
+    meshes = tmp_path / 'meshes'
+    (meshes / 'r').mkdir(parents=True)
+    (meshes / 'r' / 'Guar.NIF').write_bytes(b'')
+    ctx.morroblivion = MorroblivionModels(str(tmp_path), [],
+                                          str(tmp_path / 'none.esm'), meshes)
     out = convert_plugin([roar, sndg, guar], ctx)
     lines = out['CREA'][0][1]
     assert _value(lines, 'Model.MODL') == 'r' + chr(92) * 2 + 'guar' + chr(92) * 2 + 'skeleton.nif'
