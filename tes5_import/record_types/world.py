@@ -856,36 +856,43 @@ def _refr_map_marker(rec: dict) -> bytes:
     return subs + pack_formid_subrecord('XLRT', SKYRIM_MAP_MARKER_LCRT)
 
 
-def _refr_data(rec: dict, scale) -> bytes:
-    """The DATA position/rotation subrecord, with furniture-origin shift.
+def shifted_position(rec: dict, scale) -> tuple:
+    """`(x, y, z)` for a placed REFR, with the furniture-origin shift applied.
 
-    Marker-bearing models are re-origined to the floor inside the NIF, so
-    their placed references drop by the same amount along the model's local
-    Z: world visuals stay identical while the REFR z lands where the engine
-    anchors seated actors (asset_convert/nif/furniture_markers.py).
+    EVERY consumer of a REFR's world position must use this, not raw PosZ.
+    The shift runs along the model's LOCAL Z, so under rotation it moves all
+    three axes.
+
+    See: docs/commentary/asset_convert_nif.md#furniture-shift-third-consumer
     """
     px = get_float(rec, 'PosX')
     py = get_float(rec, 'PosY')
     pz = get_float(rec, 'PosZ')
+    shift = get_base_origin_shift(rec.get('NAME', '') or '')
+    if not shift:
+        return px, py, pz
     rx = _safe_angle(get_float(rec, 'RotX'))
     ry = _safe_angle(get_float(rec, 'RotY'))
     rz = _safe_angle(get_float(rec, 'RotZ'))
-    shift = get_base_origin_shift(rec.get('NAME', '') or '')
-    if shift:
-        s = scale if scale and scale != 1.0 else 1.0
-        if abs(rx) < 1e-4 and abs(ry) < 1e-4:
-            pz -= shift * s
-        else:
-            wx = (math.cos(rx) * math.sin(ry) * math.cos(rz)
-                  + math.sin(rx) * math.sin(rz))
-            wy = (math.cos(rx) * math.sin(ry) * math.sin(rz)
-                  - math.sin(rx) * math.cos(rz))
-            wz = math.cos(rx) * math.cos(ry)
-            px -= shift * s * wx
-            py -= shift * s * wy
-            pz -= shift * s * wz
+    s = scale if scale and scale != 1.0 else 1.0
+    if abs(rx) < 1e-4 and abs(ry) < 1e-4:
+        return px, py, pz - shift * s
+    wx = (math.cos(rx) * math.sin(ry) * math.cos(rz)
+          + math.sin(rx) * math.sin(rz))
+    wy = (math.cos(rx) * math.sin(ry) * math.sin(rz)
+          - math.sin(rx) * math.cos(rz))
+    wz = math.cos(rx) * math.cos(ry)
+    return px - shift * s * wx, py - shift * s * wy, pz - shift * s * wz
+
+
+def _refr_data(rec: dict, scale) -> bytes:
+    """The DATA position/rotation subrecord, with furniture-origin shift."""
+    px, py, pz = shifted_position(rec, scale)
     return pack_subrecord('DATA', struct.pack(
-        '<ffffff', px, py, pz, rx, ry, rz))
+        '<ffffff', px, py, pz,
+        _safe_angle(get_float(rec, 'RotX')),
+        _safe_angle(get_float(rec, 'RotY')),
+        _safe_angle(get_float(rec, 'RotZ'))))
 
 
 def convert_REFR(rec: dict) -> bytes:

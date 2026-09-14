@@ -2886,3 +2886,221 @@ once in the parent process. Spawned workers start at 0, so it is captured here
 and replayed in each child's init; without it their `get_formid()` calls
 mis-map every PathingCell parent FormID, which the engine meets as a
 navmesh-load null deref.
+
+## <a id="renderer-colour-contract"></a>The renderer as an instrument (`tools/navmesh/render.py`, `draw.py`)
+
+**Code:** `tools/navmesh/draw.py` (layers), `tools/navmesh/render.py` (CLI).
+
+Every navmesh judgement that is not a number is made by looking at a render, so
+the picture has to be unambiguous. Four measurements drove the current design;
+each one names the defect it fixes.
+
+**Colour is a contract: red / orange / yellow mean a MESH DEFECT and nothing
+else.** Before the split, blocking collision drew at `(190, 50, 45)` and a
+`badness > 2` triangle at `(220, 40, 40)` — two reds a few units apart, so a wall
+and a sliver were indistinguishable at a glance. Collision now draws in cool
+blue-grey (blocking) and neutral grey (walkable), and the authored-navmesh
+underlay reuses the same cool palette. An authored mesh must never be scored in
+the defect palette: authored navmeshes fail our own `badness > 1` contract
+40.8% (Bruma) to 51.8% (vanilla Skyrim) of the time, against our 18.5%, so
+colouring them by that contract would paint the answer key as broken.
+
+**Collision is clipped to the mesh's own Z slab.** Measured on
+BrumaCastleGreatHall: the generated mesh spans z −575..−408 while blocking
+collision spans z −590..214 — 800 units, the ceiling and roof included, drawn
+straight over the floor plan. Clipping to
+`floor − MAX_CLIMB .. ceiling + AGENT_HEIGHT` drops **29%** of blocking
+triangles on the Great Hall (4,923 → 3,488) and **15%** on BrumaChapelHall
+(3,685 → 3,125), all of it roof. The window is deliberately generous at both
+ends: a step the generator must see sits below the floor, and a lintel an actor
+must duck under sits above head height, so a tighter clip would hide geometry
+the mesh is judged against.
+
+**Opacity, not geometry, was what buried the plan.** Blocking is already **84%
+near-vertical wall and only 1% horizontal**, so filtering by normal would buy
+almost nothing — but 4,129 wall triangles at alpha 90 stack into a solid slab.
+Blocking now draws at a very low fill alpha with a brighter rim, so the rim
+carries the shape and overlapping walls stay individually readable.
+
+**Both matched test cells are single-storey** (one band each), but they carry
+real relief — the Great Hall spans 167u — and a flat fill hides every ramp,
+fold and step. `--z-shade` maps triangle centroid Z to lightness within the
+triangle's own defect hue, so height reads without costing a defect colour.
+The lightness ramp is deliberately wide (30%–120% of the base colour): interior
+storeys are shallow, and a gentler ramp across 167u renders as flat colour.
+`--bands` prints the storey clusters (gaps > `STOREY_GAP_Z`) so `--z` is chosen
+from the cell's data rather than guessed.
+
+The remaining chrome exists because the renderer feeds a hand-transplant of
+pathgrids onto Bruma's geometry: a labelled game-unit grid and a scale bar (so a
+node's target coordinate can be read off the image), `--node-ids` (`--ids`
+labels triangles; moving a node requires naming it), `--path-alpha` (at Great
+Hall density the pathgrid buries the mesh), and a legend so a render is
+self-describing.
+
+## <a id="authored-navmesh-corpus"></a>The authored-navmesh corpus (`tools/navmesh/transplant.py`)
+
+**Code:** `tools/navmesh/transplant.py`, `tools/navmesh/authored.py`.
+
+Every previous attempt to improve the navmesh failed the same way: we had no
+ground truth. The inputs were the pathgrid and a set of "is it broken"
+invariants (miss / crack / choke / orphan), so *better* was unmeasurable and
+each change traded one invariant for another. Swapping in Shewchuk's Triangle,
+for instance, improved the shape contract (`bad>1` 17%→4%) while destroying
+coverage (`miss` 0→570 on AnvilFightersGuild, 0→5599 on ImperialDungeon01).
+
+Beyond Skyrim: Bruma rebuilt Cyrodiil's architecture in Skyrim and navmeshed it
+**by hand**, so a Bruma interior replicating an Oblivion one is an answer key.
+Seven cells match by name, each with a real Oblivion pathgrid and an authored
+Bruma navmesh (Bruma prefixes cell EditorIDs with `CYR`):
+
+| corpus cell | OB pathgrid nodes | authored tris | ours |
+|---|---|---|---|
+| BrumaCastleGreatHall | 201 | 427 | 996 |
+| BrumaCastleLordsManor | 163 | 300 | |
+| BrumaCastleDungeon | 88 | 208 | |
+| BrumaChapelUndercroft | 43 | 265 | |
+| BrumaChapelHall | 43 | 239 | 256 |
+| BrumaCastleBarracks | 55 | 105 | |
+| BrumaCastleServiceHall | 52 | 120 | |
+
+### Why the grid must be transplanted, not reused
+
+The two frames are unrelated: BrumaChapelHall's authored navmesh spans
+x 16..1732, y −816..823, while our generated mesh for the same-named Oblivion
+cell spans x −411..1366, y −1337..799. `fit` recovers the rigid placement — one
+of the four right-angle rotations plus a translation, hill-climbed on a coarse
+occupancy score — which is a **starting position, not the answer**. Bruma moved
+statics, so nodes still land in walls and are nudged by hand afterwards.
+
+### The leak rule
+
+**Node positions are never derived from the authored navmesh.** A pathgrid
+shaped by the answer would flatter the generator — the test would leak its
+answer into its input, which is what makes auto-derived grids worthless here.
+The fit consults the authored mesh only to place the grid as a rigid body;
+every subsequent edit is a human judgement about where people walk, made
+against Bruma's *collision*, and the result must look like something an
+Oblivion author would have drawn for that room: sparse, hand-placed, running
+along the traffic lines — not a lattice fitted to the authored triangles.
+
+The corpus stores that judgement: `fit` (rotation, offset, score), `moved`
+(per-node final coordinates) and `dropped` (nodes Bruma's layout removed). A
+refit deliberately does **not** re-derive the overrides — moving the room
+invalidates a node placed against the old walls, so each has to be re-examined.
+
+## <a id="bruma-collision"></a>Bruma collision for the transplant editor
+
+**Code:** `tools/navmesh/bruma_collision.py`.
+
+Placing transplanted pathgrid nodes against the authored navmesh outline would
+leak the answer into the input (see
+[the corpus](#authored-navmesh-corpus)). Nodes must be placed against Bruma's
+**actual walls**, which means the same Havok collision soup the Oblivion-side
+renders use: every REFR in the cell, its base model's collision triangles,
+transformed by the ref's full rotation, scale and position — reusing
+`world.rot_matrix` / `world.place` so the editor cannot drift from production.
+
+### Where Bruma's meshes actually live
+
+Not where the filenames suggest. Measured folder-table walks of all four
+archives:
+
+| archive | folders | mesh entries |
+|---|---|---|
+| `BSHeartland - Textures.bsa` | 347 | **8,197** |
+| `BSAssets - Textures.bsa` | 260 | **1,549** |
+| `BSHeartland.bsa` | 111 | 0 (sound/voice/scripts) |
+| `BSAssets.bsa` | 14 | 0 |
+
+The two "Textures" archives carry the meshes; the two plain ones do not. They
+live in the Vortex staging tree (`stagingPath` in
+`Data/vortex.deployment.json`), not under `Data/` — Bruma's meshes are never
+deployed loose, so a `Data\meshes\bscyrodiil` walk finds only LOD.
+
+Bruma cells also place **vanilla** Skyrim statics (`Clutter\Barrel01.NIF` and
+friends), so a model missing from both Bruma archives falls back to
+`skyrim_assets.get_asset_bytes`, which resolves from the SSE BSAs.
+
+## <a id="transplant-editor"></a>The transplant editor
+
+**Code:** `tools/navmesh/transplant_server.py`, `tools/navmesh/transplant_editor.html`.
+
+```bash
+python tools/navmesh/transplant_server.py
+```
+
+Hand-placing nodes by reading coordinates off a rendered grid and issuing
+`transplant.py move` commands is slow and error-prone; dragging them is the
+natural interface, and the corpus is already a small JSON a page can read and
+write back.
+
+The page draws three layers, in order:
+
+1. **Bruma's real collision** — the same Havok soup the Oblivion-side renders
+   use (see [Bruma collision](#bruma-collision)), clipped to the storey the
+   authored mesh occupies. Blocking draws as low-alpha fill plus a bright rim,
+   the same reason as in the renderer: it is overwhelmingly vertical wall, so
+   the rim carries the shape.
+2. **The authored navmesh**, dim, as context.
+3. **The pathgrid**, draggable.
+
+**Nodes are placed against the WALLS, never against the authored mesh.** The
+authored layer is there to show which room you are in, not to snap to — a grid
+fitted to the answer key leaks the answer into the input, which is the whole
+failure mode the corpus exists to avoid. The live score (nodes off the mesh,
+edges crossing a void) is a *diagnostic* for the same reason: it reports where
+the inherited Oblivion grid disagrees with Bruma's layout, which is a prompt to
+think about where people actually walk, not a number to drive to zero.
+
+### Known gap
+
+Six vanilla Skyrim clutter meshes placed in Bruma interiors fail to parse even
+after [Patch 16](asset_convert_nif.md#patch-16-body-flags-width) —
+`MiscSackLargeFlat01`/`03`, `UpperChest01`, `NobleWardrobe01`, `Barrel01`,
+`StrongBox01`. On BrumaChapelHall that is **8 of 300 placements**, all small
+clutter; every wall, floor, pillar and door extracts. The editor draws what it
+has rather than hiding the gap.
+
+### <a id="editor-navindex-cache"></a>Why the editor caches the NavIndex
+
+`placed_nodes` needs the source cell's pathgrid, which lives in the audit index
+(`export/<plugin>/audit_index3.pkl`, ~2 GB). Constructing a `NavIndex` to read
+it measured **10.1 s** — and it was constructed on every call. The editor
+re-scores on each drag release, so an uncached index put a ten-second stall
+between letting go of a node and seeing the readout update: `POST /score`
+measured **10,735 ms**. `transplant.index_for` keeps one index per export path
+for the life of the process, which takes that to milliseconds.
+
+The page-side half of the same problem: the canvas prototype redrew all ~22,000
+collision triangles per mouse-move. The WebGL version uploads each static layer
+to the GPU once, and a drag patches only the moved node's instance matrix and
+the few line-buffer slots its edges occupy (`nudgeNode` / `moveEdgesOf`), so
+mouse-move cost is independent of cell size.
+
+### <a id="le-references-beat-sse-bsas"></a>Vanilla meshes come from the LE references, not the SSE BSAs
+
+Bruma interiors place plenty of **vanilla** Skyrim furniture and clutter. Pulled
+from the SSE BSAs those meshes fetch fine and then fail to parse, so the object
+contributes **no collision at all** — silently. That is what an unexplained gap
+in a render is: the navmesh stops at something the picture does not draw.
+
+`references/Skyrim Meshes/meshes` holds the LE copies (23,424 files), and LE
+assets are SSE-compatible, so they are simply a better source. Measured on the
+six meshes that failed from the SSE side:
+
+| mesh | SSE BSAs | LE references |
+|---|---|---|
+| `furniture\noble\noblebedsingle01.nif` | parse error | **b=1080, w=486** |
+| `clutter\barrel01.nif` | parse error | b=900, w=504 |
+| `clutter\upperclass\upperchest01.nif` | parse error | b=144, w=72 |
+| `clutter\common\strongbox01.nif` | parse error | b=72, w=36 |
+| `clutter\containers\miscsacklargeflat01.nif` | parse error | b=639, w=117 |
+| `furniture\noble\noblewardrobe01.nif` | parse error | b=504, w=180 |
+
+The SSE failures are pyffi layout bugs in the Havok blocks
+(`bhkConvexVerticesShape`, `bhkCompressedMeshShapeData`) that survive
+[Patch 16](asset_convert_nif.md#patch-16-body-flags-width) — Patch 16 fixes the
+`bhkRigidBody` Body Flags width, which is necessary but not sufficient. Rather
+than chase each remaining layout, the fetch order is now **Bruma archives → LE
+references → SSE BSAs**, and the LE copies sidestep the whole class.

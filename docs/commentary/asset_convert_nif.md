@@ -964,6 +964,43 @@ on its **`master_export` KEY**, never `rec['FormID']` — that field is in the
 master's own index space
 (see [pipeline](tes5_import_pipeline.md#phase-0-master-key-not-formid)).
 
+#### <a id="furniture-shift-third-consumer"></a>The navmesh is the THIRD consumer of the shift
+
+The furniture contract has three sides, not two. `f1194fe` fixed the first two
+— lift the model in the NIF, lower the REFR in the ESM — but
+`tes5_import/navmesh/world.py` gathered collision at the **raw `PosZ`** and
+never called `get_base_origin_shift`. The navmesh was therefore built against
+furniture floating above where the engine actually places it.
+
+Measured over `export/Oblivion.esm` (186 FURN + 6,014 STAT records, 85 marker
+models): **221 base records carry a shift**, range **−47.99 .. +126.76**,
+median **36.18**. Affected placements in the navmesh test cells:
+
+| cell | floating refs | max shift |
+|---|---|---|
+| BrumaCastleGreatHall | 23 / 335 | 61.02 |
+| BrumaChapelHall | 14 / 212 | 47.43 |
+| AnvilFightersGuild | 5 / 125 | 33.91 |
+| ImperialDungeon01 | 1 / 453 | 17.78 |
+| BrumaChapelUndercroft | 0 / 101 | — |
+
+A bench whose collision floats 47u is wrong twice over: its walkable top is a
+surface the generator sees at head height, and its blocking volume is missing
+from where the real bench stands.
+
+The shift is along the model's **local** Z, so under rotation it is a vector on
+all three axes — which is why both consumers call the one
+`record_types/world.py::shifted_position` rather than each subtracting from Z.
+
+Two coupling notes:
+
+- The shift table lives in `record_types/items._BASE_ORIGIN_SHIFT` and is
+  populated by `load_furniture_models`. Anything gathering collision outside
+  the pipeline (`tools/navmesh/index.py`) has to build it too, or it silently
+  sees the old floating geometry.
+- Changing navmesh output invalidates the shared cache tag (a SHA-1 over
+  `tes5_import/navmesh/*.py`), so the cache needs republishing.
+
 ### <a id="root-named-controlled-blocks"></a>Root-named controlled blocks are stripped
 
 A NiControllerManager on the BSFadeNode root may hold controlled blocks
@@ -2333,3 +2370,41 @@ so every NaN lands in `nan_generic` and the unreachable bucket was removed.
 Note that `block_size_check` and `End of file not reached` are emitted at
 ERROR, not WARNING -- they are the highest-signal messages for `nif.xml`
 mismatches, and they are captured because ERROR outranks WARNING.
+
+## <a id="patch-16-body-flags-width"></a>Patch 16: `bhkRigidBody` Body Flags width is BSVER-dependent
+
+**Code:** `asset_convert/nif/pyffi_monkey_patch.py::_install_rigid_body_flags`.
+
+`references/nifxml/nif.xml` declares the field once, gated two ways:
+
+```xml
+<field name="Body Flags" type="uint"   vercond="#BSVER# #LT#  76" />
+<field name="Body Flags" type="ushort" vercond="#BSVER# #GTE# 76" />
+```
+
+PyFFI 2.2.3 flattens that into **two unconditional attributes**,
+`unknown_int_9` (UInt) followed by `unknown_int_91` (UShort) — verified by
+dumping `NifFormat.bhkRigidBody._attrs`, where both carry
+`ver1=None ver2=None cond=None`. So every SSE mesh (BSVER 100, which should
+read 2 bytes) is read **6 bytes long**. The overrun consumes the next block's
+header, and pyffi then reports a cascade that names the wrong culprit:
+
+```
+Reading <struct 'bhkRigidBody'> failed ... unpack requires a buffer of 4 bytes
+Reading <struct 'bhkConvexVerticesShape'> failed ... array too long (2147483648)
+Block size check failed: corrupt NIF file or bad nif.xml?
+```
+
+The `array too long (2147483648)` is the giveaway: 0x80000000 is misaligned
+float bytes read as a count, not a corrupt file.
+
+Measured on vanilla Skyrim clutter placed in Bruma interiors —
+`Clutter\Barrel01.NIF`, `Clutter\Common\StrongBox01.nif`,
+`Clutter\Containers\MiscSackLargeFlat01.nif` / `03`,
+`Clutter\Upperclass\UpperChest01.nif`, `Furniture\Noble\NobleWardrobe01.nif`
+— all six yielded **no collision at all** before the patch, silently: the
+extractor returned `None` and the objects simply had no walls.
+
+Note this is NOT the same defect as Patch 8, which adds SSE *geometry*
+(`BSTriShape`) read support. Patch 8 leaves the Havok blocks alone, so a mesh
+can parse its geometry and still lose every collision shape.

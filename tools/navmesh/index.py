@@ -15,6 +15,7 @@ number the tool prints a lie.
     verts, tris = cell.build()
 """
 
+import contextlib
 import math
 import os
 import pickle
@@ -27,8 +28,31 @@ from tes5_import.navmesh import build
 from tes5_import.navmesh.from_pgrd import (
     collect_doors, load_door_centroids,
 )
+from tes5_import.base.text_reader import parse_export_file
+from tes5_import.record_types.items import load_furniture_models
 
 DEFAULT_EXPORT = 'export/Oblivion.esm'
+
+
+def load_origin_shifts(export, quiet=True):
+    """Build the furniture origin-shift table the pipeline builds.
+
+    Without it a diagnostic gathers collision at the RAW PosZ while the real
+    pipeline lowers those refs, so the tool shows furniture floating by up to
+    61 units and disagrees with the navmesh it is meant to explain.
+
+    See: docs/commentary/asset_convert_nif.md#furniture-shift-third-consumer
+    """
+    by_type = {}
+    for sig in ('FURN', 'STAT'):
+        path = os.path.join(export, sig + '.txt')
+        by_type[sig] = parse_export_file(path) if os.path.isfile(path) else []
+    if quiet:
+        with open(os.devnull, 'w') as null:
+            with contextlib.redirect_stdout(null):
+                return load_furniture_models(os.path.join(export, 'meshes'),
+                                             by_type)
+    return load_furniture_models(os.path.join(export, 'meshes'), by_type)
 
 
 class CellCtx(object):
@@ -94,6 +118,7 @@ class NavIndex(object):
         ce.load_collision(os.path.join(export, 'collision_cache.bin'), quiet=quiet)
         load_door_centroids(os.path.join(export, 'door_centers_cache.json'),
                             quiet=quiet)
+        load_origin_shifts(export, quiet=quiet)
         with open(os.path.join(export, 'audit_index3.pkl'), 'rb') as fh:
             (self.base_model, self.refr_by_cell, self.pgrd_by_cell,
              self.land_by_cell, self.door_fids, self.cells) = pickle.load(fh)

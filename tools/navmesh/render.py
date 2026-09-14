@@ -2,26 +2,29 @@
 
 Numbers tell you a cell has 3 uncovered samples; only a picture tells you they
 form a slit across a staircase.  This is the tool for "there is a hole in the
-top stairs" style reports.
+top stairs" style reports, and the instrument the authored-navmesh comparison is
+judged with.
 
-Triangle fill = the shape contract: red badness>2, orange >1 (violates the
-contract), yellow area<MIN_TRI_AREA, green healthy.  Blue = pathgrid (the
-authored ground truth); magenta squares = doors.  With --cracks, boundary
-edges that a walked pathgrid line crosses are drawn in bright red — those are
-adjacency breaks the engine cannot path across even when the plan coverage
-looks continuous (the "invisible hole in the stairs" signature).
+Layers and the colour contract live in tools/navmesh/draw.py: red/orange/yellow
+are MESH DEFECTS only, collision and any authored underlay draw cool.
 
-    # whole cell
-    python tools/navmesh/render.py ImperialDungeon01
+    # whole cell, with walls, height shading, grid and legend
+    python tools/navmesh/render.py ImperialDungeon01 --collision --z-shade
 
-    # ONE storey only, so a stacked building is actually readable
+    # what storeys are there?  (then isolate one)
+    python tools/navmesh/render.py AnvilPinarusInventiusHouse --bands
     python tools/navmesh/render.py AnvilPinarusInventiusHouse --z 300 700
+
+    # an AUTHORED navmesh from a shipped ESM, as the answer key
+    python tools/navmesh/render.py --authored-esm "<path>/BSHeartland.esm" \
+        --authored-cell BrumaChapelHall --authored-only
+
+    # our mesh over the authored one, same frame
+    python tools/navmesh/render.py BrumaChapelHall \
+        --authored-esm "<path>/BSHeartland.esm" --authored-cell BrumaChapelHall
 
     # zoom on the area around a placed reference the user complained about
     python tools/navmesh/render.py --ref 1A01FC1E --pad 400 --cracks
-
-    # simplified: no pathgrid/door overlay, just the mesh
-    python tools/navmesh/render.py ImperialDungeon01 --bare
 """
 
 import argparse
@@ -30,9 +33,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from PIL import Image, ImageDraw
-
-from tes5_import.navmesh import corridor_clean, params
+from tes5_import.navmesh import params
+from tools.navmesh import draw
+from tools.navmesh.authored import load_authored
 from tools.navmesh.index import NavIndex, DEFAULT_EXPORT
 from tools.navmesh.metrics import (
     crossed_boundary_edges, open_notches,
@@ -41,91 +44,43 @@ from tools.navmesh.metrics import (
 
 def render(verts, tris, nodes, edges, doors, out, bbox=None, width=1400,
            bare=False, cracks=None, title=None, collision=None, ids=False,
-           notches=None):
-    xs = [p[0] for p in verts]
-    ys = [p[1] for p in verts]
-    if bbox:
-        minx, miny, maxx, maxy = bbox
-    else:
-        # Frame on the MESH, never on raw collision: one outlier REFR
-        # (FelgageldtCave's is 70k units away) otherwise zooms the whole cell
-        # down to a blob in the corner.  Collision is still drawn wherever it
-        # falls; it just does not get to pick the framing.
-        minx, maxx = min(xs) - 50, max(xs) + 50
-        miny, maxy = min(ys) - 50, max(ys) + 50
-    span = max(maxx - minx, 1.0)
-    scale = width / span
-    height = max(1, int((maxy - miny) * scale))
+           notches=None, z_shade=False, node_ids=False, path_alpha=200,
+           authored=None, chrome=True):
+    """Draw one cell to `out`; every argument is a plain array, not a cell.
 
-    def P(x, y):
-        return ((x - minx) * scale, height - (y - miny) * scale)
-
-    img = Image.new('RGB', (width, height), (16, 16, 16))
-    dr = ImageDraw.Draw(img, 'RGBA')
+    Taking arrays rather than a CellCtx is what lets the same renderer draw an
+    authored navmesh parsed out of a shipped ESM.
+    """
+    frame = bbox or draw.mesh_bbox(verts or (authored or ([], []))[0])
+    cv = draw.Canvas(frame, width)
     if collision:
-        walk, block = collision
-        for t in walk:
-            dr.polygon([P(t[0][0], t[0][1]), P(t[1][0], t[1][1]),
-                        P(t[2][0], t[2][1])], fill=(55, 70, 60, 70))
-        for t in block:      # THE WALLS — without these, debugging is blind
-            dr.polygon([P(t[0][0], t[0][1]), P(t[1][0], t[1][1]),
-                        P(t[2][0], t[2][1])], fill=(190, 50, 45, 90))
-    for ti, tri in enumerate(tris):
-        p, q, r = (verts[k] for k in tri)
-        bad = corridor_clean._badness(verts, tri)
-        area = abs((q[0] - p[0]) * (r[1] - p[1])
-                   - (q[1] - p[1]) * (r[0] - p[0])) * 0.5
-        if bad > 2.0:
-            fill = (220, 40, 40, 150)
-        elif bad > 1.0:
-            fill = (220, 130, 40, 150)
-        elif area < params.MIN_TRI_AREA:
-            fill = (210, 210, 40, 150)
-        else:
-            fill = (50, 160, 100, 130)
-        pts = [P(p[0], p[1]), P(q[0], q[1]), P(r[0], r[1])]
-        dr.polygon(pts, fill=fill, outline=(230, 230, 230, 255))
-        if ids:
-            cx = sum(pt[0] for pt in pts) / 3.0
-            cy = sum(pt[1] for pt in pts) / 3.0
-            dr.text((cx - 6, cy - 5), str(ti), fill=(255, 255, 255, 220))
+        draw.draw_collision(cv, collision)
+    if authored:
+        draw.draw_authored(cv, authored[0], authored[1])
+    draw.draw_mesh(cv, verts, tris, ids=ids, z_shade=z_shade)
     if cracks:
-        for (a, b) in cracks:
-            dr.line([P(verts[a][0], verts[a][1]), P(verts[b][0], verts[b][1])],
-                    fill=(255, 30, 30, 255), width=5)
+        draw.draw_cracks(cv, verts, cracks)
     if notches:
-        # Ring the mouth of every V-bite: these are invisible to the crack and
-        # coverage metrics but obvious (and unwalkable) on screen.
-        for (apex, p, q, _d, _m) in notches:
-            dr.line([P(verts[p][0], verts[p][1]),
-                     P(verts[apex][0], verts[apex][1]),
-                     P(verts[q][0], verts[q][1])],
-                    fill=(255, 0, 255, 255), width=4)
-            x, y = P(verts[apex][0], verts[apex][1])
-            dr.ellipse([x - 7, y - 7, x + 7, y + 7],
-                       outline=(255, 0, 255, 255), width=3)
+        draw.draw_notches(cv, verts, notches)
     if not bare:
-        for (a, b) in edges:
-            pa, pb = nodes[a], nodes[b]
-            dr.line([P(pa[0], pa[1]), P(pb[0], pb[1])],
-                    fill=(40, 130, 255, 220), width=2)
-        for n in nodes:
-            x, y = P(n[0], n[1])
-            dr.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(60, 200, 255, 255))
-        for (x, y, _z, _r, _f, _tp, _w) in doors:
-            px, py = P(x, y)
-            dr.rectangle([px - 4, py - 4, px + 4, py + 4],
-                         fill=(240, 60, 240, 255))
-    img.save(out)
-    print('wrote %s (%d tris%s%s)%s'
-          % (out, len(tris), ', %d crack edges' % len(cracks) if cracks else '',
+        draw.draw_pathgrid(cv, nodes, edges, doors, alpha=path_alpha,
+                           ids=node_ids)
+    if chrome:
+        draw.draw_scalebar(cv, draw.draw_grid(cv))
+        draw.draw_legend(cv, draw.legend_for(collision, z_shade, authored,
+                                             cracks, notches, mesh=bool(tris),
+                                             pathgrid=not bare))
+    cv.save(out)
+    print('wrote %s (%d tris%s%s%s)%s'
+          % (out, len(tris),
+             ', %d authored' % len(authored[1]) if authored else '',
+             ', %d crack edges' % len(cracks) if cracks else '',
              ', %d NOTCHES' % len(notches) if notches else '',
              ' [%s]' % title if title else ''))
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+def _add_args(ap):
+    """Register every flag; kept apart so main() stays inside the shape limit."""
     ap.add_argument('cell', nargs='?', help='cell EditorID or FormID')
     ap.add_argument('--ref', help='center on this placed reference FormID '
                                   '(finds its cell automatically)')
@@ -135,6 +90,9 @@ def main():
     ap.add_argument('--z', nargs=2, type=float, metavar=('ZMIN', 'ZMAX'),
                     help='keep only triangles whose centroid z is in range '
                          '(isolate ONE storey)')
+    ap.add_argument('--bands', action='store_true',
+                    help='print the storey bands and exit -- pick --z from '
+                         'the cell data instead of guessing')
     ap.add_argument('--bbox', nargs=4, type=float,
                     metavar=('MINX', 'MINY', 'MAXX', 'MAXY'))
     ap.add_argument('--bare', action='store_true',
@@ -144,58 +102,129 @@ def main():
     ap.add_argument('--notches', action='store_true',
                     help='ring every open V-notch bitten into the surface')
     ap.add_argument('--collision', action='store_true',
-                    help='draw the real collision underneath: dim green '
-                         'walkable, red BLOCKING (the walls)')
+                    help='draw the real collision underneath, clipped to the '
+                         'storey the mesh occupies')
+    ap.add_argument('--no-z-clip', action='store_true',
+                    help='draw collision at every height (ceilings included)')
+    ap.add_argument('--z-shade', action='store_true',
+                    help='shade mesh triangles by height, so relief reads')
     ap.add_argument('--ids', action='store_true',
                     help='label each triangle with its index')
+    ap.add_argument('--node-ids', action='store_true',
+                    help='label each PATHGRID NODE with its index')
+    ap.add_argument('--path-alpha', type=int, default=200,
+                    help='pathgrid edge opacity 0-255 (default 200)')
+    ap.add_argument('--no-chrome', action='store_true',
+                    help='omit grid, scale bar and legend')
+    ap.add_argument('--authored-esm', help='ESM/ESP to read an authored '
+                                           'navmesh from (the answer key)')
+    ap.add_argument('--authored-cell',
+                    help='cell EditorID in --authored-esm (default: same name)')
+    ap.add_argument('--authored-only', action='store_true',
+                    help='render ONLY the authored mesh, with no cell of ours')
     ap.add_argument('--width', type=int, default=1400)
     ap.add_argument('--export', default=DEFAULT_EXPORT)
-    a = ap.parse_args()
 
-    idx = NavIndex(a.export)
+
+def _pick_cell(idx, a):
+    """Resolve --ref / positional cell to `(CellCtx, bbox)`, or `(None, None)`."""
     bbox = tuple(a.bbox) if a.bbox else None
-    if a.ref:
-        cell, refr = idx.cell_of_ref(a.ref)
-        if cell is None:
-            print('reference %s not found in any cell' % a.ref)
-            return 1
-        from tes5_import.base.text_reader import get_float
-        rx = get_float(refr, 'PosX', 0.0)
-        ry = get_float(refr, 'PosY', 0.0)
-        print('ref %s is in cell %s (%s) at (%.0f, %.0f)'
-              % (a.ref, cell.name, cell.fid, rx, ry))
-        if bbox is None:
-            bbox = (rx - a.pad, ry - a.pad, rx + a.pad, ry + a.pad)
-    else:
-        if not a.cell:
-            ap.error('give a cell name or --ref')
+    if not a.ref:
         cell = idx.cell(a.cell)
         if cell is None:
             print('cell %s not found' % a.cell)
-            return 1
+        return cell, bbox
+    cell, refr = idx.cell_of_ref(a.ref)
+    if cell is None:
+        print('reference %s not found in any cell' % a.ref)
+        return None, None
+    from tes5_import.base.text_reader import get_float
+    rx = get_float(refr, 'PosX', 0.0)
+    ry = get_float(refr, 'PosY', 0.0)
+    print('ref %s is in cell %s (%s) at (%.0f, %.0f)'
+          % (a.ref, cell.name, cell.fid, rx, ry))
+    return cell, bbox or (rx - a.pad, ry - a.pad, rx + a.pad, ry + a.pad)
+
+
+def _print_bands(verts, tris):
+    """Report the storey clusters so --z can be chosen from data."""
+    for (lo, hi, n) in draw.storey_bands(verts, tris):
+        print('  band z %8.1f .. %8.1f  %5d tris' % (lo, hi, n))
+
+
+def _authored_render(a):
+    """Render an authored navmesh on its own, with no cell of ours."""
+    av, at = load_authored(a.authored_esm, a.authored_cell)
+    if not at:
+        print('no authored navmesh for %s' % a.authored_cell)
+        return 1
+    out = a.out or ('temp/%s_authored.png' % a.authored_cell)
+    _ensure_dir(out)
+    render([], [], [], [], [], out, bbox=tuple(a.bbox) if a.bbox else None,
+           width=a.width, bare=True, title='%s (authored)' % a.authored_cell,
+           authored=(av, at), chrome=not a.no_chrome)
+    return 0
+
+
+def _ensure_dir(out):
+    """Create the output directory if the path names one."""
+    d = os.path.dirname(out)
+    if d and not os.path.isdir(d):
+        os.makedirs(d)
+
+
+def _collision_for(cell, verts, tris, a):
+    """Cell collision, clipped to the mesh's own Z slab unless --no-z-clip."""
+    coll = cell.collision()
+    if a.no_z_clip:
+        return coll
+    zs = [verts[k][2] for t in tris for k in t]
+    return draw.clip_collision(coll, min(zs) - params.MAX_CLIMB,
+                               max(zs) + params.AGENT_HEIGHT)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    _add_args(ap)
+    a = ap.parse_args()
+    if a.authored_only:
+        return _authored_render(a)
+    if not a.cell and not a.ref:
+        ap.error('give a cell name, --ref, or --authored-only')
+
+    idx = NavIndex(a.export)
+    cell, bbox = _pick_cell(idx, a)
+    if cell is None:
+        return 1
     if not cell.has_pathgrid:
         print('%s: no pathgrid' % cell.name)
         return 1
 
     verts, tris = cell.build()
+    if a.bands:
+        _print_bands(verts, tris)
+        return 0
     if a.z:
         tris = [tri for tri in tris
                 if a.z[0] <= sum(verts[k][2] for k in tri) / 3.0 <= a.z[1]]
     if not tris:
         print('%s: no triangles in view' % cell.name)
         return 1
-    cracks = None
-    if a.cracks:
-        cracks = crossed_boundary_edges(verts, tris, cell)
+
+    authored = None
+    if a.authored_esm:
+        authored = load_authored(a.authored_esm, a.authored_cell or cell.name)
+    cracks = crossed_boundary_edges(verts, tris, cell) if a.cracks else None
     notches = open_notches(verts, tris, cell) if a.notches else None
-    coll = cell.collision() if a.collision else None
+    coll = _collision_for(cell, verts, tris, a) if a.collision else None
     out = a.out or ('temp/%s.png' % (cell.name or 'cell'))
-    d = os.path.dirname(out)
-    if d and not os.path.isdir(d):
-        os.makedirs(d)
+    _ensure_dir(out)
     render(verts, tris, cell.nodes, cell.edges, cell.doors, out,
            bbox=bbox, width=a.width, bare=a.bare, cracks=cracks,
-           title=cell.name, collision=coll, ids=a.ids, notches=notches)
+           title=cell.name, collision=coll, ids=a.ids, notches=notches,
+           z_shade=a.z_shade, node_ids=a.node_ids, path_alpha=a.path_alpha,
+           authored=authored, chrome=not a.no_chrome)
     return 0
 
 

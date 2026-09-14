@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pathgrid transplant editor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0d0d0d; color: #ddd; overflow: hidden;
+         font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+  #bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+         padding: 7px 12px; background: #181818; border-bottom: 1px solid #2c2c2c; }
+  select, button { background: #232323; color: #e8e8e8; border: 1px solid #3a3a3a;
+                   border-radius: 4px; padding: 5px 9px; font: inherit; }
+  button:hover:not(:disabled) { background: #2e2e2e; }
+  button:disabled { opacity: .45; }
+  button.primary { background: #2c5cc4; border-color: #3a6fd8; }
+  button.on { background: #2c5cc4; border-color: #3a6fd8; }
+  .grp { display: flex; gap: 4px; padding-left: 10px; border-left: 1px solid #333; }
+  #stat { font-variant-numeric: tabular-nums; color: #9a9a9a; }
+  #stat b { color: #e8e8e8; font-weight: 600; }
+  .warn { color: #e0a33c; } .good { color: #4fbf7f; }
+  #wrap { position: relative; }
+  canvas { display: block; cursor: default; }
+  .panel { position: absolute; padding: 7px 9px; background: rgba(13,13,13,.85);
+           border: 1px solid #2e2e2e; border-radius: 4px; pointer-events: none; }
+  #hud { right: 10px; bottom: 10px; font-variant-numeric: tabular-nums; }
+  #key { left: 10px; bottom: 10px; line-height: 1.7; }
+  #key i { display: inline-block; width: 11px; height: 11px; margin-right: 6px;
+           vertical-align: -1px; border-radius: 2px; }
+  #mode { left: 10px; top: 10px; background: rgba(44,92,196,.9); font-weight: 600; }
+  #busy { position: absolute; inset: 0; display: grid; place-items: center;
+          background: rgba(13,13,13,.72); font-size: 15px; z-index: 3; }
+  kbd { background: #262626; border: 1px solid #3a3a3a; border-radius: 3px;
+        padding: 0 4px; font: 11px ui-monospace, monospace; }
+  #help { color: #777; font-size: 12px; }
+  label.chk { color: #9a9a9a; display: flex; align-items: center; gap: 4px; }
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <select id="cell"></select>
+  <div class="grp">
+    <button id="mSel" class="on" title="Q">Select</button>
+    <button id="mNode" title="W">+Node</button>
+    <button id="mEdge" title="E">+Edge</button>
+  </div>
+  <div class="grp">
+    <button id="vTop" title="1">Top</button>
+    <button id="vFront" title="2">Front</button>
+    <button id="vSide" title="3">Side</button>
+    <button id="vIso" title="4">Iso</button>
+  </div>
+  <div class="grp">
+    <button id="srcBruma" class="on" title="Tab">Bruma</button>
+    <button id="srcOb" title="Tab">Oblivion</button>
+    <button id="srcBoth" title="Tab">Both</button>
+  </div>
+  <div class="grp">
+    <label class="chk"><input type="checkbox" id="cWall" checked>walls</label>
+    <label class="chk"><input type="checkbox" id="cFloor" checked>floor</label>
+    <label class="chk"><input type="checkbox" id="cNav" checked>navmesh</label>
+  </div>
+  <div class="grp">
+    <button id="save" class="primary" disabled>Save</button>
+    <button id="undo" disabled>Undo</button>
+    <button id="reset">Reload</button>
+  </div>
+  <span id="stat">loading…</span>
+  <span id="help" style="margin-left:auto"></span>
+</div>
+
+<div id="wrap">
+  <div id="mode" class="panel">Select</div>
+  <div id="key" class="panel">
+    <div><i style="background:#5f78a5"></i>Bruma wall / <i
+        style="background:#6a6a6a"></i>floor</div>
+    <div><i style="background:#b08050"></i>Oblivion wall / <i
+        style="background:#8a7a5a"></i>floor</div>
+    <div><i style="background:#46597f"></i>authored navmesh</div>
+    <div><i style="background:#3ba0ff"></i>pathgrid</div>
+    <div><i style="background:#7ee0a0"></i>edited / added</div>
+    <div><i style="background:#e0a33c"></i>node off mesh</div>
+    <div><i style="background:#cf4b45"></i>edge crosses void</div>
+  </div>
+  <div id="hud" class="panel">—</div>
+  <div id="busy">loading…</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const wrap = $('wrap');
+
+/* ---------------------------------------------------------------- scene -- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+wrap.appendChild(renderer.domElement);
+const el = renderer.domElement;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0d0d);
+const camera = new THREE.PerspectiveCamera(45, 1, 1, 200000);
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+sun.position.set(0.4, 0.7, 1);
+scene.add(sun);
+
+/* Orbit state: the camera looks at `target` from a spherical offset.  Written
+   by hand rather than pulling OrbitControls, because dragging a NODE and
+   orbiting share the same pointer and the interaction has to arbitrate. */
+const orbit = { target: new THREE.Vector3(), dist: 3000, yaw: -0.9, pitch: 0.95 };
+
+function applyCamera() {
+  const cp = Math.cos(orbit.pitch), sp = Math.sin(orbit.pitch);
+  camera.position.set(
+    orbit.target.x + orbit.dist * cp * Math.cos(orbit.yaw),
+    orbit.target.y + orbit.dist * cp * Math.sin(orbit.yaw),
+    orbit.target.z + orbit.dist * sp);
+  camera.up.set(0, 0, 1);
+  camera.lookAt(orbit.target);
+  needsRender = true;
+}
+
+/* ------------------------------------------------------------ geometry -- */
+let G = null, S = { off_nodes: [], bad_edges: [] };
+let source = 'bruma';          // bruma | ob | both
+const layers = {};
+let nodeMesh = null, edgeLines = null, badLines = null;
+let needsRender = true;
+
+function triLayer(flat, color, opacity) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
+  g.computeVertexNormals();
+  const m = new THREE.MeshLambertMaterial({
+    color, opacity, transparent: opacity < 1, side: THREE.DoubleSide,
+    depthWrite: opacity > 0.85
+  });
+  return new THREE.Mesh(g, m);
+}
+
+function buildStatic() {
+  for (const k of Object.keys(layers)) {
+    scene.remove(layers[k]);
+    layers[k].geometry.dispose();
+    delete layers[k];
+  }
+  layers.blocking = triLayer(G.blocking, 0x5f78a5, 0.20);
+  layers.walkable = triLayer(G.walkable, 0x6a6a6a, 0.35);
+  /* Oblivion's side is warm where Bruma's is cool, so in "Both" the two read
+     apart at a glance -- that contrast IS the answer to "what moved". */
+  layers.ob_blocking = triLayer(G.ob_blocking || [], 0xb08050, 0.20);
+  layers.ob_walkable = triLayer(G.ob_walkable || [], 0x8a7a5a, 0.35);
+  layers.authored = triLayer(G.authored, 0x46597f, 0.75);
+  for (const k in layers) scene.add(layers[k]);
+  applyVisibility();
+}
+
+function applyVisibility() {
+  if (!layers.blocking) return;
+  const bruma = source !== 'ob', ob = source !== 'bruma';
+  layers.blocking.visible = bruma && $('cWall').checked;
+  layers.walkable.visible = bruma && $('cFloor').checked;
+  layers.ob_blocking.visible = ob && $('cWall').checked;
+  layers.ob_walkable.visible = ob && $('cFloor').checked;
+  layers.authored.visible = $('cNav').checked;
+  needsRender = true;
+}
+
+function setSource(s) {
+  source = s;
+  for (const [id, v] of [['srcBruma', 'bruma'], ['srcOb', 'ob'],
+                         ['srcBoth', 'both']]) {
+    $(id).classList.toggle('on', v === s);
+  }
+  applyVisibility();
+  status();
+}
+
+/* ---------------------------------------------------------- edit state -- */
+let P = [], E = [], baseCount = 0;
+let moved = new Map(), addedNodes = [], dropped = new Set();
+let cutEdges = new Set(), addEdges = new Set(), srcEdgeKeys = new Set();
+let history = [];
+let mode = 'sel', sel = -1, linkFrom = -1;
+
+const key = (a, b) => Math.min(a, b) + ':' + Math.max(a, b);
+
+function rebuild() {
+  P = G.nodes.map(p => p.slice());
+  baseCount = G.nodes.length;
+  for (const [i, p] of moved) P[i] = p.slice();
+  for (const p of addedNodes) P.push(p.slice());
+  E = [];
+  const live = new Set();
+  for (const [a, b] of G.edges) {
+    if (cutEdges.has(key(a, b))) continue;
+    live.add(key(a, b)); E.push([a, b]);
+  }
+  for (const k of addEdges) {
+    if (live.has(k)) continue;
+    const [a, b] = k.split(':').map(Number);
+    if (a < P.length && b < P.length) E.push([a, b]);
+  }
+  buildPathgrid();
+}
+
+const NODE_R = 11;
+let nodeGeo = null;
+let hover = -1;
+
+function buildPathgrid() {
+  if (nodeMesh) { scene.remove(nodeMesh); nodeMesh.geometry.dispose(); }
+  if (edgeLines) { scene.remove(edgeLines); edgeLines.geometry.dispose(); }
+  if (badLines) { scene.remove(badLines); badLines.geometry.dispose(); }
+
+  /* Nodes as ONE instanced mesh: 200 separate meshes would cost 200 draw
+     calls per frame, which is what made the canvas version crawl. */
+  nodeGeo = nodeGeo || new THREE.SphereGeometry(NODE_R, 10, 8);
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  nodeMesh = new THREE.InstancedMesh(nodeGeo, mat, P.length);
+  const off = new Set(S.off_nodes);
+  const m4 = new THREE.Matrix4(), c = new THREE.Color();
+  for (let i = 0; i < P.length; i++) {
+    m4.makeScale(nodeScale(i), nodeScale(i), nodeScale(i));
+    m4.setPosition(P[i][0], P[i][1], P[i][2]);
+    nodeMesh.setMatrixAt(i, m4);
+    c.set(nodeColor(i, off));
+    nodeMesh.setColorAt(i, c);
+  }
+  nodeMesh.instanceMatrix.needsUpdate = true;
+  if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
+  scene.add(nodeMesh);
+  if (hover >= P.length) hover = -1;
+
+  const bad = new Set(S.bad_edges.map(e => key(e[0], e[1])));
+  const ok = [], no = [], okIdx = new Map(), noIdx = new Map();
+  const note = (m, n, off) => {
+    if (!m.has(n)) m.set(n, []);
+    m.get(n).push(off);
+  };
+  for (const [a, b] of E) {
+    if (dropped.has(a) || dropped.has(b)) continue;
+    const isBad = bad.has(key(a, b));
+    const sink = isBad ? no : ok, idx = isBad ? noIdx : okIdx;
+    note(idx, a, sink.length);
+    note(idx, b, sink.length + 3);
+    sink.push(P[a][0], P[a][1], P[a][2], P[b][0], P[b][1], P[b][2]);
+  }
+  edgeLines = lineSet(ok, 0x3ba0ff);
+  badLines = lineSet(no, 0xcf4b45);
+  edgeLines.userData.index = okIdx;
+  badLines.userData.index = noIdx;
+  scene.add(edgeLines); scene.add(badLines);
+  needsRender = true;
+}
+
+/* A dropped node scales to ZERO: an InstancedMesh has no per-instance
+   visibility, so collapsing its matrix is how it actually disappears rather
+   than merely turning grey. */
+function nodeScale(i) {
+  if (dropped.has(i)) return 0;
+  if (i === hover) return 1.9;
+  return (i === sel || i === linkFrom) ? 1.6 : 1;
+}
+
+function nodeColor(i, off) {
+  if (i === hover && !dropped.has(i)) return 0xffffff;
+  if (dropped.has(i)) return 0x4a4a4a;
+  if (off.has(i)) return 0xe0a33c;
+  return (moved.has(i) || i >= baseCount) ? 0x7ee0a0 : 0x3ba0ff;
+}
+
+/* A drag touches ONE node and the handful of edges on it, so rewriting the
+   whole scene per mouse-move is what makes an editor feel heavy.  These two
+   patch the existing buffers in place instead. */
+const _m4 = new THREE.Matrix4();
+const _c = new THREE.Color();
+
+/* Hover repaints only the two instances involved -- the one entered and the
+   one left -- so highlighting costs nothing on a 200-node cell. */
+function setHover(i, force) {
+  if (i === hover && !force) return;
+  const prev = hover;
+  hover = i;
+  if (nodeMesh) {
+    const off = new Set(S.off_nodes);
+    for (const k of [prev, hover]) {
+      if (k < 0 || k >= P.length) continue;
+      _m4.makeScale(nodeScale(k), nodeScale(k), nodeScale(k));
+      _m4.setPosition(P[k][0], P[k][1], P[k][2]);
+      nodeMesh.setMatrixAt(k, _m4);
+      nodeMesh.setColorAt(k, _c.set(nodeColor(k, off)));
+    }
+    nodeMesh.instanceMatrix.needsUpdate = true;
+    if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
+    needsRender = true;
+  }
+  el.style.cursor = dragging ? 'grabbing'
+                  : hover >= 0 ? 'grab'
+                  : mode === 'node' ? 'copy' : 'default';
+}
+
+function nudgeNode(i) {
+  const big = (i === sel || i === linkFrom) ? 1.6 : 1;
+  _m4.makeScale(big, big, big);
+  _m4.setPosition(P[i][0], P[i][1], P[i][2]);
+  nodeMesh.setMatrixAt(i, _m4);
+  nodeMesh.instanceMatrix.needsUpdate = true;
+  moveEdgesOf(i);
+  needsRender = true;
+}
+
+function moveEdgesOf(i) {
+  for (const lines of [edgeLines, badLines]) {
+    const arr = lines.geometry.attributes.position.array;
+    const idx = lines.userData.index;
+    const slots = idx && idx.get(i);
+    if (!slots) continue;
+    for (const s of slots) {
+      arr[s] = P[i][0]; arr[s + 1] = P[i][1]; arr[s + 2] = P[i][2];
+    }
+    lines.geometry.attributes.position.needsUpdate = true;
+  }
+}
+
+function lineSet(pts, color) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color }));
+}
+
+/* ------------------------------------------------------------- picking -- */
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+
+function toNdc(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+  ray.setFromCamera(ndc, camera);
+}
+
+function pickNode(ev) {
+  toNdc(ev);
+  ray.params.Points = { threshold: NODE_R };
+  for (const h of ray.intersectObject(nodeMesh, false)) {
+    if (!dropped.has(h.instanceId)) return h.instanceId;
+  }
+  return -1;
+}
+
+function pickSurface(ev) {
+  toNdc(ev);
+  const targets = [layers.authored, layers.walkable, layers.blocking,
+                   layers.ob_walkable, layers.ob_blocking]
+    .filter(o => o && o.visible);
+  const hit = ray.intersectObjects(targets, false);
+  return hit.length ? hit[0].point : null;
+}
+
+/* Dragging: XY moves the node on a horizontal plane through its own Z; with
+   shift held, it moves on a VERTICAL plane facing the camera, which is the
+   "drag it up and down" case.  One pointer, two constraint planes. */
+const dragPlane = new THREE.Plane();
+const hitPt = new THREE.Vector3();
+let dragging = false, dragVertical = false, orbiting = false, panning = false;
+let lastPtr = null;
+
+function beginDrag(i, ev) {
+  const p = new THREE.Vector3(P[i][0], P[i][1], P[i][2]);
+  if (dragVertical) {
+    const n = camera.getWorldDirection(new THREE.Vector3());
+    n.z = 0;
+    if (n.lengthSq() < 1e-6) n.set(0, 1, 0);
+    n.normalize();
+    dragPlane.setFromNormalAndCoplanarPoint(n, p);
+  } else {
+    dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), p);
+  }
+  toNdc(ev);
+}
+
+function dragTo(ev) {
+  toNdc(ev);
+  if (!ray.ray.intersectPlane(dragPlane, hitPt)) return null;
+  const p = P[sel].slice();
+  const r = v => Math.round(v * 10) / 10;
+  if (dragVertical) { p[2] = r(hitPt.z); }
+  else { p[0] = r(hitPt.x); p[1] = r(hitPt.y); }
+  return p;
+}
+
+/* --------------------------------------------------------- interaction -- */
+el.addEventListener('pointerdown', ev => {
+  lastPtr = [ev.clientX, ev.clientY];
+  if (ev.button === 2) { orbiting = true; el.setPointerCapture(ev.pointerId); return; }
+  if (ev.button === 1) { panning = true; el.setPointerCapture(ev.pointerId); return; }
+
+  const hit = hover >= 0 ? hover : pickNode(ev);
+
+  if (mode === 'node') {
+    if (hit < 0) {
+      const pt = pickSurface(ev);
+      if (pt) {
+        snapshot();
+        addedNodes.push([Math.round(pt.x * 10) / 10,
+                         Math.round(pt.y * 10) / 10,
+                         Math.round(pt.z * 10) / 10]);
+        sel = P.length;
+        refreshScore();
+      }
+    } else { sel = hit; rebuild(); status(); }
+    return;
+  }
+
+  if (mode === 'edge') {
+    if (hit >= 0) {
+      if (linkFrom < 0) { linkFrom = hit; rebuild(); status(); }
+      else if (hit !== linkFrom) {
+        snapshot();
+        const k = key(linkFrom, hit);
+        if (srcEdgeKeys.has(k)) cutEdges.delete(k); else addEdges.add(k);
+        linkFrom = -1;
+        refreshScore();
+      }
+      return;
+    }
+    const ed = pickEdge(ev);
+    if (ed) {
+      snapshot();
+      const k = key(ed[0], ed[1]);
+      if (srcEdgeKeys.has(k)) cutEdges.add(k); else addEdges.delete(k);
+      refreshScore(); return;
+    }
+    linkFrom = -1; rebuild(); status(); return;
+  }
+
+  if (hit >= 0) {
+    sel = hit; snapshot(); dragging = true;
+    dragVertical = ev.shiftKey;
+    beginDrag(hit, ev);
+    el.setPointerCapture(ev.pointerId);
+    el.style.cursor = 'grabbing';
+    rebuild(); status();
+  } else {
+    panning = true; el.setPointerCapture(ev.pointerId);
+    el.style.cursor = 'move';
+  }
+});
+
+el.addEventListener('pointermove', ev => {
+  if (dragging && sel >= 0) {
+    const p = dragTo(ev);
+    if (p) {
+      if (sel >= baseCount) addedNodes[sel - baseCount] = p; else moved.set(sel, p);
+      P[sel] = p;
+      nudgeNode(sel);
+      $('hud').textContent =
+        'x ' + p[0].toFixed(0) + '  y ' + p[1].toFixed(0) +
+        '  z ' + p[2].toFixed(0) + (dragVertical ? '   [vertical]' : '');
+    }
+    return;
+  }
+  if (orbiting && lastPtr) {
+    orbit.yaw -= (ev.clientX - lastPtr[0]) * 0.006;
+    orbit.pitch += (ev.clientY - lastPtr[1]) * 0.006;
+    orbit.pitch = Math.max(-1.53, Math.min(1.53, orbit.pitch));
+    lastPtr = [ev.clientX, ev.clientY];
+    applyCamera(); return;
+  }
+  if (panning && lastPtr) {
+    const dx = (ev.clientX - lastPtr[0]) * orbit.dist * 0.0013;
+    const dy = (ev.clientY - lastPtr[1]) * orbit.dist * 0.0013;
+    const right = new THREE.Vector3().crossVectors(
+      camera.getWorldDirection(new THREE.Vector3()), camera.up).normalize();
+    const up = new THREE.Vector3().crossVectors(right,
+      camera.getWorldDirection(new THREE.Vector3())).normalize();
+    orbit.target.addScaledVector(right, -dx).addScaledVector(up, dy);
+    lastPtr = [ev.clientX, ev.clientY];
+    applyCamera(); return;
+  }
+  setHover(pickNode(ev));
+  if (hover >= 0) {
+    const p = P[hover];
+    $('hud').textContent = 'node ' + hover + ' · x ' + p[0].toFixed(0) +
+      '  y ' + p[1].toFixed(0) + '  z ' + p[2].toFixed(0);
+    return;
+  }
+  const pt = pickSurface(ev);
+  if (pt) $('hud').textContent =
+    'x ' + pt.x.toFixed(0) + '  y ' + pt.y.toFixed(0) + '  z ' + pt.z.toFixed(0);
+});
+
+el.addEventListener('pointerleave', () => setHover(-1));
+
+function endPtr(ev) {
+  if (dragging) refreshScore();
+  dragging = orbiting = panning = false; lastPtr = null;
+  el.style.cursor = hover >= 0 ? 'grab' : mode === 'node' ? 'copy' : 'default';
+  if (ev && ev.pointerId !== undefined && el.hasPointerCapture(ev.pointerId)) {
+    el.releasePointerCapture(ev.pointerId);
+  }
+}
+el.addEventListener('pointerup', endPtr);
+el.addEventListener('pointercancel', endPtr);
+el.addEventListener('contextmenu', e => e.preventDefault());
+
+el.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  orbit.dist = Math.max(80, Math.min(60000,
+    orbit.dist * Math.exp(ev.deltaY * 0.0012)));
+  applyCamera();
+}, { passive: false });
+
+function pickEdge(ev) {
+  toNdc(ev);
+  let best = null, bd = 14;
+  const a3 = new THREE.Vector3(), b3 = new THREE.Vector3();
+  const r = renderer.domElement.getBoundingClientRect();
+  const px = ((ndc.x + 1) / 2) * r.width, py = ((1 - ndc.y) / 2) * r.height;
+  const proj = v => {
+    const q = v.clone().project(camera);
+    return [((q.x + 1) / 2) * r.width, ((1 - q.y) / 2) * r.height];
+  };
+  for (const [a, b] of E) {
+    if (dropped.has(a) || dropped.has(b)) continue;
+    a3.set(P[a][0], P[a][1], P[a][2]);
+    b3.set(P[b][0], P[b][1], P[b][2]);
+    const [x1, y1] = proj(a3), [x2, y2] = proj(b3);
+    const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
+    let t = L ? ((px - x1) * dx + (py - y1) * dy) / L : 0;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(x1 + t * dx - px, y1 + t * dy - py);
+    if (d < bd) { bd = d; best = [a, b]; }
+  }
+  return best;
+}
+
+/* ------------------------------------------------------------- history -- */
+function snapshot() {
+  history.push(JSON.stringify({
+    moved: [...moved], added: addedNodes, dropped: [...dropped],
+    cut: [...cutEdges], add: [...addEdges]
+  }));
+  if (history.length > 200) history.shift();
+}
+
+function undo() {
+  const s = history.pop();
+  if (!s) return;
+  const o = JSON.parse(s);
+  moved = new Map(o.moved); addedNodes = o.added; dropped = new Set(o.dropped);
+  cutEdges = new Set(o.cut); addEdges = new Set(o.add);
+  sel = linkFrom = -1;
+  refreshScore();
+}
+
+/* ---------------------------------------------------------------- data -- */
+function payload() {
+  const m = {};
+  for (const [i, p] of moved) m[i] = p;
+  return {
+    moved: m, added: addedNodes, dropped: [...dropped],
+    cut_edges: [...cutEdges].map(k => k.split(':').map(Number)),
+    added_edges: [...addEdges].map(k => k.split(':').map(Number))
+  };
+}
+
+let scoreTimer = null;
+function refreshScore() {
+  rebuild(); status();
+  clearTimeout(scoreTimer);
+  scoreTimer = setTimeout(async () => {
+    S = await (await fetch('/score?cell=' + encodeURIComponent(G.cell), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload())
+    })).json();
+    rebuild(); status();
+  }, 90);
+}
+
+async function loadCell(name, keepView) {
+  $('busy').style.display = 'grid';
+  $('busy').textContent = 'loading ' + name + ' … (first load parses this '
+                        + 'cell’s meshes)';
+  try {
+    G = await (await fetch('/geometry?cell='
+                           + encodeURIComponent(name))).json();
+  } catch (err) {
+    $('busy').textContent = 'load FAILED: ' + err;
+    return;
+  }
+  moved = new Map(); addedNodes = []; history = []; sel = linkFrom = -1;
+  dropped = new Set(G.dropped);
+  cutEdges = new Set(); addEdges = new Set();
+  srcEdgeKeys = new Set(G.edges.map(e => key(e[0], e[1])));
+  S = { off_nodes: [], bad_edges: [] };
+  buildStatic();
+  rebuild();
+  if (!keepView) frameAll();
+  refreshScore();
+  $('busy').style.display = 'none';
+}
+
+async function save() {
+  $('busy').style.display = 'grid';
+  $('busy').textContent = 'saving …';
+  try {
+    await fetch('/save?cell=' + encodeURIComponent(G.cell), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload())
+    });
+    /* The save committed exactly what is on screen, so adopt it as the new
+       baseline instead of re-fetching a cell whose collision cannot have
+       changed. */
+    G.nodes = P.map(p => p.slice());
+    G.edges = E.map(e => e.slice());
+    G.dropped = [...dropped];
+    moved = new Map(); addedNodes = []; history = [];
+    cutEdges = new Set(); addEdges = new Set();
+    srcEdgeKeys = new Set(G.edges.map(e => key(e[0], e[1])));
+    refreshScore();
+  } catch (err) {
+    $('busy').textContent = 'save FAILED: ' + err;
+    setTimeout(() => { $('busy').style.display = 'none'; }, 2500);
+    return;
+  }
+  $('busy').style.display = 'none';
+}
+
+function frameAll() {
+  const box = new THREE.Box3();
+  if (layers.authored) box.setFromObject(layers.authored);
+  if (box.isEmpty()) for (const p of P) box.expandByPoint(new THREE.Vector3(...p));
+  box.getCenter(orbit.target);
+  orbit.dist = Math.max(400, box.getSize(new THREE.Vector3()).length() * 0.95);
+  applyCamera();
+}
+
+/* -------------------------------------------------------------- status -- */
+function status() {
+  const o = S.off_nodes.length, b = S.bad_edges.length;
+  const c = v => v === 0 ? 'good' : 'warn';
+  const pend = moved.size + addedNodes.length + cutEdges.size + addEdges.size
+             + Math.abs(dropped.size - G.dropped.length);
+  $('stat').innerHTML =
+    `<b>${P.length - dropped.size}</b>/${P.length} nodes · ` +
+    `<span class="${c(o)}">${o} off mesh</span> · ` +
+    `<span class="${c(b)}">${b}/${E.length} edges cross void</span>` +
+    (pend > 0 ? ` · <b>${pend} unsaved</b>` : '');
+  $('save').disabled = pend <= 0;
+  $('undo').disabled = history.length === 0;
+  $('mode').textContent =
+    ({ sel: 'Select / drag', node: 'Add node', edge: 'Add edge' })[mode] +
+    (mode === 'edge' && linkFrom >= 0 ? ' (from ' + linkFrom + ')' : '') +
+    ' · ' + ({ bruma: 'Bruma collision', ob: 'Oblivion collision',
+               both: 'both collisions' })[source];
+  $('help').innerHTML = mode === 'edge'
+    ? 'click two nodes to link · click an edge to cut · <kbd>esc</kbd> cancel'
+    : mode === 'node'
+      ? 'click a surface to add a node there'
+      : 'drag node · <kbd>shift</kbd>+drag = up/down · <kbd>del</kbd> delete · ' +
+        '<kbd>ctrl+r</kbd> restore all · left-drag pan · right-drag orbit';
+}
+
+/* --------------------------------------------------------------- setup -- */
+function setMode(m) {
+  mode = m; linkFrom = -1;
+  for (const [id, v] of [['mSel', 'sel'], ['mNode', 'node'], ['mEdge', 'edge']]) {
+    $(id).classList.toggle('on', v === m);
+  }
+  el.style.cursor = hover >= 0 ? 'grab' : m === 'node' ? 'copy' : 'default';
+  rebuild(); status();
+}
+
+function setView(v) {
+  const a = { top: [0, 1.5707], front: [-1.5707, 0], side: [0, 0],
+              iso: [-0.9, 0.95] }[v];
+  orbit.yaw = a[0]; orbit.pitch = a[1];
+  applyCamera();
+}
+
+$('mSel').onclick = () => setMode('sel');
+$('mNode').onclick = () => setMode('node');
+$('mEdge').onclick = () => setMode('edge');
+$('vTop').onclick = () => setView('top');
+$('vFront').onclick = () => setView('front');
+$('vSide').onclick = () => setView('side');
+$('vIso').onclick = () => setView('iso');
+$('srcBruma').onclick = () => setSource('bruma');
+$('srcOb').onclick = () => setSource('ob');
+$('srcBoth').onclick = () => setSource('both');
+$('save').onclick = save;
+$('undo').onclick = undo;
+$('reset').onclick = () => loadCell(G.cell, false);
+$('cell').onchange = e => loadCell(e.target.value, false);
+for (const id of ['cWall', 'cFloor', 'cNav']) $(id).onchange = applyVisibility;
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape') { linkFrom = -1; rebuild(); status(); }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && sel >= 0) {
+    e.preventDefault(); snapshot();
+    dropped.add(sel);
+    setHover(-1);
+    sel = -1;
+    refreshScore();
+  }
+  if (e.key === 'r' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    if (dropped.size) {
+      snapshot();
+      dropped.clear();
+      refreshScore();
+    }
+  }
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
+  if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    setSource({ bruma: 'ob', ob: 'both', both: 'bruma' }[source]);
+  }
+  if (e.key === 'f') frameAll();
+  if (e.key === 'q') setMode('sel');
+  if (e.key === 'w') setMode('node');
+  if (e.key === 'e') setMode('edge');
+  if (e.key === '1') setView('top');
+  if (e.key === '2') setView('front');
+  if (e.key === '3') setView('side');
+  if (e.key === '4') setView('iso');
+});
+
+function resize() {
+  const h = window.innerHeight - $('bar').offsetHeight;
+  renderer.setSize(wrap.clientWidth, h);
+  camera.aspect = wrap.clientWidth / h;
+  camera.updateProjectionMatrix();
+  needsRender = true;
+}
+window.addEventListener('resize', resize);
+
+/* Render on demand: a static scene costs nothing, and a drag redraws only
+   because needsRender was set. */
+(function loop() {
+  requestAnimationFrame(loop);
+  if (!needsRender) return;
+  needsRender = false;
+  renderer.render(scene, camera);
+})();
+
+(async function init() {
+  resize();
+  const names = await (await fetch('/cells')).json();
+  $('cell').innerHTML = names.map(n => `<option>${n}</option>`).join('');
+  await loadCell(names[0], false);
+  resize();
+})();
+</script>
+</body>
+</html>

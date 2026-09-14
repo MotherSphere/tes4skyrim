@@ -150,9 +150,37 @@ def _apply_nifformat_patches(NifFormat):
     # ------------------------------------------------------------------
     _install_legacy_block_types(NifFormat)
 
+    # ------------------------------------------------------------------
+    # Patch 16: bhkRigidBody Body Flags width is BSVER-dependent
+    # ------------------------------------------------------------------
+    _install_rigid_body_flags(NifFormat)
+
 
 #: Block types that are a bare NiNode with no extra fields (nif.xml 0.9/0.10).
 _LEGACY_NINODE_BLOCKS = ('NiCollisionSwitch',)
+
+#: BSVER at which bhkRigidBody's Body Flags narrows from uint to ushort.
+_BSVER_BODY_FLAGS_USHORT = 76
+
+
+def _install_rigid_body_flags(NifFormat):
+    """Gate bhkRigidBody's two Body Flags fields on BSVER.
+
+    PyFFI declares both widths unconditionally, so an SSE mesh reads 6 bytes
+    where it should read 2 and every later block fails.
+
+    See: docs/commentary/asset_convert_nif.md#patch-16-body-flags-width
+    """
+    from pyffi.object_models.xml.expression import Expression
+
+    lo = Expression('user_version_2 < %d' % _BSVER_BODY_FLAGS_USHORT)
+    hi = Expression('user_version_2 >= %d' % _BSVER_BODY_FLAGS_USHORT)
+    for attr in NifFormat.bhkRigidBody._attrs:
+        if attr.name == 'unknown_int_9':
+            attr.vercond = lo
+        elif attr.name == 'unknown_int_91':
+            attr.vercond = hi
+    _refresh_attribute_caches(NifFormat, (NifFormat.bhkRigidBody,))
 
 
 # ---------------------------------------------------------------------------
