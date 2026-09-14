@@ -125,19 +125,30 @@ def draw_collision(cv, coll, alpha=None):
         cv.poly(t, fill, outline=COLL_BLOCK_EDGE)
 
 
-def _tri_fill(verts, tri):
-    """Defect colour for one triangle, by the shape contract."""
+#: Shape-contract verdicts, worst first; `TRI_CLASSES[tri_class(...)]` is a fill.
+TRI_CLASSES = (DEFECT_BAD2, DEFECT_BAD1, DEFECT_TINY, HEALTHY)
+
+
+def tri_class(verts, tri):
+    """Index into `TRI_CLASSES` for one triangle, by the shape contract.
+
+    Separate from the fill so the web editor can ship the verdict as an int
+    and colour it itself, rather than re-deriving the thresholds.
+    """
     p, q, r = (verts[k] for k in tri)
     bad = corridor_clean._badness(verts, tri)
     area = abs((q[0] - p[0]) * (r[1] - p[1])
                - (q[1] - p[1]) * (r[0] - p[0])) * 0.5
     if bad > 2.0:
-        return DEFECT_BAD2
+        return 0
     if bad > 1.0:
-        return DEFECT_BAD1
-    if area < params.MIN_TRI_AREA:
-        return DEFECT_TINY
-    return HEALTHY
+        return 1
+    return 2 if area < params.MIN_TRI_AREA else 3
+
+
+def _tri_fill(verts, tri):
+    """Defect colour for one triangle, by the shape contract."""
+    return TRI_CLASSES[tri_class(verts, tri)]
 
 
 def _shade(fill, f):

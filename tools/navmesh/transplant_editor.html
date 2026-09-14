@@ -10,7 +10,8 @@
          font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
   #bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
          padding: 7px 12px; background: #181818; border-bottom: 1px solid #2c2c2c; }
-  select, button { background: #232323; color: #e8e8e8; border: 1px solid #3a3a3a;
+  select, button, input { background: #232323; color: #e8e8e8;
+                   border: 1px solid #3a3a3a;
                    border-radius: 4px; padding: 5px 9px; font: inherit; }
   button:hover:not(:disabled) { background: #2e2e2e; }
   button:disabled { opacity: .45; }
@@ -41,10 +42,18 @@
 
 <div id="bar">
   <select id="cell"></select>
+  <div class="grp" id="anyCell">
+    <select id="plugin" title="Export to browse"></select>
+    <input id="cellSearch" placeholder="any cell…" autocomplete="off"
+           list="cellList" size="18">
+    <datalist id="cellList"></datalist>
+    <button id="openMesh">Open</button>
+  </div>
   <div class="grp">
     <button id="mSel" class="on" title="Q">Select</button>
     <button id="mNode" title="W">+Node</button>
     <button id="mEdge" title="E">+Edge</button>
+    <button id="mTri" title="T">Mesh</button>
   </div>
   <div class="grp">
     <button id="vTop" title="1">Top</button>
@@ -60,7 +69,10 @@
   <div class="grp">
     <label class="chk"><input type="checkbox" id="cWall" checked>walls</label>
     <label class="chk"><input type="checkbox" id="cFloor" checked>floor</label>
-    <label class="chk"><input type="checkbox" id="cNav" checked>navmesh</label>
+    <label class="chk"><input type="checkbox" id="cNav" checked>authored</label>
+    <label class="chk"><input type="checkbox" id="cGen">ours</label>
+    <label class="chk"><input type="checkbox" id="cPath" checked>pathgrid</label>
+    <label class="chk"><input type="checkbox" id="cTri" checked>navmesh</label>
   </div>
   <div class="grp">
     <button id="save" class="primary" disabled>Save</button>
@@ -79,7 +91,17 @@
     <div><i style="background:#b08050"></i>Oblivion wall / <i
         style="background:#8a7a5a"></i>floor</div>
     <div><i style="background:#46597f"></i>authored navmesh</div>
-    <div><i style="background:#3ba0ff"></i>pathgrid</div>
+    <div><i style="background:#f03cf0"></i>authored door / <i
+        style="background:#ff8adf"></i>ours</div>
+    <div><i style="background:#32a064"></i>ours ok / <i
+        style="background:#e18728"></i>bad / <i
+        style="background:#d7d72d"></i>tiny</div>
+    <div><i style="background:#3ba0ff"></i>vertex / <i
+        style="background:#7ee0a0"></i>selected / <i
+        style="background:#ffd24a"></i>welding</div>
+    <div><i style="background:#ffa500"></i>drop link (ledge up/down)</div>
+    <div><i style="background:#3ba0ff"></i>pathgrid / <i
+        style="background:#b46cff"></i>in mesh mode</div>
     <div><i style="background:#7ee0a0"></i>edited / added</div>
     <div><i style="background:#e0a33c"></i>node off mesh</div>
     <div><i style="background:#cf4b45"></i>edge crosses void</div>
@@ -142,12 +164,55 @@ function triLayer(flat, color, opacity) {
   return new THREE.Mesh(g, m);
 }
 
-function buildStatic() {
+/* draw.py's shape contract, worst first: red / orange / yellow mean a MESH
+   DEFECT and nothing else, so these hues must not appear on any other layer. */
+const TRI_CLASS = [0xdc2828, 0xe18728, 0xd7d72d, 0x32a064, 0xff8adf];
+
+function classedLayer(flat, cls, opacity) {
+  const mesh = triLayer(flat, 0xffffff, opacity);
+  const n = flat.length / 3, col = new Float32Array(n * 3), c = new THREE.Color();
+  for (let t = 0; t < n / 3; t++) {
+    c.setHex(TRI_CLASS[cls[t] === undefined ? 3 : cls[t]]);
+    for (let k = 0; k < 3; k++) {
+      col[(t * 3 + k) * 3] = c.r;
+      col[(t * 3 + k) * 3 + 1] = c.g;
+      col[(t * 3 + k) * 3 + 2] = c.b;
+    }
+  }
+  mesh.geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  mesh.material.vertexColors = true;
+  return mesh;
+}
+
+/* Door triangles are a SUBSET of the authored mesh, drawn as their own layer
+   so "did the door land on the mesh" is answerable by eye. */
+function subsetLayer(flat, idx, color, opacity) {
+  const out = [];
+  for (const t of idx) out.push(...flat.slice(t * 9, t * 9 + 9));
+  return triLayer(out, color, opacity);
+}
+
+function clearLayers() {
   for (const k of Object.keys(layers)) {
     scene.remove(layers[k]);
     layers[k].geometry.dispose();
     delete layers[k];
   }
+}
+
+function clearPathgrid() {
+  /* nodeMesh's geometry is the shared `nodeGeo` and must OUTLIVE the mesh;
+     the line geometries are per-build and are disposed. */
+  if (nodeMesh) scene.remove(nodeMesh);
+  for (const o of [edgeLines, badLines]) {
+    if (o) { scene.remove(o); o.geometry.dispose(); }
+  }
+  nodeMesh = edgeLines = badLines = null;
+  P = []; E = []; hover = -1; sel = -1;
+}
+
+function buildStatic() {
+  clearLayers();
   layers.blocking = triLayer(G.blocking, 0x5f78a5, 0.20);
   layers.walkable = triLayer(G.walkable, 0x6a6a6a, 0.35);
   /* Oblivion's side is warm where Bruma's is cool, so in "Both" the two read
@@ -155,18 +220,37 @@ function buildStatic() {
   layers.ob_blocking = triLayer(G.ob_blocking || [], 0xb08050, 0.20);
   layers.ob_walkable = triLayer(G.ob_walkable || [], 0x8a7a5a, 0.35);
   layers.authored = triLayer(G.authored, 0x46597f, 0.75);
+  layers.generated = classedLayer(G.generated || [], G.generated_class || [],
+                                  0.80);
+  /* A door triangle rides with the mesh it belongs to: it annotates that mesh,
+     so hiding the mesh and leaving its doors floating would be a lie. */
+  layers.doors = subsetLayer(G.authored, G.authored_doors || [], 0xf03cf0, 0.95);
+  layers.gen_doors = subsetLayer(G.generated || [], G.generated_doors || [],
+                                 0xff8adf, 0.95);
   for (const k in layers) scene.add(layers[k]);
   applyVisibility();
 }
 
+/* Mesh mode builds only walkable/blocking, so every other layer is optional
+   here rather than assumed present. */
 function applyVisibility() {
-  if (!layers.blocking) return;
   const bruma = source !== 'ob', ob = source !== 'bruma';
-  layers.blocking.visible = bruma && $('cWall').checked;
-  layers.walkable.visible = bruma && $('cFloor').checked;
-  layers.ob_blocking.visible = ob && $('cWall').checked;
-  layers.ob_walkable.visible = ob && $('cFloor').checked;
-  layers.authored.visible = $('cNav').checked;
+  const vis = (k, on) => { if (layers[k]) layers[k].visible = on; };
+  const tri = mode === 'tri';
+  vis('blocking', bruma && $('cWall').checked);
+  vis('walkable', bruma && $('cFloor').checked);
+  vis('ob_blocking', ob && $('cWall').checked);
+  vis('ob_walkable', ob && $('cFloor').checked);
+  vis('authored', $('cNav').checked);
+  vis('doors', $('cNav').checked);
+  vis('generated', !tri && $('cGen').checked);
+  vis('gen_doors', !tri && $('cGen').checked);
+  const path = $('cPath').checked;
+  for (const o of [nodeMesh, edgeLines, badLines]) if (o) o.visible = path;
+  const showTri = $('cTri').checked;
+  for (const o of [mFill, mWire, mVertMesh, mLinkLines]) {
+    if (o) o.visible = showTri;
+  }
   needsRender = true;
 }
 
@@ -189,7 +273,15 @@ let mode = 'sel', sel = -1, linkFrom = -1;
 
 const key = (a, b) => Math.min(a, b) + ':' + Math.max(a, b);
 
+/* The pathgrid must not read as mesh geometry: mesh mode already owns blue
+   (vertex handles) and white (triangle outlines), so the grid goes violet.
+   Declared ABOVE `rebuild`, which calls buildPathgrid at load: a `const` read
+   before its declaration line throws, and the throw leaves every instance
+   colour at its default of BLACK. */
+const PATH_NODE = 0xb46cff, PATH_EDGE = 0x8a4fd8;
+
 function rebuild() {
+  if (!G) return;
   P = G.nodes.map(p => p.slice());
   baseCount = G.nodes.length;
   for (const [i, p] of moved) P[i] = p.slice();
@@ -213,14 +305,21 @@ let nodeGeo = null;
 let hover = -1;
 
 function buildPathgrid() {
-  if (nodeMesh) { scene.remove(nodeMesh); nodeMesh.geometry.dispose(); }
+  /* Do NOT dispose nodeMesh.geometry: it IS the shared, cached `nodeGeo`, and
+     a disposed geometry reused on the next rebuild renders black. */
+  if (nodeMesh) scene.remove(nodeMesh);
   if (edgeLines) { scene.remove(edgeLines); edgeLines.geometry.dispose(); }
   if (badLines) { scene.remove(badLines); badLines.geometry.dispose(); }
 
   /* Nodes as ONE instanced mesh: 200 separate meshes would cost 200 draw
      calls per frame, which is what made the canvas version crawl. */
   nodeGeo = nodeGeo || new THREE.SphereGeometry(NODE_R, 10, 8);
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  /* NO `vertexColors`: per-INSTANCE colour rides `instanceColor`, which three
+     enables by itself.  `vertexColors` additionally defines USE_COLOR, whose
+     `vColor *= color` reads a per-VERTEX attribute SphereGeometry lacks -- an
+     absent attribute reads (0,0,0), so every node renders BLACK.
+     See: docs/commentary/tes5_import_navmesh.md#instanced-colour-is-not-vertex-colour */
+  const mat = new THREE.MeshBasicMaterial();
   nodeMesh = new THREE.InstancedMesh(nodeGeo, mat, P.length);
   const off = new Set(S.off_nodes);
   const m4 = new THREE.Matrix4(), c = new THREE.Color();
@@ -250,11 +349,12 @@ function buildPathgrid() {
     note(idx, b, sink.length + 3);
     sink.push(P[a][0], P[a][1], P[a][2], P[b][0], P[b][1], P[b][2]);
   }
-  edgeLines = lineSet(ok, 0x3ba0ff);
+  edgeLines = lineSet(ok, mode === 'tri' ? PATH_EDGE : 0x3ba0ff);
   badLines = lineSet(no, 0xcf4b45);
   edgeLines.userData.index = okIdx;
   badLines.userData.index = noIdx;
   scene.add(edgeLines); scene.add(badLines);
+  applyVisibility();
   needsRender = true;
 }
 
@@ -271,6 +371,7 @@ function nodeColor(i, off) {
   if (i === hover && !dropped.has(i)) return 0xffffff;
   if (dropped.has(i)) return 0x4a4a4a;
   if (off.has(i)) return 0xe0a33c;
+  if (mode === 'tri') return PATH_NODE;
   return (moved.has(i) || i >= baseCount) ? 0x7ee0a0 : 0x3ba0ff;
 }
 
@@ -370,8 +471,11 @@ const hitPt = new THREE.Vector3();
 let dragging = false, dragVertical = false, orbiting = false, panning = false;
 let lastPtr = null;
 
-function beginDrag(i, ev) {
-  const p = new THREE.Vector3(P[i][0], P[i][1], P[i][2]);
+let dragFrom = null;
+
+function beginDragAt(xyz, ev) {
+  dragFrom = xyz.slice();
+  const p = new THREE.Vector3(xyz[0], xyz[1], xyz[2]);
   if (dragVertical) {
     const n = camera.getWorldDirection(new THREE.Vector3());
     n.z = 0;
@@ -384,10 +488,14 @@ function beginDrag(i, ev) {
   toNdc(ev);
 }
 
+function beginDrag(i, ev) {
+  beginDragAt(P[i], ev);
+}
+
 function dragTo(ev) {
   toNdc(ev);
   if (!ray.ray.intersectPlane(dragPlane, hitPt)) return null;
-  const p = P[sel].slice();
+  const p = dragFrom.slice();
   const r = v => Math.round(v * 10) / 10;
   if (dragVertical) { p[2] = r(hitPt.z); }
   else { p[0] = r(hitPt.x); p[1] = r(hitPt.y); }
@@ -399,6 +507,8 @@ el.addEventListener('pointerdown', ev => {
   lastPtr = [ev.clientX, ev.clientY];
   if (ev.button === 2) { orbiting = true; el.setPointerCapture(ev.pointerId); return; }
   if (ev.button === 1) { panning = true; el.setPointerCapture(ev.pointerId); return; }
+
+  if (mode === 'tri') { meshPointerDown(ev); return; }
 
   const hit = hover >= 0 ? hover : pickNode(ev);
 
@@ -453,6 +563,7 @@ el.addEventListener('pointerdown', ev => {
 });
 
 el.addEventListener('pointermove', ev => {
+  if (mode === 'tri' && mDragging) { meshPointerMove(ev); return; }
   if (dragging && sel >= 0) {
     const p = dragTo(ev);
     if (p) {
@@ -483,7 +594,9 @@ el.addEventListener('pointermove', ev => {
     lastPtr = [ev.clientX, ev.clientY];
     applyCamera(); return;
   }
-  setHover(pickNode(ev));
+  /* In mesh mode the pathgrid is read-only context, so nodes must not offer a
+     grab cursor -- the thing under the pointer there is a vertex. */
+  setHover(mode === 'tri' ? -1 : pickNode(ev));
   if (hover >= 0) {
     const p = P[hover];
     $('hud').textContent = 'node ' + hover + ' · x ' + p[0].toFixed(0) +
@@ -498,6 +611,7 @@ el.addEventListener('pointermove', ev => {
 el.addEventListener('pointerleave', () => setHover(-1));
 
 function endPtr(ev) {
+  if (mDragging) meshPointerUp();
   if (dragging) refreshScore();
   dragging = orbiting = panning = false; lastPtr = null;
   el.style.cursor = hover >= 0 ? 'grab' : mode === 'node' ? 'copy' : 'default';
@@ -573,6 +687,7 @@ function payload() {
 let scoreTimer = null;
 function refreshScore() {
   rebuild(); status();
+  if (!G) return;
   clearTimeout(scoreTimer);
   scoreTimer = setTimeout(async () => {
     S = await (await fetch('/score?cell=' + encodeURIComponent(G.cell), {
@@ -594,19 +709,91 @@ async function loadCell(name, keepView) {
     $('busy').textContent = 'load FAILED: ' + err;
     return;
   }
+  /* Leaving mesh mode's geometry behind would show two cells at once. */
+  meshDiscard();
+  if (mode === 'tri') mode = 'sel';
   moved = new Map(); addedNodes = []; history = []; sel = linkFrom = -1;
   dropped = new Set(G.dropped);
   cutEdges = new Set(); addEdges = new Set();
   srcEdgeKeys = new Set(G.edges.map(e => key(e[0], e[1])));
   S = { off_nodes: [], bad_edges: [] };
   buildStatic();
+  applyScope();
   rebuild();
   if (!keepView) frameAll();
   refreshScore();
   $('busy').style.display = 'none';
 }
 
+/* Any cell of any export can be opened for mesh work; only the seven corpus
+   cells have a Bruma counterpart, so the authored layers simply stay empty. */
+async function loadMesh(plugin, cell) {
+  $('busy').style.display = 'grid';
+  $('busy').textContent = 'baking ' + cell + ' …';
+  const r = await fetch('/mesh?plugin=' + encodeURIComponent(plugin) +
+                        '&cell=' + encodeURIComponent(cell));
+  const d = await r.json();
+  if (d.error) {
+    $('busy').textContent = d.error;
+    setTimeout(() => { $('busy').style.display = 'none'; }, 2500);
+    return;
+  }
+  M = d; mOps = d.ops.slice(); mHistory = [];
+  meshReset();
+  /* One cell at a time: drop EVERY layer of the previous one, including the
+     pathgrid and the authored underlay, not just the collision. */
+  clearLayers();
+  clearPathgrid();
+  G = null;
+  layers.walkable = triLayer(d.walkable, 0x6a6a6a, 0.35);
+  layers.blocking = triLayer(d.blocking, 0x5f78a5, 0.20);
+  for (const k of ['walkable', 'blocking']) scene.add(layers[k]);
+  /* The pathgrid is the generator's INPUT, so it is the first thing to look at
+     when our output is wrong -- shown read-only here, edited in corpus mode. */
+  P = d.nodes.map(p => p.slice());
+  E = d.edges.map(e => e.slice());
+  baseCount = P.length;
+  dropped = new Set();
+  S = { off_nodes: [], bad_edges: [] };
+  buildPathgrid();
+  applyScope();
+  applyVisibility();
+  setMode('tri');
+  frameMesh();
+  $('busy').style.display = 'none';
+}
+
+function frameMesh() {
+  const box = new THREE.Box3();
+  for (const p of mVerts) box.expandByPoint(new THREE.Vector3(...p));
+  if (box.isEmpty()) return;
+  box.getCenter(orbit.target);
+  orbit.dist = Math.max(400, box.getSize(new THREE.Vector3()).length() * 0.95);
+  applyCamera();
+}
+
+async function meshSave() {
+  $('busy').style.display = 'grid';
+  $('busy').textContent = 'saving mesh …';
+  try {
+    const r = await fetch('/mesh_save?plugin=' + encodeURIComponent(M.plugin) +
+                          '&cell=' + encodeURIComponent(M.cell), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ops: mOps })
+    });
+    const d = await r.json();
+    $('busy').textContent = d.error || ('saved ' + d.ops + ' ops');
+    mHistory = [];
+    setTimeout(() => { $('busy').style.display = 'none'; }, 900);
+  } catch (err) {
+    $('busy').textContent = 'save FAILED: ' + err;
+    setTimeout(() => { $('busy').style.display = 'none'; }, 2500);
+  }
+  status();
+}
+
 async function save() {
+  if (mode === 'tri') { await meshSave(); return; }
   $('busy').style.display = 'grid';
   $('busy').textContent = 'saving …';
   try {
@@ -632,6 +819,271 @@ async function save() {
   $('busy').style.display = 'none';
 }
 
+/* ----------------------------------------------------------- mesh edit -- */
+/* Mesh mode edits OUR triangles: the pathgrid corpus says what the generator's
+   input should be, this says what its output should have been.  Ops address
+   triangles by their ORIGINAL index (meshedit.replay tombstones deletions), so
+   the page and the saved changelist speak the same index space. */
+let M = null;                     // the /mesh bake for the open cell
+let mOps = [], mHistory = [];
+let mVerts = [], mTris = [], mDoors = new Set(), mDead = new Set();
+let mSelVert = -1, mSelTri = -1, mSnapFrom = -1;
+//: Corners collected so far in build mode; three of them make a triangle.
+let mRing = [], mBuild = false, mNewVerts = new Set();
+//: Drop-down (Ledge Up/Down) links as "up:down"; `l` links the last two tris.
+let mLinks = new Set(), mLinkFrom = -1, mLinkLines = null;
+const lkey = (a, b) => a + ':' + b;
+let mWire = null, mVertMesh = null, mFill = null;
+
+function meshDiscard() {
+  for (const o of [mWire, mVertMesh, mFill, mLinkLines]) {
+    if (o) { scene.remove(o); o.geometry.dispose(); }
+  }
+  mWire = mVertMesh = mFill = mLinkLines = null;
+  M = null; mOps = []; mHistory = [];
+  mVerts = []; mTris = []; mDoors = new Set(); mDead = new Set();
+  mSelVert = mSelTri = mSnapFrom = -1; mRing = [];
+  needsRender = true;
+}
+
+function meshReset() {
+  mVerts = M.verts.map(p => p.slice());
+  mTris = M.tris.map(t => t.slice());
+  mDoors = new Set(M.doors);
+  mLinks = new Set((M.ledges || []).map(l => lkey(l[0], l[1])));
+  mDead = new Set();
+  mSelVert = mSelTri = mSnapFrom = mLinkFrom = -1;
+  mRing = []; mBuild = false; mNewVerts = new Set();
+  for (const op of mOps) meshApply(op);
+}
+
+function meshApply(op) {
+  if (op.op === 'add_vert') mVerts.push(op.to.slice());
+  else if (op.op === 'move_vert') mVerts[op.v] = op.to.slice();
+  /* Welding rewrites the INDEX everywhere, mirroring meshedit._snap_vert: a
+     crack closes only when both triangles share the vertex. */
+  else if (op.op === 'snap_vert') {
+    mVerts[op.v] = mVerts[op.to_v].slice();
+    mTris.forEach((t, n) => {
+      if (!t) return;
+      for (let k = 0; k < 3; k++) if (t[k] === op.v) t[k] = op.to_v;
+      if (new Set(t).size < 3) mDead.add(n);
+    });
+  }
+  else if (op.op === 'add_tri') mTris.push(op.verts.slice());
+  else if (op.op === 'del_tri') mDead.add(op.tri);
+  else if (op.op === 'set_door') (op.on ? mDoors.add : mDoors.delete)
+    .call(mDoors, op.tri);
+  else if (op.op === 'add_link') mLinks.add(lkey(op.up, op.down));
+  else if (op.op === 'del_link') mLinks.delete(lkey(op.up, op.down));
+}
+
+function meshPush(op) {
+  mHistory.push(mOps.length);
+  mOps.push(op);
+  meshApply(op);
+  meshRebuild();
+  status();
+}
+
+function meshUndo() {
+  if (!mHistory.length) return;
+  mOps.length = mHistory.pop();
+  meshReset();
+  meshRebuild();
+  status();
+}
+
+/* Outlines, not fills, are what make a triangle editable: you need to see the
+   edge you are about to snap, including where two triangles already share it. */
+function meshRebuild() {
+  for (const o of [mWire, mVertMesh, mFill, mLinkLines]) {
+    if (o) { scene.remove(o); o.geometry.dispose(); }
+  }
+  mWire = mVertMesh = mFill = mLinkLines = null;
+  if (!M || mode !== 'tri') { needsRender = true; return; }
+
+  const live = mTris.map((t, i) => [t, i]).filter(([, i]) => !mDead.has(i));
+  const fill = [], cls = [], seg = [];
+  for (const [t, i] of live) {
+    for (const k of [0, 1, 2]) fill.push(...mVerts[t[k]]);
+    const c = mDoors.has(i) ? 4 : (M.tri_class[i] === undefined ? 3
+                                                : M.tri_class[i]);
+    cls.push(c);
+    for (const [a, b] of [[0, 1], [1, 2], [2, 0]]) {
+      seg.push(...mVerts[t[a]], ...mVerts[t[b]]);
+    }
+  }
+  mFill = classedLayer(fill, cls, 0.55);
+  mWire = lineSet(seg, 0xf0f0f0);
+  mWire.material.opacity = 0.55; mWire.material.transparent = true;
+  scene.add(mFill); scene.add(mWire);
+
+  /* Ring corners join the handle set even when no triangle uses them yet --
+     otherwise a corner placed in open floor would be invisible. */
+  const used = new Set(mRing);
+  for (const [t] of live) for (const k of t) used.add(k);
+  mVertMesh = vertHandles([...used]);
+  if (mVertMesh) scene.add(mVertMesh);
+
+  /* A drop link joins two triangles that do NOT share an edge, so the only way
+     to see one is to draw it: centroid to centroid. */
+  const ls = [];
+  for (const k of mLinks) {
+    const [a, b] = k.split(':').map(Number);
+    if (mDead.has(a) || mDead.has(b) || !mTris[a] || !mTris[b]) continue;
+    ls.push(...centroid(a), ...centroid(b));
+  }
+  if (ls.length) {
+    mLinkLines = lineSet(ls, 0xffa500);
+    scene.add(mLinkLines);
+  }
+  applyVisibility();
+  needsRender = true;
+}
+
+function centroid(ti) {
+  const t = mTris[ti];
+  return [0, 1, 2].map(k =>
+    (mVerts[t[0]][k] + mVerts[t[1]][k] + mVerts[t[2]][k]) / 3);
+}
+
+const VERT_R = 9;
+function vertHandles(idx) {
+  if (!idx.length) return null;
+  const g = new THREE.SphereGeometry(VERT_R, 8, 6);
+  const m = new THREE.MeshBasicMaterial();
+  const inst = new THREE.InstancedMesh(g, m, idx.length);
+  const c = new THREE.Color();
+  inst.userData.idx = idx;
+  idx.forEach((vi, n) => {
+    /* A selected or ring corner is drawn BIGGER as well as recoloured: at this
+       density colour alone is not a readable selection cue. */
+    const r = (vi === mSelVert || mRing.includes(vi)) ? 1.8
+            : vi === mSnapFrom ? 1.6 : 1;
+    _m4.makeScale(r, r, r);
+    _m4.setPosition(...mVerts[vi]);
+    inst.setMatrixAt(n, _m4);
+    c.setHex(mRing.includes(vi) ? 0xff5cf0
+           : vi === mSelVert ? 0x7ee0a0
+           : vi === mSnapFrom ? 0xffd24a : 0x3ba0ff);
+    inst.setColorAt(n, c);
+  });
+  inst.instanceMatrix.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+  return inst;
+}
+
+function pickVert(ev) {
+  if (!mVertMesh) return -1;
+  toNdc(ev);
+  const h = ray.intersectObject(mVertMesh, false)[0];
+  return h ? mVertMesh.userData.idx[h.instanceId] : -1;
+}
+
+function pickTri(ev) {
+  if (!mFill) return -1;
+  toNdc(ev);
+  const h = ray.intersectObject(mFill, false)[0];
+  if (!h) return -1;
+  const live = mTris.map((t, i) => i).filter(i => !mDead.has(i));
+  return live[Math.floor(h.faceIndex)];
+}
+
+/* Snap-to-collision answers "where is the floor here?" without eyeballing a
+   height in an orbiting 3D view, which is the whole reason a Z drag is hard. */
+function floorUnder(x, y, z) {
+  const targets = [layers.walkable, layers.blocking].filter(Boolean);
+  if (!targets.length) return null;
+  ray.set(new THREE.Vector3(x, y, z + 512), new THREE.Vector3(0, 0, -1));
+  const h = ray.intersectObjects(targets, false)[0];
+  return h ? h.point.z : null;
+}
+
+let mDragging = false, mDragVert = -1;
+
+/* Build mode (`b`) collects three corners and makes a triangle of them.  A
+   corner is EITHER an existing vertex (click it) OR bare collision (click the
+   floor), which is what lets the mesh be EXTENDED, not only holed-filled --
+   the same gesture that adds a pathgrid node in corpus mode. */
+function newVertAt(p) {
+  mVerts.push([Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100,
+               Math.round(p.z * 100) / 100]);
+  return mVerts.length - 1;
+}
+
+function buildClick(ev) {
+  const v = pickVert(ev);
+  if (v >= 0) {
+    if (!mRing.includes(v)) mRing.push(v);
+  } else {
+    const pt = pickSurface(ev);
+    if (!pt) return false;
+    mRing.push(newVertAt(pt));
+  }
+  if (mRing.length === 3) {
+    /* The new vertices must reach `replay` too, so each is an explicit op. */
+    for (const k of mRing) {
+      if (k >= M.verts.length && !mNewVerts.has(k)) {
+        mNewVerts.add(k);
+        mOps.push({ op: 'add_vert', to: mVerts[k].slice() });
+      }
+    }
+    meshPush({ op: 'add_tri', verts: mRing.slice() });
+    mRing = [];
+    return true;
+  }
+  meshRebuild(); status();
+  return true;
+}
+
+function meshPointerDown(ev) {
+  if (mBuild && buildClick(ev)) return;
+  const v = pickVert(ev);
+  if (v >= 0) {
+    if (ev.shiftKey && mSnapFrom >= 0 && v !== mSnapFrom) {
+      meshPush({ op: 'snap_vert', v: mSnapFrom, to_v: v });
+      mSnapFrom = -1;
+      return;
+    }
+    if (ev.shiftKey) { mSnapFrom = v; meshRebuild(); status(); return; }
+    mSelVert = v; mSelTri = -1;
+    mDragging = true; mDragVert = v;
+    dragVertical = ev.altKey;
+    beginDragAt(mVerts[v], ev);
+    el.setPointerCapture(ev.pointerId);
+    el.style.cursor = 'grabbing';
+    meshRebuild(); status();
+    return;
+  }
+  const t = pickTri(ev);
+  if (t >= 0) {
+    mSelTri = t; mSelVert = -1;
+    meshRebuild(); status();
+    return;
+  }
+  panning = true;
+  el.setPointerCapture(ev.pointerId);
+  el.style.cursor = 'move';
+}
+
+function meshPointerMove(ev) {
+  if (!mDragging || mDragVert < 0) return;
+  const p = dragTo(ev);
+  if (!p) return;
+  mVerts[mDragVert] = p;
+  meshRebuild();
+}
+
+function meshPointerUp() {
+  if (!mDragging) return;
+  mDragging = false;
+  const v = mDragVert;
+  mDragVert = -1;
+  meshPush({ op: 'move_vert', v,
+             to: mVerts[v].map(c => Math.round(c * 100) / 100) });
+}
+
 function frameAll() {
   const box = new THREE.Box3();
   if (layers.authored) box.setFromObject(layers.authored);
@@ -642,7 +1094,46 @@ function frameAll() {
 }
 
 /* -------------------------------------------------------------- status -- */
+function meshStatus() {
+  const live = mTris.length - mDead.size;
+  $('stat').innerHTML =
+    `<b>${live}</b> tris · ${mDoors.size} door · ${mLinks.size} drop link · ` +
+    (mOps.length ? `<b>${mOps.length} ops</b>` : 'no edits') +
+    (M.stale ? ' · <span class="warn">ops stale</span>' : '');
+  $('save').disabled = mOps.length === 0;
+  $('undo').disabled = mHistory.length === 0;
+  $('mode').textContent = 'Mesh · ' + M.plugin + ' · ' + M.cell +
+    (mBuild ? ' · BUILD ' + mRing.length + '/3' : '') +
+    (mSelVert >= 0 ? ' · vert ' + mSelVert : '') +
+    (mSelTri >= 0 ? ' · tri ' + mSelTri : '') +
+    (mSnapFrom >= 0 ? ' · welding ' + mSnapFrom : '') +
+    (mLinkFrom >= 0 ? ' · linking from ' + mLinkFrom : '');
+  $('help').innerHTML = mBuild
+    ? 'click 3 corners — an existing vertex, or bare floor to EXTEND · ' +
+      '<kbd>b</kbd> or <kbd>esc</kbd> to leave build mode'
+    : 'drag vertex · <kbd>alt</kbd>+drag = up/down · ' +
+      '<kbd>shift</kbd>+click two verts = weld · <kbd>g</kbd> snap to floor · ' +
+      '<kbd>del</kbd> delete tri · <kbd>d</kbd> door · ' +
+      '<kbd>b</kbd> build a triangle · <kbd>l</kbd> link two tris (upper first)';
+}
+
+/* The collision toggle and the authored underlay are CORPUS concepts: an
+   arbitrary cell has one collision set and no Bruma counterpart.  The corpus
+   cell PICKER always stays, or leaving corpus mode would be a one-way door. */
+function applyScope() {
+  const corpus = !!G;
+  for (const id of ['srcBruma', 'srcOb', 'srcBoth']) {
+    $(id).parentElement.style.display = corpus ? '' : 'none';
+  }
+  $('cNav').parentElement.style.display = corpus ? '' : 'none';
+  $('cGen').parentElement.style.display = corpus ? '' : 'none';
+  for (const id of ['mSel', 'mNode', 'mEdge']) $(id).disabled = !corpus;
+  $('cell').value = corpus ? G.cell : '';
+}
+
 function status() {
+  if (mode === 'tri' && M) { meshStatus(); return; }
+  if (!G) return;
   const o = S.off_nodes.length, b = S.bad_edges.length;
   const c = v => v === 0 ? 'good' : 'warn';
   const pend = moved.size + addedNodes.length + cutEdges.size + addEdges.size
@@ -669,12 +1160,21 @@ function status() {
 
 /* --------------------------------------------------------------- setup -- */
 function setMode(m) {
+  if (m === 'tri' && !M) return;
+  /* The pathgrid modes edit the CORPUS entry, which an arbitrary cell has
+     none of -- pick a corpus cell to get back to them. */
+  if (m !== 'tri' && !G) return;
   mode = m; linkFrom = -1;
-  for (const [id, v] of [['mSel', 'sel'], ['mNode', 'node'], ['mEdge', 'edge']]) {
+  for (const [id, v] of [['mSel', 'sel'], ['mNode', 'node'],
+                         ['mEdge', 'edge'], ['mTri', 'tri']]) {
     $(id).classList.toggle('on', v === m);
   }
   el.style.cursor = hover >= 0 ? 'grab' : m === 'node' ? 'copy' : 'default';
-  rebuild(); status();
+  applyVisibility();
+  /* The grid recolours per mode, so it has to be rebuilt when the mode
+     changes -- `rebuild` only runs for a corpus cell. */
+  if (G) rebuild(); else buildPathgrid();
+  meshRebuild(); status();
 }
 
 function setView(v) {
@@ -687,6 +1187,34 @@ function setView(v) {
 $('mSel').onclick = () => setMode('sel');
 $('mNode').onclick = () => setMode('node');
 $('mEdge').onclick = () => setMode('edge');
+$('mTri').onclick = () => {
+  if (M) setMode('tri');
+  else if (G) loadMesh($('plugin').value, G.source_cell || G.cell);
+};
+$('openMesh').onclick = () => {
+  const c = $('cellSearch').value.trim();
+  if (c) loadMesh($('plugin').value, c);
+};
+$('cellSearch').onkeydown = e => {
+  if (e.key === 'Enter') $('openMesh').click();
+};
+
+/* Cell names are fetched per keystroke prefix: an export has thousands, and
+   shipping the whole list to a datalist would stall the page. */
+let cellSearchTimer = null;
+$('cellSearch').oninput = () => {
+  clearTimeout(cellSearchTimer);
+  cellSearchTimer = setTimeout(async () => {
+    const q = $('cellSearch').value.trim();
+    if (q.length < 2) return;
+    const r = await fetch('/plugin_cells?plugin=' +
+                          encodeURIComponent($('plugin').value) +
+                          '&q=' + encodeURIComponent(q));
+    const names = await r.json();
+    $('cellList').innerHTML =
+      names.slice(0, 40).map(n => '<option value="' + n + '">').join('');
+  }, 180);
+};
 $('vTop').onclick = () => setView('top');
 $('vFront').onclick = () => setView('front');
 $('vSide').onclick = () => setView('side');
@@ -697,11 +1225,64 @@ $('srcBoth').onclick = () => setSource('both');
 $('save').onclick = save;
 $('undo').onclick = undo;
 $('reset').onclick = () => loadCell(G.cell, false);
-$('cell').onchange = e => loadCell(e.target.value, false);
-for (const id of ['cWall', 'cFloor', 'cNav']) $(id).onchange = applyVisibility;
+$('cell').onchange = e => { if (e.target.value) loadCell(e.target.value, false); };
+for (const id of ['cWall', 'cFloor', 'cNav', 'cGen', 'cPath', 'cTri'])
+  $(id).onchange = applyVisibility;
+
+/* Mesh-mode keys, returning true when the event was consumed there. */
+function meshKey(e) {
+  if (mode !== 'tri' || !M) return false;
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (mSelTri >= 0) { meshPush({ op: 'del_tri', tri: mSelTri }); mSelTri = -1; }
+    return true;
+  }
+  if (e.key === 'd' && mSelTri >= 0) {
+    meshPush({ op: 'set_door', tri: mSelTri, on: !mDoors.has(mSelTri) });
+    return true;
+  }
+  if (e.key === 'b') {
+    mBuild = !mBuild; mRing = [];
+    el.style.cursor = mBuild ? 'copy' : 'default';
+    meshRebuild(); status();
+    return true;
+  }
+  /* Links are directional -- Ledge Up vs Ledge Down -- so the FIRST triangle
+     picked is the upper one. */
+  if (e.key === 'l' && mSelTri >= 0) {
+    if (mLinkFrom < 0) { mLinkFrom = mSelTri; status(); return true; }
+    if (mLinkFrom !== mSelTri) {
+      const k = lkey(mLinkFrom, mSelTri);
+      meshPush(mLinks.has(k)
+        ? { op: 'del_link', up: mLinkFrom, down: mSelTri }
+        : { op: 'add_link', up: mLinkFrom, down: mSelTri });
+    }
+    mLinkFrom = -1;
+    return true;
+  }
+  if (e.key === 'g' && mSelVert >= 0) {
+    const p = mVerts[mSelVert];
+    const z = floorUnder(p[0], p[1], p[2]);
+    if (z !== null) {
+      meshPush({ op: 'move_vert', v: mSelVert,
+                 to: [p[0], p[1], Math.round(z * 100) / 100] });
+    }
+    return true;
+  }
+  if (e.key === 'Escape') {
+    mSnapFrom = -1; mLinkFrom = -1; mRing = []; mBuild = false;
+    el.style.cursor = 'default';
+    meshRebuild(); status();
+    return true;
+  }
+  return false;
+}
 
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && mode === 'tri') {
+    e.preventDefault(); meshUndo(); return;
+  }
+  if (meshKey(e)) { e.preventDefault(); return; }
   if (e.key === 'Escape') { linkFrom = -1; rebuild(); status(); }
   if ((e.key === 'Delete' || e.key === 'Backspace') && sel >= 0) {
     e.preventDefault(); snapshot();
@@ -728,6 +1309,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'q') setMode('sel');
   if (e.key === 'w') setMode('node');
   if (e.key === 'e') setMode('edge');
+  if (e.key === 't') $('mTri').click();
   if (e.key === '1') setView('top');
   if (e.key === '2') setView('front');
   if (e.key === '3') setView('side');
@@ -754,8 +1336,13 @@ window.addEventListener('resize', resize);
 
 (async function init() {
   resize();
-  const names = await (await fetch('/cells')).json();
-  $('cell').innerHTML = names.map(n => `<option>${n}</option>`).join('');
+  const [names, plugs] = await Promise.all([
+    (await fetch('/cells')).json(),
+    (await fetch('/plugins')).json()
+  ]);
+  $('cell').innerHTML = '<option value="">corpus cell…</option>' +
+    names.map(n => `<option>${n}</option>`).join('');
+  $('plugin').innerHTML = plugs.map(n => `<option>${n}</option>`).join('');
   await loadCell(names[0], false);
   resize();
 })();

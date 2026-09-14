@@ -74,14 +74,19 @@ class CellCtx(object):
     def has_pathgrid(self):
         return bool(self.nodes)
 
-    def build(self):
-        """Regenerate this cell's navmesh exactly as the pipeline would."""
+    def build(self, ledges_out=None):
+        """Regenerate this cell's navmesh exactly as the pipeline would.
+
+        `ledges_out` collects `(upper_tri, lower_tri, drop)` drop-down links,
+        which production returns out-of-band so `(verts, tris)` stays intact.
+        """
         verts, tris = build.build_navmesh(
             self.refrs, self.index.base_model, ce.get_collision,
             self.nodes, self.edges, land_rec=self.land,
             doors=[(x, y, z, r, tp, w)
                    for (x, y, z, r, _f, tp, w) in self.doors],
-            door_bases=set(self.index.door_fids.keys()))
+            door_bases=set(self.index.door_fids.keys()),
+            ledges_out=ledges_out)
         return verts, [tuple(int(i) for i in tri[:3]) for tri in tris]
 
     def collision(self):

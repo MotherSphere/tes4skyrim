@@ -2951,18 +2951,28 @@ coverage (`miss` 0→570 on AnvilFightersGuild, 0→5599 on ImperialDungeon01).
 
 Beyond Skyrim: Bruma rebuilt Cyrodiil's architecture in Skyrim and navmeshed it
 **by hand**, so a Bruma interior replicating an Oblivion one is an answer key.
-Seven cells match by name, each with a real Oblivion pathgrid and an authored
-Bruma navmesh (Bruma prefixes cell EditorIDs with `CYR`):
+Seven cells make up the corpus, each with a real Oblivion pathgrid and an
+authored Bruma navmesh (Bruma prefixes cell EditorIDs with `CYR`):
 
-| corpus cell | OB pathgrid nodes | authored tris | ours |
-|---|---|---|---|
-| BrumaCastleGreatHall | 201 | 427 | 996 |
-| BrumaCastleLordsManor | 163 | 300 | |
-| BrumaCastleDungeon | 88 | 208 | |
-| BrumaChapelUndercroft | 43 | 265 | |
-| BrumaChapelHall | 43 | 239 | 256 |
-| BrumaCastleBarracks | 55 | 105 | |
-| BrumaCastleServiceHall | 52 | 120 | |
+| corpus cell | Oblivion source | OB nodes | authored tris | ours |
+|---|---|---|---|---|
+| BrumaCastleGreatHall | same | 201 | 427 | 999 |
+| BrumaCastleLordsManor | same | 163 | 300 | |
+| BrumaCastleDungeon | same | 88 | 208 | 408 |
+| BrumaChapelUndercroft | same | 43 | 265 | |
+| BrumaChapelHall | same | 43 | 239 | 261 |
+| BrumaCathedralofStMartin | BrumaChapel | 73 | 373 | |
+| BrumaCastleBarracks | same | 55 | 105 | 184 |
+
+**A corpus cell need not share its name with its Oblivion source.** The
+Cathedral of St. Martin is the same building as Oblivion's `BrumaChapel`, so
+its entry sets `source_cell` explicitly; the rigid fit lands 70 of 73 nodes on
+the authored mesh (96%), the best of the corpus.
+
+`BrumaCastleServiceHall` was REMOVED: despite the matching name it is a
+different building, and the fit left 32 of 52 nodes off-mesh with 65 of 84
+edges crossing void. A name match is not a building match — check the fit score
+before trusting one.
 
 ### Why the grid must be transplanted, not reused
 
@@ -3022,6 +3032,26 @@ Bruma cells also place **vanilla** Skyrim statics (`Clutter\Barrel01.NIF` and
 friends), so a model missing from both Bruma archives falls back to
 `skyrim_assets.get_asset_bytes`, which resolves from the SSE BSAs.
 
+### <a id="vanilla-bases-need-the-master"></a>Vanilla BASES need the master, not just vanilla assets
+
+Resolving vanilla *assets* is not enough: the REFRs that place them point at
+base records living in **Skyrim.esm**, and a scan of `BSHeartland.esm` alone
+resolves none of them. This is [master-export
+blindness](../../CLAUDE.md#master-blindness) in the editor's own loader.
+
+Measured on `CYRBrumaChapelHall`: 300 REFRs over **174 distinct bases, 105 of
+them vanilla — and 0 of those 105 resolved.** Only 72 of 300 REFRs got a model.
+The missing objects are exactly the furniture a room is made of — beds
+(`NobleBedSingle01`), tables, benches, chairs — so the renderer showed open
+floor where the navmesh correctly stopped at something solid, which is what
+"unexplained gaps" in the chapel actually were.
+
+`cell_refrs` therefore loads base models from Skyrim.esm FIRST, then overlays
+the plugin's own so Bruma's overrides win. Skyrim.esm is read from the live SSE
+install, which CLAUDE.md permits for Papyrus logs and Skyrim.esm specifically.
+A vanilla base carries a `00` master index here only because Bruma lists
+Skyrim.esm first; never assume that index across other plugins.
+
 ## <a id="transplant-editor"></a>The transplant editor
 
 **Code:** `tools/navmesh/transplant_server.py`, `tools/navmesh/transplant_editor.html`.
@@ -3035,7 +3065,7 @@ Hand-placing nodes by reading coordinates off a rendered grid and issuing
 natural interface, and the corpus is already a small JSON a page can read and
 write back.
 
-The page draws three layers, in order:
+The page draws five layers, each independently toggleable:
 
 1. **Bruma's real collision** — the same Havok soup the Oblivion-side renders
    use (see [Bruma collision](#bruma-collision)), clipped to the storey the
@@ -3043,7 +3073,26 @@ The page draws three layers, in order:
    the same reason as in the renderer: it is overwhelmingly vertical wall, so
    the rim carries the shape.
 2. **The authored navmesh**, dim, as context.
-3. **The pathgrid**, draggable.
+3. **Door triangles**, magenta — a subset of layer 2, drawn apart so "did the
+   door land on the mesh" is answerable by eye.
+4. **Our generated mesh**, coloured by `draw.tri_class` so the editor and
+   `render.py` cannot disagree about what counts as a defect. Off by default:
+   it is the thing under test, not context.
+5. **The pathgrid**, draggable.
+
+### <a id="nvnm-flags-vs-cover-flags"></a>An NVNM triangle has TWO flag fields
+
+The triangle struct is `'<6h2H'`: three vertex indices, three neighbours, then
+**Flags at index 6 and Cover Flags at index 7**. `wbNavmeshTriangleFlags` in
+`references/xEdit/Core/wbDefinitionsCommon.pas` puts Door at bit 10 of *Flags*;
+bit 10 of *Cover Flags* means something else entirely, and the two are easy to
+confuse because both are `itU16` and adjacent.
+
+Reading index 7 reports **13 door triangles** in `BrumaChapelHall`; reading
+index 6 reports **one, triangle 224**. The NVNM **Doors array** (parsed into
+`check.py`'s `nm.door_tris`) names its triangle outright and independently
+gives `[224]` — so cross-checking the flag against that array is the way to
+confirm the field index, and any disagreement means the wrong field was read.
 
 **Nodes are placed against the WALLS, never against the authored mesh.** The
 authored layer is there to show which room you are in, not to snap to — a grid
@@ -3104,3 +3153,204 @@ The SSE failures are pyffi layout bugs in the Havok blocks
 `bhkRigidBody` Body Flags width, which is necessary but not sufficient. Rather
 than chase each remaining layout, the fetch order is now **Bruma archives → LE
 references → SSE BSAs**, and the LE copies sidestep the whole class.
+
+## <a id="hand-corrected-navmesh-corpus"></a>The hand-corrected navmesh corpus
+
+**Code:** `tools/navmesh/meshedit.py`, served by `tools/navmesh/transplant_server.py`.
+
+### Mesh mode lives in the SAME page
+
+Triangle editing is a MODE of the transplant editor (`t`), not a second page:
+the collision, camera, picking and orbit arbitration are already there, and a
+parallel page would duplicate ~800 lines that must not drift apart. The two
+modes share `beginDragAt`/`dragTo`, generalized from node indices to plain
+positions for exactly this. Mesh mode hides the read-only `generated` layer,
+whose editable copy draws the same triangles and would z-fight it.
+
+| key | does |
+|---|---|
+| drag vertex | move in XY |
+| `alt`+drag | move in Z |
+| `shift`+click two vertices | weld the first onto the second (close a crack) |
+| `g` | snap the selected vertex down to the collision under it |
+| `b` | build mode: click 3 corners, each an existing vertex OR bare floor |
+| `del` | delete the selected triangle |
+| `d` | toggle the selected triangle's door flag |
+| `l` | link two triangles as a drop-down, UPPER picked first |
+
+The cell picker is a prefix search against `/plugin_cells`, not a full list: an
+export holds thousands of cells with a pathgrid, and shipping them all to a
+`datalist` stalls the page.
+
+### <a id="welding-rewrites-the-index"></a>Welding rewrites the INDEX, not just the position
+
+The first `snap_vert` moved vertex `v` onto `to_v`'s coordinates and stopped
+there. That looks like nothing happened, because the two corners were already
+almost coincident — and, worse, it fixes nothing: a navmesh crack closes only
+when the two triangles **share a vertex index**. Two distinct indices at
+identical coordinates are still a crack, and the CK's own validation counts
+them as duplicate/asymmetric edges.
+
+So the weld rewrites every triangle that referenced `v` to reference `to_v`,
+and drops any triangle the weld leaves degenerate (fewer than three distinct
+corners). The moved coordinates are kept as well, so an orphaned `v` no longer
+used by any triangle sits harmlessly on top of `to_v`.
+
+### Building a triangle must reach OPEN FLOOR
+
+The first cut collected "the last three vertices clicked", which can only ever
+fill a hole between triangles that already exist — it cannot EXTEND the mesh,
+which is the more common repair. Build mode (`b`) takes each corner as either
+an existing vertex or a click on bare collision, the same gesture that adds a
+pathgrid node in corpus mode; a corner on open floor becomes an explicit
+`add_vert` op so `replay` reproduces it.
+
+Ring corners are drawn enlarged and magenta, and join the handle set even when
+no triangle uses them yet — a corner placed in open floor would otherwise be
+invisible, leaving no indication of what is selected.
+
+### One cell at a time, and the scope follows it
+
+Opening a cell drops **every** layer of the previous one — collision, authored
+underlay and pathgrid alike — via `clearLayers` / `clearPathgrid` /
+`meshDiscard`. The first cut only replaced collision when the name differed,
+which left two cells on screen at once.
+
+The collision-source buttons (Bruma / Oblivion / Both) and the authored/ours
+toggles are **corpus concepts**, hidden for an arbitrary cell which has one
+collision set and no Bruma counterpart. `applyScope` keys that off `G` being
+non-null, and the pathgrid edit modes are disabled rather than silently inert.
+
+**The corpus cell picker always stays visible.** Hiding it made leaving corpus
+mode a one-way door with no way back; it keeps a blank first option so it can
+show "no corpus cell" and still re-select one.
+
+The cell's **pathgrid is drawn read-only** in mesh mode: it is the generator's
+input, so it is the first thing to look at when the output is wrong. Node
+hover is suppressed there, because the thing under the pointer is a vertex.
+
+### <a id="instanced-colour-is-not-vertex-colour"></a>Black nodes: `vertexColors` on an INSTANCED mesh
+
+Per-instance colour and per-vertex colour are different three.js features, and
+asking for both when only one exists paints everything black.
+
+`InstancedMesh.setColorAt` allocates `instanceColor`, and three.js sets
+`USE_INSTANCING_COLOR` by itself when that buffer is non-null. The shader chunk
+is:
+
+```glsl
+#elif defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+    vColor = vec3( 1.0 );
+#endif
+#ifdef USE_COLOR
+    vColor *= color;          // per-VERTEX attribute
+#endif
+#ifdef USE_INSTANCING_COLOR
+    vColor.xyz *= instanceColor.xyz;
+#endif
+```
+
+Setting `vertexColors: true` additionally defines `USE_COLOR`, whose
+`vColor *= color` reads a per-vertex `color` attribute that `SphereGeometry`
+does not have. **An absent attribute reads `(0,0,0)`**, so the multiply zeroes
+the instance colour and every sphere renders solid black.
+
+**`instanceColor` needs no material flag.** The fix is to drop `vertexColors`
+from both instanced handle meshes. `classedLayer` keeps it, correctly — it sets
+a real `color` attribute on its geometry first.
+
+Verified by reading the shader chunks out of the pinned
+`three.js/0.160.0/three.min.js` the page loads, not by inference.
+
+### <a id="never-dispose-a-shared-geometry"></a>Also: never dispose a SHARED geometry
+
+`nodeGeo` is a module-level `SphereGeometry`, built once and reused by every
+`buildPathgrid`. `buildPathgrid` also began by calling
+`nodeMesh.geometry.dispose()` — and `nodeMesh.geometry` **is** `nodeGeo`. So
+the first rebuild freed the shared geometry's GPU buffers, and every rebuild
+afterwards handed that dead geometry to a new `InstancedMesh`. The nodes drew
+**solid black**.
+
+It stayed latent while the page only ever loaded one cell at startup; adding
+`clearPathgrid` (for one-cell-at-a-time switching) made a rebuild happen on
+every cell open, so it surfaced constantly.
+
+**A cached geometry must outlive every mesh that borrows it.** `vertHandles`
+was never affected because it builds a fresh `SphereGeometry` per call — the
+per-build line and triangle geometries are still disposed, correctly.
+
+Two earlier theories for this were wrong and are recorded so they are not
+retried: the material being `MeshLambertMaterial` (an unlit `MeshBasicMaterial`
+is right for markers regardless, but lighting was not the cause), and a
+temporal-dead-zone read of the palette constants (no top-level code calls
+`buildPathgrid`, so the constants are always initialized by then).
+
+Separately, **blue collided with blue**: mesh mode already spends blue on
+vertex handles and white on triangle outlines, so the grid's usual `0x3ba0ff`
+read as more mesh. In mesh mode it switches to violet, which means
+`buildPathgrid` must re-run on a mode change, not only on load.
+
+`cPath` and `cTri` hide the pathgrid and the triangles independently — with
+both layers occupying the same floor, being able to drop one is what makes the
+other readable.
+
+### Drop links are editable
+
+`build_navmesh` returns Ledge Up/Down pairs **out-of-band** through
+`ledges_out` so the long-standing `(verts, tris)` return stays intact;
+`CellCtx.build` now forwards that parameter, which is why the editor can see
+them at all. A link joins two triangles that do NOT share an edge, so the only
+way to see one is to draw it centroid-to-centroid (orange).
+
+Links are **directional** — Ledge Up is not Ledge Down — so `l` takes the upper
+triangle first. `replay` drops a link whose triangle was deleted and remaps the
+survivors, the same tombstone-then-compact rule the door flags follow.
+
+Measured: `ImperialDungeon01` has one (triangle 567 → 276, a 192-unit drop);
+the Bruma corpus interiors have none, being single-storey.
+
+The [pathgrid corpus](#authored-navmesh-corpus) says what the generator's INPUT
+should look like. This says what its OUTPUT should have been, which is a
+sharper signal: a cell where the mesh is visibly wrong gets fixed by hand --
+snap a crack shut, tilt a ramp to match the stairs under it, fill a hole -- and
+the corrected mesh becomes a target to score against.
+
+Corrections live in `tests/navmesh_fixed/<plugin>/<cell>.json`, separate from
+`tests/navmesh_authored/` because they answer a different question and apply to
+**any** cell of **any** plugin, not only the seven Bruma name-matches.
+
+### Ops AND result, not one or the other
+
+Each file stores both:
+
+- **`ops`** -- the reviewable changelist (`move_vert`, `snap_vert`, `add_tri`,
+  `del_tri`, `set_door`). This is what says *what was being fixed*, which is
+  the part that tells the generator what to learn.
+- **`result`** -- the finished `verts`/`tris`/`doors`. This is the scoring
+  target, and it never goes stale.
+
+`base_hash` pins the generated mesh the ops were authored against (SHA-1 over
+vertices rounded to 0.01u and triangle indices; the rounding absorbs float
+jitter that moves nothing a human would call different). When the generator
+improves, the hash stops matching and `is_stale` reports it: the **ops** are
+then suspect, but `result` is still a valid target. Storing only ops would lose
+the target on every generator change; storing only the result would lose the
+intent.
+
+### Deletions tombstone
+
+`replay` sets a deleted triangle to `None` and compacts only at the end, so
+every op keeps addressing triangles by their ORIGINAL index. The page, the
+changelist and the ops all speak the same index space, and an op list stays
+order-independent with respect to deletions.
+
+### Door triangles are editable
+
+A door triangle is marked by bit 10 of an NVNM triangle's Flags (see
+[flags vs cover flags](#nvnm-flags-vs-cover-flags)). Our own door triangles are
+identified with production's `corridor._tri_carries_door`, not a second
+predicate, so what the editor marks is what the writer would flag.
+
+This immediately showed a real defect: `BrumaChapelHall` has **one** authored
+door triangle (224) where we flag **seven** (110, 140, 157, 173-176) -- our
+door quad fragments where Bethesda's is a single triangle.

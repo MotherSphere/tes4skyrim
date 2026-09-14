@@ -26,9 +26,16 @@ import numpy as np
 from asset_convert.collision import collision_extract as ce
 from asset_convert.nif.sse_nif import read_nif
 from asset_convert.sources.bsa_extract import read_bsa_files
-from asset_convert.sources.skyrim_assets import get_asset_bytes
+from asset_convert.sources.skyrim_assets import find_skyrim_data, get_asset_bytes
 from tes5_import.base.tes5_reader import subrecords, walk
 from tes5_import.navmesh.world import place, rot_matrix
+
+
+def master_esm():
+    """Skyrim.esm beside the SSE install, or None."""
+    data = find_skyrim_data()
+    p = os.path.join(data, 'Skyrim.esm') if data else None
+    return p if p and os.path.isfile(p) else None
 
 #: Default Vortex staging root; `stagingPath` in Data/vortex.deployment.json.
 STAGING = r'C:\Other Games\Mod Staging\skyrimse'
@@ -91,19 +98,36 @@ def _placement(body):
     return base, pos, rot, scale
 
 
+def _models_in(path):
+    """`{base FormID: MODL}` for every model-bearing base record in a file."""
+    data, start = _read(path)
+    out = {}
+    for rec, _st in walk(data, span=(start, len(data))):
+        if rec.sig in _MODEL_SIGS:
+            m = _modl(rec.body)
+            if m:
+                out[rec.form_id] = m
+    return out
+
+
 def cell_refrs(esm, cell_name):
-    """`(models, refrs)`: base FormID -> MODL, and this cell's placements."""
+    """`(models, refrs)`: base FormID -> MODL, and this cell's placements.
+
+    Bruma places far more VANILLA bases than its own, so the master is loaded
+    first and the plugin's own records overlay it.
+
+    See: docs/commentary/tes5_import_navmesh.md#vanilla-bases-need-the-master
+    """
+    master = master_esm()
+    models = _models_in(master) if master else {}
+    models.update(_models_in(esm))
     data, start = _read(esm)
     target = None
-    models = {}
     want = cell_name.lower()
     for rec, _st in walk(data, span=(start, len(data))):
         if rec.sig == b'CELL' and _edid(rec.body).lower() == want:
             target = rec.form_id
-        elif rec.sig in _MODEL_SIGS:
-            m = _modl(rec.body)
-            if m:
-                models[rec.form_id] = m
+            break
     if target is None:
         return {}, []
     refrs = []

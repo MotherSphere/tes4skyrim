@@ -62,12 +62,19 @@ def _meshes_by_cell(path):
     return out
 
 
+#: Bit 10 of an NVNM triangle's Flags: the triangle a door stands on.
+TRI_FLAG_DOOR = 0x0400
+
+#: Index of Flags in the `'<6h2H'` triangle; index 7 is COVER flags, not these.
+TRI_FLAGS_FIELD = 6
+
+
 def _as_arrays(meshes):
     """Concatenate NavMesh records into flat `(verts, tris)` render arrays.
 
-    NVNM stores vertices as a flat float run and triangles as `6h2H`, of which
-    only the first three shorts are vertex indices; the rest are neighbour and
-    flag fields the renderer does not draw.
+    NVNM stores vertices as a flat float run and triangles as `6h2H`: the
+    first three shorts are vertex indices, the next three neighbours, and the
+    last ushort the flags.
     """
     verts, tris = [], []
     for nm in meshes:
@@ -76,6 +83,36 @@ def _as_arrays(meshes):
         verts += [(v[i], v[i + 1], v[i + 2]) for i in range(0, len(v), 3)]
         tris += [(t[0] + base, t[1] + base, t[2] + base) for t in nm.tris]
     return verts, tris
+
+
+def door_triangles(meshes):
+    """Indices (into the concatenated tri list) of door-flagged triangles.
+
+    Cross-check any change here against each mesh's `door_tris`, the NVNM
+    Doors array, which names the same triangles independently.
+
+    See: docs/commentary/tes5_import_navmesh.md#nvnm-flags-vs-cover-flags
+    """
+    out, n = [], 0
+    for nm in meshes:
+        for t in nm.tris:
+            if t[TRI_FLAGS_FIELD] & TRI_FLAG_DOOR:
+                out.append(n)
+            n += 1
+    return out
+
+
+def load_authored_full(path, cell_name):
+    """`(verts, tris, door_tri_indices)` for one authored cell."""
+    names = cell_editor_ids(path)
+    want = str(cell_name).lower()
+    fids = [f for f, e in names.items() if e.lower() == want]
+    if not fids:
+        return [], [], []
+    by_cell = _meshes_by_cell(path)
+    meshes = [m for f in fids for m in by_cell.get(f, [])]
+    verts, tris = _as_arrays(meshes)
+    return verts, tris, door_triangles(meshes)
 
 
 def load_authored(path, cell_name):
