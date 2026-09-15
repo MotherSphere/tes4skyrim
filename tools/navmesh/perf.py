@@ -120,7 +120,7 @@ def install_stage_timers():
 
     _wrap(corridor_union, 'build_union_mesh', 'corridor_union.build_union_mesh')
     for fn in ('_split_plan_overlaps', '_merge_at_pathgrid_nodes',
-               '_stitch_shared_nodes', '_split_t_junctions', '_weld_sheets',
+               'stitch_shared_nodes', 'split_t_junctions', '_weld_sheets',
                '_triangulate', '_emit_surfaces'):
         label = 'corridor_union.' + fn
         _NESTED.add(label)

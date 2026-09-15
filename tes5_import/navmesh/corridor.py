@@ -1228,7 +1228,7 @@ def build_corridors(refr_recs, base_model_by_fid, get_collision, nodes, edges,
         door_pins=door_pins,
         node_pins=[(nodes[i][0], nodes[i][1]) for i in range(len(nodes))],
         ground_ok=_outline_ground_ok(blocking, walkable),
-        ledge_reach=_ledge_reach(blocking, walkable))
+        ledge_reach=_ledge_reach(blocking, walkable), surface=sample)
 
     verts = [tuple(float(c) for c in v) for v in verts]
     tris = [tuple(int(i) for i in t) for t in tris]

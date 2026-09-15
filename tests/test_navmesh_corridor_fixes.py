@@ -17,7 +17,8 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from tes5_import.navmesh import clean_validate, corridor, params, union_cdt
+from tes5_import.navmesh import (clean_decimate, clean_validate, corridor,
+                                 params, union_cdt)
 
 
 class _Sampler(object):
@@ -97,6 +98,32 @@ def test_overlapping_plateaus_keep_the_chord():
     sample = _Sampler(regions)
     assert corridor._surface_profile(sample, (0.0, 0.0, -1248.0),
                                      (200.0, 0.0, -1184.0), half=64.0) is None
+
+
+def test_needle_split_sits_on_the_floor_under_it():
+    """A split spanning two levels takes the ground, not the chord.
+
+    ImperialDungeon01's ramp foot: bisecting the -590 to -632 edge put the new
+    vertex at the chord's -614.6, 17.6u above the -632 floor there, leaving the
+    floor rim and ramp rim as parallel boundaries over the same ground.
+    """
+    verts = [[0.0, 0.0, -590.0], [100.0, 0.0, -632.0]]
+    sample = _Sampler([(-500.0, -500.0, 500.0, 500.0, -632.0),
+                       (-500.0, -500.0, 20.0, 500.0, -590.0)])
+    mid = clean_decimate._apex_split_point(verts, 0, 1, (60.0, 40.0, -632.0),
+                                           100.0, sample)
+    assert mid[2] == pytest.approx(-632.0)
+    chord = clean_decimate._apex_split_point(verts, 0, 1, (60.0, 40.0, -632.0),
+                                             100.0)
+    assert chord[2] == pytest.approx(-616.88)
+
+
+def test_needle_split_keeps_the_chord_without_a_sampler():
+    """No oracle: the split is exactly where it always was."""
+    verts = [[0.0, 0.0, 0.0], [100.0, 0.0, 40.0]]
+    mid = clean_decimate._apex_split_point(verts, 0, 1, (50.0, 10.0, 0.0),
+                                           100.0)
+    assert mid[2] == pytest.approx(25.6)
 
 
 def test_blocked_stations_take_neighbour_widths():

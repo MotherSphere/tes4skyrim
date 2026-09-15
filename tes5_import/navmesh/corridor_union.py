@@ -41,7 +41,7 @@ triangulated on its own:
      across several sheets, which overlapped at the same height and duplicated
      ground — 7% of triangles stacked).
   3. Each sheet is unioned, triangulated, and lifted independently, then
-     `_weld_sheets` (3D radius weld) and `_split_t_junctions` rejoin sheets that
+     `_weld_sheets` (3D radius weld) and `split_t_junctions` rejoin sheets that
      abut on one floor, so the surface stays connected across a sheet boundary.
 
 HEIGHT — the vertex, not the triangle, owns it
@@ -97,8 +97,8 @@ from .union_mesh import (
     _destack as _destack,
     _drop_walls as _drop_walls,
     _merge_at_pathgrid_nodes as _merge_at_pathgrid_nodes,
-    _split_t_junctions as _split_t_junctions,
-    _stitch_shared_nodes as _stitch_shared_nodes,
+    split_t_junctions as split_t_junctions,
+    stitch_shared_nodes as stitch_shared_nodes,
     _tri_overlaps_mesh as _tri_overlaps_mesh,
     _weld_sheets as _weld_sheets,
 )
@@ -424,13 +424,13 @@ def _finish_union(verts, tris, strips, node_pts, node_half, stitch_nodes,
 
     See: docs/commentary/tes5_import_navmesh.md#t-junctions-are-split-three-times
     """
-    tris = _split_t_junctions(verts, tris)
+    tris = split_t_junctions(verts, tris)
     verts, tris = _merge_at_pathgrid_nodes(verts, tris, node_pts, node_half)
     tris = _destack(verts, tris)
-    tris = _stitch_shared_nodes(verts, tris, stitch_nodes)
-    tris = _split_t_junctions(verts, tris)
+    tris = stitch_shared_nodes(verts, tris, stitch_nodes)
+    tris = split_t_junctions(verts, tris)
     tris = _drop_walls(verts, tris, strips)
-    tris = _split_t_junctions(verts, tris)
+    tris = split_t_junctions(verts, tris)
     if probe_only:
         return verts, tris
     tris = _fill_boundary_notches(verts, tris, strips)

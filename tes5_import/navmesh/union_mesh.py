@@ -607,7 +607,7 @@ def _stitch_round(verts, tris, allow_overlap):
     return [t for t in out + added if len(set(t)) == 3], True
 
 
-def _stitch_shared_nodes(verts, tris, stitch_nodes):
+def stitch_shared_nodes(verts, tris, stitch_nodes):
     """Give sheets meeting at a node REAL shared edges, not mere contact.
 
     Runs to convergence: each round either bridges a junction, opens a fan,
@@ -937,7 +937,7 @@ def _apply_splits(tris, splits):
     return [t for t in out if len(set(t)) == 3], changed
 
 
-def _split_t_junctions(verts, tris):
+def split_t_junctions(verts, tris):
     """Split a border edge another sheet's vertex lies on, sealing cracks.
 
     Projects in PLAN with a separate Z window, so a stair fold whose vertex

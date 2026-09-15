@@ -417,14 +417,14 @@ def _decimate_round(verts, tris, pin, on_seam, min_edge, budget, area_lost,
 
 
 def decimate(verts, tris, pinned_xy=None, seam_bounds=None, rounds=None,
-             allow_split=True, ground_ok=None):
+             allow_split=True, ground_ok=None, surface=None):
     """Collapse sliver-producing SHORT edges into near-equilateral triangles.
 
     pinned_xy: [(x, y), ...] positions that must survive (door thresholds).
     seam_bounds: (minx, miny, maxx, maxy) exterior cell rectangle, whose
     boundary vertices only ever collapse under the strict collinear rule.
-    ground_ok: f(a, v, b) -> True when the concave notch a-v-b may be cut
-    straight; None keeps the fixed concave allowance.
+    ground_ok: f(a, v, b) -> True when a concave notch may be cut straight.
+    surface: f(x, y, z) -> the walkable height a needle split sits on.
     See: docs/commentary/tes5_import_navmesh.md#decimation
     """
     tris = [tuple(int(i) for i in t) for t in tris]
@@ -452,7 +452,7 @@ def decimate(verts, tris, pinned_xy=None, seam_bounds=None, rounds=None,
         if got is None:
             break
         tris, area_lost, progressed = got
-        split = (_split_needles(verts, tris, pin, on_seam)
+        split = (_split_needles(verts, tris, pin, on_seam, surface)
                  if allow_split else None)
         if split is not None:
             tris = split
@@ -470,9 +470,11 @@ def _edge_owners(tris):
     return edge_tris
 
 
-def _apex_split_point(verts, a, b, apex, d):
+def _apex_split_point(verts, a, b, apex, d, surface=None):
     """Where to cut edge a-b: the apex's projection, clamped off both ends.
 
+    The Z is the chord's, then snapped onto walkable collision within a step:
+    an edge spanning two levels has no ground under its chord.
     See: docs/commentary/tes5_import_navmesh.md#split-at-the-apex-projection
     """
     dx_, dy_ = verts[b][0] - verts[a][0], verts[b][1] - verts[a][1]
@@ -480,9 +482,15 @@ def _apex_split_point(verts, a, b, apex, d):
               + (apex[1] - verts[a][1]) * dy_) / (d * d))
     tlo = params.DECIMATE_MIN_EDGE / d
     tproj = max(tlo, min(1.0 - tlo, tproj))
-    return (verts[a][0] + dx_ * tproj,
-            verts[a][1] + dy_ * tproj,
-            verts[a][2] + (verts[b][2] - verts[a][2]) * tproj)
+    px = verts[a][0] + dx_ * tproj
+    py = verts[a][1] + dy_ * tproj
+    pz = verts[a][2] + (verts[b][2] - verts[a][2]) * tproj
+    if surface is not None:
+        near = verts[a][2] if tproj <= 0.5 else verts[b][2]
+        got = surface(px, py, near)
+        if got is not None and abs(got - pz) <= params.MAX_CLIMB:
+            pz = got
+    return (px, py, pz)
 
 
 def _split_halves(verts, tris, owners, a, b, mid):
@@ -530,7 +538,7 @@ def _splittable_edge(verts, tris, t, pin, on_seam, edge_tris, consumed):
     return a, b, owners, verts[t[(k + 2) % 3]], d
 
 
-def _split_needles(verts, tris, pin, on_seam):
+def _split_needles(verts, tris, pin, on_seam, surface=None):
     """Bisect the LONGEST edge of triangles violating MAX_EDGE_RATIO.
 
     Only edges >= 2 * DECIMATE_MIN_EDGE split, so the pass terminates.  An
@@ -551,7 +559,7 @@ def _split_needles(verts, tris, pin, on_seam):
         if got is None:
             continue
         a, b, owners, apex, d = got
-        mid = _apex_split_point(verts, a, b, apex, d)
+        mid = _apex_split_point(verts, a, b, apex, d, surface)
         made = _split_halves(verts, tris, owners, a, b, mid)
         if made is None:
             continue

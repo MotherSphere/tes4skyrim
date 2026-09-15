@@ -174,14 +174,15 @@ def _make_manifold(verts, tris, pin_xy=None):
 
 def finalize(verts, tris, cs=None, pinned=None, doors=None, cell_bounds=None,
              pin_xy=None, door_pins=None, node_pins=None, ground_ok=None,
-             ledge_reach=None):
+             ledge_reach=None, surface=None):
     """V1 cleanup: weld, guarantee manifold, drop stray islands, compact.
 
     Ledges come back as MARKS (centroids) because later passes shift indices;
     the caller resolves them with `_resolve_ledges` LAST.  Returns (verts,
     tris) as numpy arrays (float verts, int32 tris).  `ground_ok` is the
     collision oracle `decimate` straightens concave notches with;
-    `ledge_reach` the one `find_ledge_links` pushes lips to the edge with.
+    `ledge_reach` the one `find_ledge_links` pushes lips with; `surface` the
+    walkable height a needle split sits on.
     See: docs/commentary/tes5_import_navmesh.md#finalize-is-a-backstop
     """
     verts, tris = _weld_coincident(verts, tris)
@@ -205,7 +206,8 @@ def finalize(verts, tris, cs=None, pinned=None, doors=None, cell_bounds=None,
              + [(n[0], n[1], params.DECIMATE_PIN_NODE_RADIUS)
                 for n in (node_pins or ())])
     verts, tris = decimate(verts, tris, pinned_xy=_pins,
-                           seam_bounds=cell_bounds, ground_ok=ground_ok)
+                           seam_bounds=cell_bounds, ground_ok=ground_ok,
+                           surface=surface)
     # The "little bits around the outside": whatever badly-shaped small
     # triangles remain after collapses and flips sit where the outline simply
     # does not admit a good triangle — remove them rather than ship needles.
@@ -242,21 +244,26 @@ def finalize(verts, tris, cs=None, pinned=None, doors=None, cell_bounds=None,
     ledge_marks = [(_centroid(verts, tris[hi]), _centroid(verts, tris[lo]),
                     drop) for (hi, lo, drop) in ledge_pairs]
     tris = _make_manifold(verts, tris, pin_xy=pin_xy)
-    # POST-CLEANUP JUNCTION REPAIR.  Decimation can land two components'
-    # boundary vertices on the exact same position (a collapse target is
-    # another vertex's position) — coincident, but different indices, so
-    # nothing upstream can see the contact.  The stitch is re-run here: its
-    # first act each round is to fuse coincident vertices, after which its
-    # fan-open/bridge machinery (with all its guards) turns the contact into
-    # shared edges.  Measured: Moranda02's doorstep quad ended 0.00u from the
-    # main mesh, vertex-coincident and edge-disconnected.
-    from .corridor_union import _stitch_shared_nodes
-    verts = [list(map(float, v)) for v in verts]
-    tris = _stitch_shared_nodes(verts, [tuple(t) for t in tris], [])
+    verts, tris = _repair_junctions_after_cleanup(verts, tris)
     tris = _make_manifold(verts, tris, pin_xy=pin_xy)
     tris = _drop_unreachable_islands(verts, tris, doors, cell_bounds, pin_xy)
     verts, tris = _compact(verts, tris)
     return verts, tris, ledge_marks
+
+
+def _repair_junctions_after_cleanup(verts, tris):
+    """(verts, tris) with contact decimation created turned into shared edges.
+
+    A collapse target is another vertex's position, so two components' rims can
+    end up coincident under different indices; a needle split mints a vertex ON
+    a border edge, leaving the sheet across it a parallel rim over the same
+    ground.  Neither is visible upstream, where both passes already ran.
+    See: docs/commentary/tes5_import_navmesh.md#split-at-the-apex-projection
+    """
+    from .corridor_union import split_t_junctions, stitch_shared_nodes
+    verts = [list(map(float, v)) for v in verts]
+    tris = stitch_shared_nodes(verts, [tuple(t) for t in tris], [])
+    return verts, split_t_junctions(verts, tris)
 
 
 #: How far inside a triangle a walked sample must fall to count as crossing it.
