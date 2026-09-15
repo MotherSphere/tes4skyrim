@@ -82,15 +82,10 @@ from core.worker_budget import worker_count
 MAX_SLOPE_DEG = 46.0
 _COS_MAX_SLOPE = math.cos(math.radians(MAX_SLOPE_DEG))
 
-# Two distinct scale factors, both measured empirically against the source meshes
-# (exactly, on all three axes — do not "simplify" these to one number):
-#
-#   CMS:        decode_cms() returns havok units already divided by 7, so
-#               game = havok * 70.0   (= 7 game-per-havok / the 0.1 _HAVOK_SCALE)
-#   primitives: bhkConvexVerticesShape/Box/Capsule/Sphere vertices are plain
-#               havok units, so game = havok * 10.0  (= 1 / _HAVOK_SCALE)
+#: Havok->game units. See: docs/commentary/asset_convert_collision.md#collision-extraction-scale
 CMS_TO_GAME = 70.0
-PRIM_TO_GAME = 10.0
+#: Havok->game units. See: docs/commentary/asset_convert_collision.md#collision-extraction-scale
+PRIM_TO_GAME = 70.0
 
 # OblivionLayer values survive conversion in bhkRigidBody.havok_col_filter.layer.
 # Only real world collision supports/obstructs an NPC.
@@ -286,8 +281,6 @@ def collision_from_data(data) -> Optional[dict]:
                 except Exception:
                     tris = []
         else:
-            # Primitive (convex/box/capsule/sphere/list) — ~28% of meshes, and
-            # where barrels/crates/sacks live.  Different scale factor than CMS.
             tris = _primitive_tris(shape)
 
         for (a, b, c) in tris:
