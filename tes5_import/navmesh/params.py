@@ -43,10 +43,7 @@ MAX_SLOPE_DEG = 46.0
 MAX_SIMPLIFY_ERR = 12.0
 # Contours shorter than this many voxels are noise (specks behind furniture).
 MIN_REGION_VOXELS = 8
-# Target navmesh triangle edge length (game units).  Simplification never makes
-# an edge longer than this, so triangles come out roughly uniform in size rather
-# than as fans of long thin slivers.  ~vanilla interior tri scale.  Scaled by the
-# heightfield's cell size, so an exterior (CS 32) allows 2x longer edges.
+#: Hex-lattice spacing and outline densify step (u); 192 was measured and rejected, see #tri-target-edge-192.
 TRI_TARGET_EDGE = 128.0
 # Triangle shape bound during simplification: longest_edge^2 / (4 * area).  An
 # equilateral triangle scores 0.58; slivers score high.  A collapse or a smooth
@@ -265,10 +262,6 @@ RIBBON_GROW_SLAB_Z_BOTTOM = MAX_CLIMB
 # Bisection rounds used to place the stop exactly at the wall once the swept
 # step has detected one.  4 rounds resolve an 8u step to 0.5u.
 RIBBON_GROW_BISECT = 4
-# Two edges count as opposing parallel corridors only when their directions
-# agree to at least this |dot|.  A crossing/diverging edge is NOT a corridor
-# wall and must not cap width (that pinched every dense junction).
-RIBBON_GROW_PARALLEL_DOT = 0.70
 # An edge steeper than this (rise/run) is a STAIRCASE or ramp and is NOT grown:
 # its ribbon is a tilted plane, so a perpendicular rail leaves the treads at
 # once — off the side of the flight, or through the stairwell wall.  Stairs keep
@@ -353,12 +346,6 @@ RIBBON_GROW_MIN_HALF = 16.0
 # stops here rather than ballooning across a whole exterior cell.  ~1.5 doorways;
 # wide enough for room coverage, bounded enough that a doorway leak is a nub.
 RIBBON_GROW_MAX_HALF = 160.0
-# When measuring the distance to the nearest OTHER edge's centerline, ignore
-# edges that share a node with this one (they meet AT the junction, they are not
-# an opposing wall of corridor) and edges whose centerline Z is more than this
-# from the trial point's Z (a corridor on the storey above must not stop growth
-# on the floor below).
-RIBBON_GROW_NEIGHBOUR_ZTOL = 96.0
 
 # --- Limits ----------------------------------------------------------------------
 # Hard cap on grid dimension per cell; beyond this CS is coarsened.  Guards

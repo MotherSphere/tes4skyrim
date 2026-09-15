@@ -138,19 +138,54 @@ def _link_pair(tris, comps, bounds, verts, i, j, out):
         used.add(t1)
         used.add(t2)
         made += 1
-        out.append((t1, t2, drop) if z1 >= z2 else (t2, t1, drop))
+        if z1 >= z2:
+            out.append((t1, t2, drop, (a1, b1), tris[t1]))
+        else:
+            out.append((t2, t1, drop, (a2, b2), tris[t2]))
 
 
-def find_ledge_links(verts, tris):
+#: How far short of the floor's real edge a pushed lip stops.
+LIP_STANDOFF = 2.0
+
+
+def _push_lip(verts, lip, hi_tri, reach, moved):
+    """Move the lip's two vertices out along the lip's OUTWARD normal to the
+    floor's real edge; False if a wall stands in the way (no actor can drop
+    over a railing).
+
+    See: docs/commentary/tes5_import_navmesh.md#ledge-lip-is-pushed-to-the-edge
+    """
+    a, b = lip
+    apex = next(k for k in hi_tri if k not in (a, b))
+    mx = 0.5 * (verts[a][0] + verts[b][0])
+    my = 0.5 * (verts[a][1] + verts[b][1])
+    mz = 0.5 * (verts[a][2] + verts[b][2])
+    ex, ey = verts[b][0] - verts[a][0], verts[b][1] - verts[a][1]
+    run = math.hypot(ex, ey)
+    if run < 1e-6:
+        return True
+    nx, ny = -ey / run, ex / run
+    if (verts[apex][0] - mx) * nx + (verts[apex][1] - my) * ny > 0.0:
+        nx, ny = -nx, -ny
+    dist, wall = reach(mx, my, mz, nx, ny, params.ISLAND_BRIDGE_XY)
+    if wall:
+        return False
+    dist -= LIP_STANDOFF
+    for k in (a, b):
+        if dist > 0.0 and k not in moved:
+            verts[k][0] += nx * dist
+            verts[k][1] += ny * dist
+            moved.add(k)
+    return True
+
+
+def find_ledge_links(verts, tris, reach=None):
     """Find DROP-DOWNs between components: [(tri_hi, tri_lo, drop), ...].
 
-    Oblivion expressed a drop-down as two disconnected pathgrid islands, so the
-    navmesh mirrors them as separate components with no route between.  Skyrim
-    expresses it as an NVNM Edge Link (Ledge Down / Ledge Up), NOT geometry.
-
-    This only DETECTS the pairs; `pgrd_to_navm` writes the links.  Both sides
-    must ALREADY be separate components, which is what keeps stairs and ramps
-    out of it.
+    Both sides must ALREADY be separate components (stairs and ramps never
+    enter); `pgrd_to_navm` writes the links.  With `reach` (see
+    `corridor._ledge_reach`) each lip is pushed to the floor's edge, editing
+    `verts` in place, and a railing-blocked pair is dropped.
 
     See: docs/commentary/tes5_import_navmesh.md#ledge-links-spread-along-the-lip
     """
@@ -161,10 +196,14 @@ def find_ledge_links(verts, tris):
     if len(comps) < 2:
         return []
     bounds = [_boundary_edges(tris, c) for c in comps]
-    out = []
+    pairs = []
     for i in range(len(comps)):
         for j in range(i + 1, len(comps)):
-            _link_pair(tris, comps, bounds, verts, i, j, out)
+            _link_pair(tris, comps, bounds, verts, i, j, pairs)
+    out, moved = [], set()
+    for (hi, lo, drop, lip, hi_tri) in pairs:
+        if reach is None or _push_lip(verts, lip, hi_tri, reach, moved):
+            out.append((hi, lo, drop))
     return out
 
 

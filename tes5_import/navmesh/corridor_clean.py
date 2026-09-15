@@ -173,12 +173,15 @@ def _make_manifold(verts, tris, pin_xy=None):
 
 
 def finalize(verts, tris, cs=None, pinned=None, doors=None, cell_bounds=None,
-             pin_xy=None, door_pins=None, node_pins=None):
+             pin_xy=None, door_pins=None, node_pins=None, ground_ok=None,
+             ledge_reach=None):
     """V1 cleanup: weld, guarantee manifold, drop stray islands, compact.
 
     Ledges come back as MARKS (centroids) because later passes shift indices;
     the caller resolves them with `_resolve_ledges` LAST.  Returns (verts,
-    tris) as numpy arrays (float verts, int32 tris).
+    tris) as numpy arrays (float verts, int32 tris).  `ground_ok` is the
+    collision oracle `decimate` straightens concave notches with;
+    `ledge_reach` the one `find_ledge_links` pushes lips to the edge with.
     See: docs/commentary/tes5_import_navmesh.md#finalize-is-a-backstop
     """
     verts, tris = _weld_coincident(verts, tris)
@@ -202,7 +205,7 @@ def finalize(verts, tris, cs=None, pinned=None, doors=None, cell_bounds=None,
              + [(n[0], n[1], params.DECIMATE_PIN_NODE_RADIUS)
                 for n in (node_pins or ())])
     verts, tris = decimate(verts, tris, pinned_xy=_pins,
-                           seam_bounds=cell_bounds)
+                           seam_bounds=cell_bounds, ground_ok=ground_ok)
     # The "little bits around the outside": whatever badly-shaped small
     # triangles remain after collapses and flips sit where the outline simply
     # does not admit a good triangle — remove them rather than ship needles.
@@ -217,7 +220,7 @@ def finalize(verts, tris, cs=None, pinned=None, doors=None, cell_bounds=None,
     # ~10% of a dense cell's whole build for marginal further gain).
     verts, tris = decimate(verts, tris, pinned_xy=_pins,
                            seam_bounds=cell_bounds, rounds=2,
-                           allow_split=False)
+                           allow_split=False, ground_ok=ground_ok)
     tris = cull_boundary_slivers(verts, tris, pinned_xy=_pins, pin_xy=pin_xy,
                                  seam_bounds=cell_bounds,
                                  budget_frac=params.CULL_SLIVER_AREA_FRAC
@@ -232,11 +235,7 @@ def finalize(verts, tris, cs=None, pinned=None, doors=None, cell_bounds=None,
     # BEFORE find_ledge_links so a flap is never mistaken for a mezzanine an
     # actor is meant to drop off.
     tris = cull_open_flaps(verts, tris, pin_xy)
-    # Find drop-down storeys BEFORE the island cull: a mezzanine an actor is
-    # meant to step off is a legitimate component and must not be culled as a
-    # stray scrap.  These become NVNM Ledge Up/Down EDGE LINKS (Skyrim's own
-    # drop-down mechanism), not bridging geometry — see find_ledge_links.
-    ledge_pairs = find_ledge_links(verts, tris)
+    ledge_pairs = find_ledge_links(verts, tris, reach=ledge_reach)
     # Identify each ledge triangle by its CENTROID, not its index: the passes
     # below drop and reorder both triangles and vertices, so an index captured
     # now is meaningless afterwards.  The centroid survives all of them.

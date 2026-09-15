@@ -399,11 +399,7 @@ class TestNativeGrowGuards:
                                    self._tri(np, 8.936455989415117e+17)])
         with pytest.raises(ValueError):
             cg._native.grow_strips(
-                blocking, None,
-                np.zeros((0, 2), dtype=np.float64),
-                np.zeros((0, 2), dtype=np.int32),
-                np.zeros(0, dtype=np.float64),
-                self._stations(np), cg._native_params())
+                blocking, None, self._stations(np), cg._native_params())
 
     def test_non_finite_coordinate_raises(self):
         """NaN/Inf propagate through the extent maths, so reject them up front."""
@@ -414,11 +410,7 @@ class TestNativeGrowGuards:
             blocking = np.concatenate([self._tri(np, 0.0), self._tri(np, bad)])
             with pytest.raises(ValueError):
                 cg._native.grow_strips(
-                    blocking, None,
-                    np.zeros((0, 2), dtype=np.float64),
-                    np.zeros((0, 2), dtype=np.int32),
-                    np.zeros(0, dtype=np.float64),
-                    self._stations(np), cg._native_params())
+                    blocking, None, self._stations(np), cg._native_params())
 
     def test_normal_soup_still_grows(self):
         """The guards must not reject legitimate cell-sized geometry."""
@@ -428,11 +420,7 @@ class TestNativeGrowGuards:
         # A 4096-unit exterior cell is 33x33 buckets -- far under the ceiling.
         blocking = np.concatenate([self._tri(np, 0.0), self._tri(np, 4096.0)])
         out = cg._native.grow_strips(
-            blocking, None,
-            np.zeros((0, 2), dtype=np.float64),
-            np.zeros((0, 2), dtype=np.int32),
-            np.zeros(0, dtype=np.float64),
-            self._stations(np), cg._native_params())
+            blocking, None, self._stations(np), cg._native_params())
         assert len(out) == 1
         assert out[0] >= 0.0
 

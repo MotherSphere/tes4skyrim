@@ -45,13 +45,14 @@ _INDEX = {}
 
 
 def index_for(export):
-    """The shared NavIndex for `export`, built once per process.
+    """The shared NavIndex for `export`, keyed on its normalized path.
 
     See: docs/commentary/tes5_import_navmesh.md#editor-navindex-cache
     """
-    if export not in _INDEX:
-        _INDEX[export] = NavIndex(export)
-    return _INDEX[export]
+    key = os.path.normcase(os.path.normpath(export))
+    if key not in _INDEX:
+        _INDEX[key] = NavIndex(export)
+    return _INDEX[key]
 
 
 def corpus_path(cell):

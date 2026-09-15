@@ -5,7 +5,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tools.navmesh.meshedit import is_stale, make_entry, mesh_hash, replay
+from tools.navmesh import meshedit
+from tools.navmesh.meshedit import (
+    free_cell_name, is_stale, make_entry, mesh_hash, replay,
+)
 
 VERTS = [[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0], [20, 0, 0]]
 TRIS = [[0, 1, 2], [0, 2, 3], [1, 4, 2]]
@@ -126,3 +129,23 @@ def test_float_jitter_is_not_a_change():
     """Sub-0.01u movement must not invalidate a correction."""
     jittered = [[c + 1e-5 for c in p] for p in VERTS]
     assert mesh_hash(jittered, TRIS) == mesh_hash(VERTS, TRIS)
+
+
+def test_free_name_is_the_cell_when_unused(tmp_path, monkeypatch):
+    """A cell with no correction saves under its own name."""
+    monkeypatch.setattr(meshedit, 'FIXES', str(tmp_path))
+    assert free_cell_name('Oblivion.esm', 'SomeCell') == 'SomeCell'
+
+
+def test_free_name_never_reuses_an_existing_file(tmp_path, monkeypatch):
+    """A second reading of one cell must not overwrite the first.
+
+    A stale correction's `result` is the only record of what the mesh should
+    have looked like, so saving again numbers the file instead.
+    """
+    monkeypatch.setattr(meshedit, 'FIXES', str(tmp_path))
+    entry = make_entry('Oblivion.esm', 'C', VERTS, TRIS, [])
+    meshedit.save_fix('Oblivion.esm', 'C', entry)
+    assert free_cell_name('Oblivion.esm', 'C') == 'C.2'
+    meshedit.save_fix('Oblivion.esm', 'C.2', entry)
+    assert free_cell_name('Oblivion.esm', 'C') == 'C.3'

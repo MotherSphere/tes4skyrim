@@ -311,105 +311,10 @@ inline bool walk_sample(const TriGrid& g, double x, double y, double near_z,
     return have;
 }
 
-// --------------------------------------------------------------------------
-// Neighbour field: nearest roughly-parallel OTHER edge centerline.
-// --------------------------------------------------------------------------
-struct Seg { double ax, ay, bx, by, dx, dy, midz; int i, j; };
-
-struct NeighbourField {
-    std::vector<Seg> segs;
-    double minx = 0.0, miny = 0.0, cell = 256.0;
-    std::unordered_map<long long, std::vector<int>> grid;
-
-    void build(const double* nodes, size_t nnodes,
-               const int* edges, size_t nedges, const double* node_z) {
-        double gminx = 1e300, gminy = 1e300;
-        for (size_t e = 0; e < nedges; ++e) {
-            const int i = edges[e * 2], j = edges[e * 2 + 1];
-            if (i < 0 || j < 0 || (size_t)i >= nnodes || (size_t)j >= nnodes
-                || i == j) continue;
-            const double ax = nodes[(size_t)i * 2], ay = nodes[(size_t)i * 2 + 1];
-            const double bx = nodes[(size_t)j * 2], by = nodes[(size_t)j * 2 + 1];
-            // A non-finite node makes the bucket span below non-finite and the
-            // insert loop unbounded. Skipping the edge (rather than throwing)
-            // matches how the rest of this builder treats unusable edges.
-            if (!std::isfinite(ax) || !std::isfinite(ay) ||
-                !std::isfinite(bx) || !std::isfinite(by) ||
-                !std::isfinite(node_z[i]) || !std::isfinite(node_z[j]))
-                continue;
-            const double dx = bx - ax, dy = by - ay;
-            const double ln = std::sqrt(dx * dx + dy * dy);
-            if (ln < 1e-6) continue;
-            Seg s;
-            s.ax = ax; s.ay = ay; s.bx = bx; s.by = by;
-            s.dx = dx / ln; s.dy = dy / ln;
-            s.midz = 0.5 * (node_z[i] + node_z[j]);
-            s.i = i; s.j = j;
-            segs.push_back(s);
-            gminx = std::min(gminx, std::min(ax, bx));
-            gminy = std::min(gminy, std::min(ay, by));
-        }
-        if (segs.empty()) return;
-        minx = gminx; miny = gminy;
-        for (size_t si = 0; si < segs.size(); ++si) {
-            const Seg& s = segs[si];
-            // Bounded for the same reason as levels_at's strip grid: the map is
-            // sparse, so an oversized segment has no dense allocation to trip
-            // first and would just grow until memory ran out.
-            const double spanx = (std::max(s.ax, s.bx) - std::min(s.ax, s.bx)) / cell;
-            const double spany = (std::max(s.ay, s.by) - std::min(s.ay, s.by)) / cell;
-            if (spanx > (double)kMaxBuckets || spany > (double)kMaxBuckets ||
-                spanx * spany > (double)kMaxBuckets)
-                throw std::invalid_argument("pathgrid edge span too large");
-            const long long gx0 = (long long)std::floor(
-                (std::min(s.ax, s.bx) - minx) / cell);
-            const long long gx1 = (long long)std::floor(
-                (std::max(s.ax, s.bx) - minx) / cell);
-            const long long gy0 = (long long)std::floor(
-                (std::min(s.ay, s.by) - miny) / cell);
-            const long long gy1 = (long long)std::floor(
-                (std::max(s.ay, s.by) - miny) / cell);
-            for (long long gx = gx0 - 1; gx <= gx1 + 1; ++gx)
-                for (long long gy = gy0 - 1; gy <= gy1 + 1; ++gy)
-                    grid[(gx << 32) ^ (gy & 0xffffffffLL)].push_back((int)si);
-        }
-    }
-
-    // exclude_a/exclude_b are the querying edge's endpoints (-1 when unused).
-    double nearest(double x, double y, double z, int ex_a, int ex_b,
-                   double dirx, double diry, double ztol, double pdot) const {
-        if (segs.empty()) return HUGE_VAL;
-        const long long gx = (long long)std::floor((x - minx) / cell);
-        const long long gy = (long long)std::floor((y - miny) / cell);
-        auto it = grid.find((gx << 32) ^ (gy & 0xffffffffLL));
-        if (it == grid.end()) return HUGE_VAL;
-        double best = HUGE_VAL;
-        for (int si : it->second) {
-            const Seg& s = segs[(size_t)si];
-            if (s.i == ex_a || s.j == ex_a || s.i == ex_b || s.j == ex_b)
-                continue;
-            if (std::fabs(s.midz - z) > ztol) continue;
-            if (std::fabs(s.dx * dirx + s.dy * diry) < pdot) continue;
-            const double ddx = s.bx - s.ax, ddy = s.by - s.ay;
-            const double d2 = ddx * ddx + ddy * ddy;
-            double d;
-            if (d2 < 1e-9) {
-                d = std::hypot(x - s.ax, y - s.ay);
-            } else {
-                double t = ((x - s.ax) * ddx + (y - s.ay) * ddy) / d2;
-                t = std::max(0.0, std::min(1.0, t));
-                d = std::hypot(x - (s.ax + ddx * t), y - (s.ay + ddy * t));
-            }
-            if (d < best) best = d;
-        }
-        return best;
-    }
-};
-
 // Tunables mirrored from params.py, passed in so the two can never drift.
 struct Params {
     double step, cap, min_half, half_width, slab_half_w, slab_depth;
-    double slab_z_bottom, agent_height, max_climb, ztol, pdot;
+    double slab_z_bottom, agent_height, max_climb;
     int bisect;
 };
 
@@ -417,14 +322,10 @@ struct Params {
 // One outward march (mirrors grow_half_width).
 // --------------------------------------------------------------------------
 double grow_half_width(const TriGrid& wall, const TriGrid* walk,
-                       const NeighbourField& field,
                        double cx, double cy, double floor_z,
                        double dirx, double diry, double tanx, double tany,
-                       int ex_a, int ex_b, double lo, const Params& P) {
-    const double nd = field.nearest(cx, cy, floor_z, ex_a, ex_b,
-                                    tanx, tany, P.ztol, P.pdot);
-    const double neighbour_cap = std::isfinite(nd) ? 0.5 * nd : P.cap;
-    const double hard = std::min(P.cap, std::max(lo, neighbour_cap));
+                       double lo, const Params& P) {
+    const double hard = std::max(lo, P.cap);
 
     const double z_lo = floor_z + P.slab_z_bottom;
     const double z_hi = floor_z + P.agent_height;
@@ -475,32 +376,23 @@ PyArrayObject* as_f64(PyObject* o) {
         o, NPY_DOUBLE, 0, 0, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
 }
 
-// grow_strips(blocking, walkable, nodes_xy, edges, node_z, stations, params)
+// grow_strips(blocking, walkable, stations, params)
 //
 // `stations` is an (N, 9) float64 array, one row per march to perform:
 //   cx, cy, cz, dirx, diry, tanx, tany, lo, edge_index
-// `edges` is (E, 2) int32; a station's edge_index selects the endpoint pair to
-// exclude from the neighbour query (-1 for a node disc's own node pair, which
-// the caller encodes by passing that node in both columns).
+// edge_index is the caller's own bookkeeping and is not read here.
 //
 // Returns a float64 array of N grown half-widths.
 PyObject* py_grow_strips(PyObject*, PyObject* args) {
-    PyObject *o_block, *o_walk, *o_nodes, *o_edges, *o_nodez, *o_st, *o_par;
-    if (!PyArg_ParseTuple(args, "OOOOOOO", &o_block, &o_walk, &o_nodes,
-                          &o_edges, &o_nodez, &o_st, &o_par))
+    PyObject *o_block, *o_walk, *o_st, *o_par;
+    if (!PyArg_ParseTuple(args, "OOOO", &o_block, &o_walk, &o_st, &o_par))
         return nullptr;
 
     PyArrayObject* a_block = as_f64(o_block);
-    PyArrayObject* a_nodes = as_f64(o_nodes);
-    PyArrayObject* a_nodez = as_f64(o_nodez);
     PyArrayObject* a_st = as_f64(o_st);
-    PyArrayObject* a_edges = (PyArrayObject*)PyArray_FROMANY(
-        o_edges, NPY_INT32, 0, 0, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
     PyArrayObject* a_walk = (o_walk == Py_None) ? nullptr : as_f64(o_walk);
-    if (!a_block || !a_nodes || !a_nodez || !a_st || !a_edges ||
-        (o_walk != Py_None && !a_walk)) {
-        Py_XDECREF(a_block); Py_XDECREF(a_nodes); Py_XDECREF(a_nodez);
-        Py_XDECREF(a_st); Py_XDECREF(a_edges); Py_XDECREF(a_walk);
+    if (!a_block || !a_st || (o_walk != Py_None && !a_walk)) {
+        Py_XDECREF(a_block); Py_XDECREF(a_st); Py_XDECREF(a_walk);
         return nullptr;
     }
 
@@ -518,28 +410,20 @@ PyObject* py_grow_strips(PyObject*, PyObject* args) {
     P.slab_z_bottom = getd("slab_z_bottom", 12.0);
     P.agent_height = getd("agent_height", 128.0);
     P.max_climb = getd("max_climb", 34.0);
-    P.ztol = getd("ztol", 96.0);
-    P.pdot = getd("pdot", 0.70);
     P.bisect = (int)getd("bisect", 4.0);
 
     const size_t nblock = (size_t)(PyArray_SIZE(a_block) / 9);
     const size_t nwalk = a_walk ? (size_t)(PyArray_SIZE(a_walk) / 9) : 0;
-    const size_t nnodes = (size_t)(PyArray_SIZE(a_nodes) / 2);
-    const size_t nedges = (size_t)(PyArray_SIZE(a_edges) / 2);
     const size_t nst = (size_t)(PyArray_SIZE(a_st) / 9);
 
     const double* blockp = (const double*)PyArray_DATA(a_block);
     const double* walkp = a_walk ? (const double*)PyArray_DATA(a_walk) : nullptr;
-    const double* nodesp = (const double*)PyArray_DATA(a_nodes);
-    const double* nodezp = (const double*)PyArray_DATA(a_nodez);
-    const int* edgesp = (const int*)PyArray_DATA(a_edges);
     const double* stp = (const double*)PyArray_DATA(a_st);
 
     npy_intp dims[1] = {(npy_intp)nst};
     PyArrayObject* out = (PyArrayObject*)PyArray_SimpleNew(1, dims, NPY_DOUBLE);
     if (!out) {
-        Py_DECREF(a_block); Py_DECREF(a_nodes); Py_DECREF(a_nodez);
-        Py_DECREF(a_st); Py_DECREF(a_edges); Py_XDECREF(a_walk);
+        Py_DECREF(a_block); Py_DECREF(a_st); Py_XDECREF(a_walk);
         return nullptr;
     }
     double* outp = (double*)PyArray_DATA(out);
@@ -561,20 +445,12 @@ PyObject* py_grow_strips(PyObject*, PyObject* args) {
         TriGrid wall, walk;
         wall.build(blockp, nblock, 128.0);
         if (walkp) walk.build(walkp, nwalk, 128.0);
-        NeighbourField field;
-        field.build(nodesp, nnodes, edgesp, nedges, nodezp);
 
         for (size_t s = 0; s < nst; ++s) {
             const double* r = &stp[s * 9];
-            const int ei = (int)r[8];
-            int ex_a = -1, ex_b = -1;
-            if (ei >= 0 && (size_t)ei < nedges) {
-                ex_a = edgesp[(size_t)ei * 2];
-                ex_b = edgesp[(size_t)ei * 2 + 1];
-            }
-            outp[s] = grow_half_width(wall, walkp ? &walk : nullptr, field,
+            outp[s] = grow_half_width(wall, walkp ? &walk : nullptr,
                                       r[0], r[1], r[2], r[3], r[4], r[5], r[6],
-                                      ex_a, ex_b, r[7], P);
+                                      r[7], P);
         }
     } catch (const std::bad_alloc&) {
         err = "out of memory building the navmesh triangle index";
@@ -585,8 +461,7 @@ PyObject* py_grow_strips(PyObject*, PyObject* args) {
     }
     Py_END_ALLOW_THREADS
 
-    Py_DECREF(a_block); Py_DECREF(a_nodes); Py_DECREF(a_nodez);
-    Py_DECREF(a_st); Py_DECREF(a_edges); Py_XDECREF(a_walk);
+    Py_DECREF(a_block); Py_DECREF(a_st); Py_XDECREF(a_walk);
     if (!err.empty()) {
         Py_DECREF(out);
         PyErr_SetString(PyExc_ValueError, err.c_str());

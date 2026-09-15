@@ -134,7 +134,8 @@ class _Collapse:
     See: docs/commentary/tes5_import_navmesh.md#decimate-keeps-a-vertex-incidence-map
     """
 
-    def __init__(self, verts, tris, boundary, bnbr, pin, on_seam):
+    def __init__(self, verts, tris, boundary, bnbr, pin, on_seam,
+                 ground_ok=None):
         """Index the triangles by vertex and start with nothing collapsed."""
         self.verts = verts
         self.tris = [tuple(t) for t in tris]
@@ -142,6 +143,7 @@ class _Collapse:
         self.bnbr = bnbr
         self.pin = pin
         self.on_seam = on_seam
+        self.ground_ok = ground_ok
         self.alive = [True] * len(self.tris)
         self.vmap = {}
         for ti, t in enumerate(self.tris):
@@ -214,7 +216,19 @@ class _Collapse:
             return False
         if self.is_convex(vi):
             return err <= params.DECIMATE_SAWTOOTH_DEV
-        return err <= max(tol, CONCAVE_CUT_FRAC * params.RIBBON_HALF_WIDTH)
+        if err <= max(tol, CONCAVE_CUT_FRAC * params.RIBBON_HALF_WIDTH):
+            return True
+        return self.notch_is_open_ground(vi, err)
+
+    def notch_is_open_ground(self, vi, err):
+        """May a deeper concave notch go?  Only with collision saying so.
+
+        See: docs/commentary/tes5_import_navmesh.md#concave-notches-straightened-against-collision
+        """
+        if self.ground_ok is None or err > params.DECIMATE_SAWTOOTH_DEV:
+            return False
+        a, b = self.bnbr[vi]
+        return self.ground_ok(self.verts[a], self.verts[vi], self.verts[b])
 
     def boundary_pair(self, a, b, budget_left):
         """(keep, drop) for two OUTLINE vertices, or None if neither may move.
@@ -375,7 +389,8 @@ def _try_collapse(st, a, b, area_lost, budget):
     return loss
 
 
-def _decimate_round(verts, tris, pin, on_seam, min_edge, budget, area_lost):
+def _decimate_round(verts, tris, pin, on_seam, min_edge, budget, area_lost,
+                    ground_ok=None):
     """One collapse+flip round; returns (tris, area lost, progressed) or None.
 
     `area_lost` is the running total across ALL rounds, charged against the
@@ -386,7 +401,7 @@ def _decimate_round(verts, tris, pin, on_seam, min_edge, budget, area_lost):
     cands = _short_edges(verts, tris, min_edge)
     if not cands:
         return None
-    st = _Collapse(verts, tris, boundary, bnbr, pin, on_seam)
+    st = _Collapse(verts, tris, boundary, bnbr, pin, on_seam, ground_ok)
     for _d, (ea, eb) in cands:
         a, b = st.resolve(ea), st.resolve(eb)
         if a == b or a in st.gone or b in st.gone:
@@ -402,12 +417,14 @@ def _decimate_round(verts, tris, pin, on_seam, min_edge, budget, area_lost):
 
 
 def decimate(verts, tris, pinned_xy=None, seam_bounds=None, rounds=None,
-             allow_split=True):
+             allow_split=True, ground_ok=None):
     """Collapse sliver-producing SHORT edges into near-equilateral triangles.
 
     pinned_xy: [(x, y), ...] positions that must survive (door thresholds).
     seam_bounds: (minx, miny, maxx, maxy) exterior cell rectangle, whose
     boundary vertices only ever collapse under the strict collinear rule.
+    ground_ok: f(a, v, b) -> True when the concave notch a-v-b may be cut
+    straight; None keeps the fixed concave allowance.
     See: docs/commentary/tes5_import_navmesh.md#decimation
     """
     tris = [tuple(int(i) for i in t) for t in tris]
@@ -431,7 +448,7 @@ def decimate(verts, tris, pinned_xy=None, seam_bounds=None, rounds=None,
     area_lost = 0.0
     for _ in range(rounds if rounds is not None else params.DECIMATE_ROUNDS):
         got = _decimate_round(verts, tris, pin, on_seam, min_edge,
-                              budget, area_lost)
+                              budget, area_lost, ground_ok)
         if got is None:
             break
         tris, area_lost, progressed = got

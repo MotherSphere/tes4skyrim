@@ -118,12 +118,13 @@ class CellCtx(object):
 
 
 class NavIndex(object):
+    #: Export whose tables are currently armed in the shared module globals.
+    _armed = None
+
     def __init__(self, export=DEFAULT_EXPORT, quiet=True):
         self.export = export
-        ce.load_collision(os.path.join(export, 'collision_cache.bin'), quiet=quiet)
-        load_door_centroids(os.path.join(export, 'door_centers_cache.json'),
-                            quiet=quiet)
-        load_origin_shifts(export, quiet=quiet)
+        self._quiet = quiet
+        self.arm()
         with open(os.path.join(export, 'audit_index3.pkl'), 'rb') as fh:
             (self.base_model, self.refr_by_cell, self.pgrd_by_cell,
              self.land_by_cell, self.door_fids, self.cells) = pickle.load(fh)
@@ -134,8 +135,29 @@ class NavIndex(object):
                 self._by_name.setdefault(eid, c)
         self._by_fid = {(c.get('FormID') or '').upper(): c for c in self.cells}
 
+    def arm(self):
+        """Point the shared collision/door globals at THIS export's tables.
+
+        `ce.load_collision` and `load_door_centroids` write module globals, so
+        two NavIndex objects in one process share one table and the last one
+        built wins -- every cell of the other export then finds no collision.
+
+        See: docs/commentary/tes5_import_navmesh.md#navindex-arms-shared-tables
+        """
+        key = os.path.normcase(os.path.normpath(self.export))
+        if NavIndex._armed == key:
+            return
+        ce.load_collision(os.path.join(self.export, 'collision_cache.bin'),
+                          quiet=self._quiet)
+        load_door_centroids(
+            os.path.join(self.export, 'door_centers_cache.json'),
+            quiet=self._quiet)
+        load_origin_shifts(self.export, quiet=self._quiet)
+        NavIndex._armed = key
+
     def cell(self, name_or_fid):
         """Look up by EditorID (case-insensitive) or by FormID hex."""
+        self.arm()
         rec = self._by_name.get(str(name_or_fid).lower())
         if rec is None:
             rec = self._by_fid.get(str(name_or_fid).upper().lstrip('0X').rjust(8, '0'))

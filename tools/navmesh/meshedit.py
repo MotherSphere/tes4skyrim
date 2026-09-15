@@ -53,6 +53,21 @@ def load_fix(plugin, cell):
         return json.load(fh)
 
 
+def free_cell_name(plugin, cell):
+    """`cell`, or `cell.2` / `cell.3` ... when that correction already exists.
+
+    Saving a second reading of one cell must never silently replace the first:
+    a stale correction's `result` is still the only record of what the mesh
+    should have looked like.
+    """
+    if not os.path.isfile(fix_path(plugin, cell)):
+        return cell
+    n = 2
+    while os.path.isfile(fix_path(plugin, '%s.%d' % (cell, n))):
+        n += 1
+    return '%s.%d' % (cell, n)
+
+
 def save_fix(plugin, cell, entry):
     """Write a correction file, creating its plugin folder on first use."""
     p = fix_path(plugin, cell)
@@ -161,12 +176,20 @@ def replay(verts, tris, ops, doors=(), links=()):
 
 
 def make_entry(plugin, cell, verts, tris, ops, doors=(), links=()):
-    """A correction file's full contents: the ops AND the resulting mesh."""
+    """A correction file's full contents: the base mesh, the ops AND the result.
+
+    `base` is the generator mesh the human edited, kept so the diff that says
+    WHAT they changed survives the generator moving (`tools/navmesh/fix_analyze.py`).
+    """
     rv, rt, rd, rl = replay(verts, tris, ops, doors, links)
     return {
         'plugin': plugin,
         'cell': cell,
         'base_hash': mesh_hash(verts, tris),
+        'base': {
+            'verts': [[round(float(c), 3) for c in p] for p in verts],
+            'tris': [[int(k) for k in t[:3]] for t in tris],
+        },
         'ops': list(ops or ()),
         'result': {
             'verts': [[round(c, 3) for c in p] for p in rv],

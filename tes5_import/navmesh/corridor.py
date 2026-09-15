@@ -123,23 +123,34 @@ def _surface_sampler(walkable):
     return sample
 
 
+#: Plan radii also sampled when snapping a node's Z (a node in a seam keeps its neighbours' height).
+NODE_SNAP_RADII = (8.0, 16.0)
+
+
 def _snap_node_z(sample, x, y, z):
     """Node Z snapped DOWN onto walkable collision (principle 2).
 
     The pathgrid hovers above the walked surface, and the navmesh must sit ON
     it.  Snap toward the surface only within a plausible window; never teleport
-    to a distant floor, never rise onto an object standing on the floor.
+    to a distant floor, never rise onto an object standing on the floor.  The
+    surface nearest the node's OWN height within NODE_SNAP_RADII wins.
+    See: docs/commentary/tes5_import_navmesh.md#node-z-snaps-down-onto-collision
     """
     if sample is None:
         return z
     s = sample(x, y, z)
+    for r in NODE_SNAP_RADII:
+        for dx, dy in ((r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r)):
+            c = sample(x + dx, y + dy, z)
+            if c is not None and (s is None or abs(c - z) < abs(s - z)):
+                s = c
     if s is None:
-        return z                                   # trust the pathgrid
+        return z
     if s <= z + params.SEED_Z_TOLERANCE and s >= z - params.SEED_SNAP:
-        return s                                   # within window: sit on it
+        return s
     if s < z:
-        return z - params.SEED_SNAP                # far below: clamp the drop
-    return z                                       # surface above node: stay
+        return z - params.SEED_SNAP
+    return z
 
 
 # ---------------------------------------------------------------------------
@@ -159,53 +170,136 @@ def _edge_frame(nodes, node_z, i, j):
             ((bx - ax) / length, (by - ay) / length), length)
 
 
-def _edge_march_rows(nodes, edges, node_z, degree):
-    """(station rows, plan entries) for every edge flat enough to grow."""
+def _extended_ends(got, degree, i, j):
+    """(pa, pb): the edge's ends pushed out by `RIBBON_END_EXTEND` at dead ends.
+
+    See: docs/commentary/tes5_import_navmesh.md#only-dead-ends-extend
+    """
+    (ax, ay, az), (bx, by, bz), (ux, uy), length = got
     ext = params.RIBBON_END_EXTEND
+    dz = bz - az
+    ea = ext if degree.get(i, 0) <= 1 else 0.0
+    eb = ext if degree.get(j, 0) <= 1 else 0.0
+    return ((ax - ux * ea, ay - uy * ea, az - dz * (ea / length)),
+            (bx + ux * eb, by + uy * eb, bz + dz * (eb / length)))
+
+
+def _is_steep(pa, pb):
+    """True for a stair/ramp edge: rise over run above RIBBON_GROW_MAX_SLOPE."""
+    run = math.hypot(pb[0] - pa[0], pb[1] - pa[1])
+    return abs(pb[2] - pa[2]) / max(run, 1e-6) > params.RIBBON_GROW_MAX_SLOPE
+
+
+def _prof_at(prof, pa, pb, x, y):
+    """(height, |slope|) of a profile at plan point (x, y).
+
+    The parameter runs along the pa->pb chord the profile was built on and
+    is clamped, so beyond either end the end height carries on flat.
+    """
+    ax, ay = pa[0], pa[1]
+    dx, dy = pb[0] - ax, pb[1] - ay
+    d2 = dx * dx + dy * dy
+    t = 0.0 if d2 < 1e-9 else max(0.0, min(1.0, ((x - ax) * dx
+                                                 + (y - ay) * dy) / d2))
+    f = t * (len(prof) - 1)
+    k = min(len(prof) - 2, max(0, int(f)))
+    z0, z1 = prof[k][2], prof[k + 1][2]
+    run = math.dist(prof[k][:2], prof[k + 1][:2]) or 1.0
+    return z0 + (z1 - z0) * (f - k), abs(z1 - z0) / run
+
+
+def _edge_station_rows(pa, pb, frame, k, prof, ei):
+    """The 2(k+1) march rows of one edge: each station, both perpendiculars.
+
+    A station's height and soft floor follow the profile where there is one:
+    on the flight (local slope above RIBBON_GROW_MAX_SLOPE) the floor is the
+    stair half-width, on the approaches it is the corridor ramp.
+    See: docs/commentary/tes5_import_navmesh.md#steep-edges-are-grown
+    """
+    (ux, uy), (wx, wy), total = frame
+    ramp = params.RIBBON_HALF_WIDTH
+    lo0, lo1 = params.RIBBON_HALF_WIDTH, params.RIBBON_GROW_MIN_HALF
+    steep = _is_steep(pa, pb)
+    rows = []
+    for s in range(k + 1):
+        t = s / k
+        cxs = pa[0] + (pb[0] - pa[0]) * t
+        cys = pa[1] + (pb[1] - pa[1]) * t
+        czs = pa[2] + (pb[2] - pa[2]) * t
+        flight = steep
+        if prof:
+            czs, slope = _prof_at(prof, pa, pb, cxs, cys)
+            flight = slope > params.RIBBON_GROW_MAX_SLOPE
+        d_end = min(t, 1.0 - t) * total
+        frac = min(1.0, d_end / ramp) if ramp > 1e-6 else 1.0
+        floor_h = (params.RIBBON_STAIR_HALF_WIDTH if flight
+                   else lo0 + (lo1 - lo0) * frac)
+        rows.append((cxs, cys, czs, wx, wy, ux, uy, floor_h, ei))
+        rows.append((cxs, cys, czs, -wx, -wy, ux, uy, floor_h, ei))
+    return rows
+
+
+def _edge_march_rows(nodes, edges, node_z, degree, profiles):
+    """(station rows, plan entries) for every edge, steep ones included.
+
+    `profiles` maps each steep edge to its tread profile (or None).
+    See: docs/commentary/tes5_import_navmesh.md#steep-edges-are-grown
+    """
     edge_index = {(i, j): e for e, (i, j) in enumerate(edges)}
     rows, plan = [], []
     for (i, j) in edges:
         got = _edge_frame(nodes, node_z, i, j)
         if got is None:
             continue
-        (ax, ay, az), (bx, by, bz), (ux, uy), length = got
-        wx, wy = -uy, ux
-        dz = bz - az
-        ea = ext if degree.get(i, 0) <= 1 else 0.0
-        eb = ext if degree.get(j, 0) <= 1 else 0.0
-        pa = (ax - ux * ea, ay - uy * ea, az - dz * (ea / length))
-        pb = (bx + ux * eb, by + uy * eb, bz + dz * (eb / length))
-        if (abs(pb[2] - pa[2]) / max(length, 1e-6)
-                > params.RIBBON_GROW_MAX_SLOPE):
-            continue
-        total = length + ea + eb
+        (ux, uy), length = got[2], got[3]
+        pa, pb = _extended_ends(got, degree, i, j)
+        total = math.hypot(pb[0] - pa[0], pb[1] - pa[1])
         k = max(1, int(round(total / params.RIBBON_STEP)))
-        ramp = params.RIBBON_HALF_WIDTH
-        lo0, lo1 = params.RIBBON_HALF_WIDTH, params.RIBBON_GROW_MIN_HALF
         ei = edge_index.get((i, j), -1)
         base = len(rows)
-        for s in range(k + 1):
-            t = s / k
-            cxs = pa[0] + (pb[0] - pa[0]) * t
-            cys = pa[1] + (pb[1] - pa[1]) * t
-            czs = pa[2] + (pb[2] - pa[2]) * t
-            d_end = min(t, 1.0 - t) * total
-            frac = min(1.0, d_end / ramp) if ramp > 1e-6 else 1.0
-            floor_h = lo0 + (lo1 - lo0) * frac
-            rows.append((cxs, cys, czs, wx, wy, ux, uy, floor_h, ei))
-            rows.append((cxs, cys, czs, -wx, -wy, ux, uy, floor_h, ei))
-        plan.append(('edge', (i, j), pa, pb, (ux, uy), (wx, wy),
+        rows += _edge_station_rows(pa, pb, ((ux, uy), (-uy, ux), total), k,
+                                   profiles.get((i, j)), ei)
+        plan.append(('edge', (i, j), pa, pb, (ux, uy), (-uy, ux),
                      length, k, base))
     return rows, plan
 
 
-def _disc_march_rows(nodes, edges, node_z, degree, rows):
-    """Append each node's radial fan to `rows`; returns (plan, extra edges).
+def _bridge_blocked_stations(widths, plan):
+    """Give a station blocked on BOTH sides the widths of its neighbours.
+
+    See: docs/commentary/tes5_import_navmesh.md#blocked-stations-are-bridged
+    """
+    for entry in plan:
+        if entry[0] != 'edge':
+            continue
+        k, base = entry[7], entry[8]
+        open_s = [s for s in range(k + 1)
+                  if widths[base + 2 * s] > 0.0 or widths[base + 2 * s + 1] > 0.0]
+        if not open_s or len(open_s) == k + 1:
+            continue
+        for s in range(k + 1):
+            if widths[base + 2 * s] > 0.0 or widths[base + 2 * s + 1] > 0.0:
+                continue
+            before = max((o for o in open_s if o < s), default=None)
+            after = min((o for o in open_s if o > s), default=None)
+            if before is None or after is None:
+                src = after if before is None else before
+                widths[base + 2 * s] = widths[base + 2 * src]
+                widths[base + 2 * s + 1] = widths[base + 2 * src + 1]
+                continue
+            f = (s - before) / float(after - before)
+            for side in (0, 1):
+                w0 = widths[base + 2 * before + side]
+                w1 = widths[base + 2 * after + side]
+                widths[base + 2 * s + side] = w0 + (w1 - w0) * f
+
+
+def _disc_march_rows(nodes, node_z, degree, rows):
+    """Append each node's radial fan to `rows`; returns the disc plan entries.
 
     See: docs/commentary/tes5_import_navmesh.md#stair-nodes-get-discs-too
     """
     nrays = params.RIBBON_GROW_DISC_RAYS
-    disc_self = {}
     plan = []
     for ni in sorted(degree):
         if ni >= len(nodes):
@@ -213,42 +307,44 @@ def _disc_march_rows(nodes, edges, node_z, degree, rows):
         nx, ny = nodes[ni][0], nodes[ni][1]
         nz = node_z[ni]
         base = len(rows)
-        ei = len(edges) + disc_self.setdefault(ni, len(disc_self))
         for kk in range(nrays):
             ang = 2.0 * math.pi * kk / nrays
             ddx, ddy = math.cos(ang), math.sin(ang)
-            rows.append((nx, ny, nz, ddx, ddy, -ddy, ddx, 0.0, ei))
+            rows.append((nx, ny, nz, ddx, ddy, -ddy, ddx, 0.0, -1))
         plan.append(('disc', ni, nx, ny, nz, base))
-    extra_edges = [(ni, ni) for ni, _slot in
-                   sorted(disc_self.items(), key=lambda kv: kv[1])]
-    return plan, extra_edges
+    return plan
 
 
-def _plan_stations(nodes, edges, node_z, degree, grow):
+def _plan_stations(nodes, edges, node_z, degree, grow, profiles):
     """Every march station the grow needs, as a plan the native batch consumes.
 
-    Returns (stations, plan, extra_edges): an (N, 9) float64 array of
-    (cx, cy, cz, dirx, diry, tanx, tany, lo, edge_index), the reassembly plan
-    (`edge` and `disc` entries), and the synthetic self-pairs the disc
-    stations name as their exclusion.
+    Returns (stations, plan): an (N, 9) float64 array of
+    (cx, cy, cz, dirx, diry, tanx, tany, lo, edge_index) and the reassembly
+    plan (`edge` and `disc` entries).
     See: docs/commentary/tes5_import_navmesh.md#stations-are-planned-then-marched
     """
     if not grow:
-        return np.zeros((0, 9), dtype=np.float64), [], []
-    rows, plan = _edge_march_rows(nodes, edges, node_z, degree)
-    disc_plan, extra_edges = _disc_march_rows(nodes, edges, node_z, degree,
-                                              rows)
-    plan.extend(disc_plan)
+        return np.zeros((0, 9), dtype=np.float64), []
+    rows, plan = _edge_march_rows(nodes, edges, node_z, degree, profiles)
+    plan.extend(_disc_march_rows(nodes, node_z, degree, rows))
     st = (np.asarray(rows, dtype=np.float64) if rows
           else np.zeros((0, 9), dtype=np.float64))
-    return st, plan, extra_edges
+    return st, plan
 
 
-def _profile_stations(sample, pa, pb, n):
-    """Per-station (x, y, candidate heights) along a steep edge's centerline."""
+def _profile_stations(sample, pa, pb, n, half):
+    """Per-station (x, y, candidate heights) along a steep edge's centerline.
+
+    Candidates come from the whole CROSS-SECTION (centerline and +-half/2,
+    +-half across it), so a line that clips a flight's corner still sees
+    every tread.
+    See: docs/commentary/tes5_import_navmesh.md#profile-samples-the-cross-section
+    """
     layers = sample.layers
     ax, ay, az = pa
     bx, by, bz = pb
+    run = math.hypot(bx - ax, by - ay) or 1.0
+    wx, wy = -(by - ay) / run, (bx - ax) / run
     lo = min(az, bz) - params.MAX_CLIMB
     hi = max(az, bz) + params.MAX_CLIMB
     stations = []
@@ -256,11 +352,40 @@ def _profile_stations(sample, pa, pb, n):
         t = s / n
         x = ax + (bx - ax) * t
         y = ay + (by - ay) * t
-        cand = [z for z in layers(x, y) if lo <= z <= hi]
-        if not cand:
-            cand = [az + (bz - az) * t]
-        stations.append((x, y, cand))
+        cand = set()
+        for off in (0.0, 0.5 * half, -0.5 * half, half, -half):
+            cand.update(round(z, 1) for z in layers(x + wx * off, y + wy * off)
+                        if lo <= z <= hi)
+        stations.append((x, y, sorted(cand) or [az + (bz - az) * t]))
     return stations
+
+
+def _clamped_chord(stations, az, bz, n):
+    """Each node's level held while its floor continues, one ramp between.
+
+    None when the two plateaus overlap (the lower floor runs under the
+    upper), where a chord is the only honest answer.
+    See: docs/commentary/tes5_import_navmesh.md#profile-samples-the-cross-section
+    """
+    step = params.MAX_CLIMB
+
+    def holds(s, z):
+        """True while some layer at station s is within a step of z."""
+        return any(abs(c - z) <= step for c in stations[s][2])
+
+    ka = 0
+    while ka + 1 <= n and holds(ka + 1, az):
+        ka += 1
+    kb = n
+    while kb - 1 >= 0 and holds(kb - 1, bz):
+        kb -= 1
+    if ka >= kb:
+        return None
+    pts = []
+    for s in range(n + 1):
+        f = max(0.0, min(1.0, (s - ka) / float(kb - ka)))
+        pts.append((stations[s][0], stations[s][1], az + (bz - az) * f))
+    return pts
 
 
 def _cheapest_layer_path(stations, az, n):
@@ -287,11 +412,11 @@ def _cheapest_layer_path(stations, az, n):
     return costs, back
 
 
-def _surface_profile(sample, pa, pb):
+def _surface_profile(sample, pa, pb, half=None):
     """Height profile along a STEEP edge, following the real walkable surface.
 
-    Returns None (caller keeps the chord) when no layer path reaches the far
-    node's own height.
+    Returns None (caller keeps the chord) only when no layer path reaches the
+    far node's height AND the clamped-chord fallback has nothing to hold.
     See: docs/commentary/tes5_import_navmesh.md#steep-heights-follow-the-treads
     """
     if getattr(sample, 'layers', None) is None:
@@ -302,7 +427,9 @@ def _surface_profile(sample, pa, pb):
     if run < 32.0:
         return None
     n = max(2, int(run // 16.0))
-    stations = _profile_stations(sample, pa, pb, n)
+    stations = _profile_stations(
+        sample, pa, pb, n,
+        params.RIBBON_STAIR_HALF_WIDTH if half is None else half)
     costs, back = _cheapest_layer_path(stations, az, n)
 
     inf = float('inf')
@@ -314,7 +441,7 @@ def _surface_profile(sample, pa, pb):
         if best is None or key < best:
             best = key
     if best is None:
-        return None
+        return _clamped_chord(stations, az, bz, n)
     idx = best[2]
     zs = [0.0] * (n + 1)
     for s in range(n, -1, -1):
@@ -350,24 +477,48 @@ def _steep_counts(nodes, edges, node_z):
     return steep_count
 
 
-def _ungrown_strip(strip, steep, sample, pa, pb):
+def _ungrown_strip(strip, steep, prof):
     """Finish a strip the march never planned: fixed width, real tread heights.
 
     See: docs/commentary/tes5_import_navmesh.md#a-steep-ribbon-is-never-grown
     """
     strip['half'] = (params.RIBBON_STAIR_HALF_WIDTH if steep
                      else params.RIBBON_HALF_WIDTH)
-    if steep and sample is not None:
-        prof = _surface_profile(sample, pa, pb)
-        if prof:
-            strip['prof'] = prof
+    if prof:
+        strip['prof'] = prof
     return strip
 
 
-def _grown_outline(strip, entry, widths, w):
+def _steep_profiles(nodes, edges, node_z, degree, sample):
+    """{(i, j): tread profile or None} for every steep edge.
+
+    See: docs/commentary/tes5_import_navmesh.md#profile-samples-the-cross-section
+    """
+    out = {}
+    for (i, j) in edges:
+        got = _edge_frame(nodes, node_z, i, j)
+        if got is None:
+            continue
+        pa, pb = _extended_ends(got, degree, i, j)
+        if _is_steep(pa, pb):
+            out[(i, j)] = (_surface_profile(sample, pa, pb)
+                           if sample is not None else None)
+    return out
+
+
+def _on_flight(prof, pa, pb, x, y):
+    """True where the profile climbs faster than a corridor may be grown."""
+    if not prof:
+        return _is_steep(pa, pb)
+    return _prof_at(prof, pa, pb, x, y)[1] > params.RIBBON_GROW_MAX_SLOPE
+
+
+def _grown_outline(strip, entry, widths, w, prof):
     """Finish a grown strip: simplified rails closed into an explicit outline.
 
-    See: docs/commentary/tes5_import_navmesh.md#rails-are-simplified-before-triangulation
+    Stations on the FLIGHT keep the fixed stair half-width; only the flat
+    approaches take their marched widths.
+    See: docs/commentary/tes5_import_navmesh.md#steep-edges-are-grown
     """
     wx, wy = w
     _, _, ppa, ppb, _u, _w, _len, k, base = entry
@@ -379,6 +530,8 @@ def _grown_outline(strip, entry, widths, w):
         cys = ppa[1] + (ppb[1] - ppa[1]) * t
         hl = float(widths[base + 2 * s])
         hr = float(widths[base + 2 * s + 1])
+        if _on_flight(prof, ppa, ppb, cxs, cys):
+            hl = hr = params.RIBBON_STAIR_HALF_WIDTH
         left.append((cxs + wx * hl, cys + wy * hl))
         right.append((cxs - wx * hr, cys - wy * hr))
         max_h = max(max_h, hl, hr)
@@ -389,7 +542,7 @@ def _grown_outline(strip, entry, widths, w):
     return strip
 
 
-def _edge_strip(nodes, node_z, i, j, degree, grown_edges, widths, sample):
+def _edge_strip(nodes, node_z, i, j, degree, grown_edges, widths, profiles):
     """The ribbon for one pathgrid edge, or None if the edge is unusable.
 
     See: docs/commentary/tes5_import_navmesh.md#only-dead-ends-extend
@@ -398,23 +551,22 @@ def _edge_strip(nodes, node_z, i, j, degree, grown_edges, widths, sample):
     if got is None:
         return None
     (ax, ay, az), (bx, by, bz), (ux, uy), length = got
-    ext = params.RIBBON_END_EXTEND
-    ea = ext if degree.get(i, 0) <= 1 else 0.0
-    eb = ext if degree.get(j, 0) <= 1 else 0.0
-    dz = bz - az
-    pa = (ax - ux * ea, ay - uy * ea, az - dz * (ea / length))
-    pb = (bx + ux * eb, by + uy * eb, bz + dz * (eb / length))
+    pa, pb = _extended_ends(got, degree, i, j)
     strip = {
         'edge': (i, j),
         'na': (ax, ay, az), 'nb': (bx, by, bz),
         'a': pa, 'b': pb,
         'u': (ux, uy), 'w': (-uy, ux), 'len': length,
     }
+    steep = _is_steep(pa, pb)
+    prof = profiles.get((i, j)) if steep else None
     entry = grown_edges.get((i, j)) if widths is not None else None
     if entry is None:
-        steep = abs(dz) / length > params.RIBBON_GROW_MAX_SLOPE
-        return _ungrown_strip(strip, steep, sample, pa, pb)
-    return _grown_outline(strip, entry, widths, (-uy, ux))
+        return _ungrown_strip(strip, steep, prof)
+    strip = _grown_outline(strip, entry, widths, (-uy, ux), prof)
+    if prof:
+        strip['prof'] = prof
+    return strip
 
 
 def _trim_disc_ray(layers, nx, ny, nz, ddx, ddy, d):
@@ -440,8 +592,49 @@ def _trim_disc_ray(layers, nx, ny, nz, ddx, ddy, d):
     return good
 
 
-def _disc_strip(entry, widths, layers, steep_strips, trim):
-    """The node-disc ribbon for one plan entry, or None if it degenerates."""
+def _node_reach(plan, widths):
+    """{node: largest half-width any incident ribbon reached at that node}.
+
+    See: docs/commentary/tes5_import_navmesh.md#disc-radius-capped-by-its-ribbons
+    """
+    reach = {}
+    for entry in plan:
+        if entry[0] != 'edge':
+            continue
+        (i, j), k, base = entry[1], entry[7], entry[8]
+        for node, s in ((i, 0), (j, k)):
+            w = max(float(widths[base + 2 * s]), float(widths[base + 2 * s + 1]))
+            reach[node] = max(reach.get(node, 0.0), w)
+    return reach
+
+
+#: A disc ray runs past its ribbons' reach only over ground this close to the node's level.
+DISC_LEVEL_TOL = 2.0
+
+
+def _level_reach(layers, nx, ny, nz, ddx, ddy, start, d):
+    """Largest distance in [start, d] up to which the ground stays AT level nz.
+
+    See: docs/commentary/tes5_import_navmesh.md#disc-radius-capped-by-its-ribbons
+    """
+    good = start
+    dd = start
+    while dd < d - 1e-6:
+        dd = min(d, dd + 8.0)
+        if not any(abs(z - nz) <= DISC_LEVEL_TOL
+                   for z in layers(nx + ddx * dd, ny + ddy * dd)):
+            break
+        good = dd
+    return good
+
+
+def _disc_strip(entry, widths, layers, steep_strips, trim, cap):
+    """The node-disc ribbon for one plan entry, or None if it degenerates.
+
+    A ray is clamped to `cap`, the reach of the node's own ribbons, and runs
+    beyond it only over ground at the node's level.
+    See: docs/commentary/tes5_import_navmesh.md#disc-radius-capped-by-its-ribbons
+    """
     _, ni, nx, ny, nz, base = entry
     nrays = params.RIBBON_GROW_DISC_RAYS
     disc = []
@@ -449,6 +642,9 @@ def _disc_strip(entry, widths, layers, steep_strips, trim):
         ang = 2.0 * math.pi * kk / nrays
         ddx, ddy = math.cos(ang), math.sin(ang)
         d = float(widths[base + kk])
+        if d > cap:
+            d = (_level_reach(layers, nx, ny, nz, ddx, ddy, cap, d)
+                 if layers is not None else cap)
         if trim and d > params.RIBBON_HALF_WIDTH:
             d = _trim_disc_ray(layers, nx, ny, nz, ddx, ddy, d)
         disc.append((nx + ddx * d, ny + ddy * d))
@@ -495,20 +691,20 @@ def _build_corridor_strips(nodes, edges, node_z, wall_hit=None,
     grow = params.RIBBON_GROW and blocking is not None
     degree = _node_degrees(edges)
     steep_count = _steep_counts(nodes, edges, node_z)
+    profiles = _steep_profiles(nodes, edges, node_z, degree, sample)
 
-    stations, plan, extra_edges = _plan_stations(nodes, edges, node_z,
-                                                 degree, grow)
+    stations, plan = _plan_stations(nodes, edges, node_z, degree, grow,
+                                    profiles)
     widths = None
     if len(stations):
-        widths = corridor_grow.grow_batch(
-            blocking, walkable, nodes, list(edges) + extra_edges,
-            node_z, stations)
+        widths = corridor_grow.grow_batch(blocking, walkable, stations)
+        _bridge_blocked_stations(widths, plan)
     grown_edges = {p[1]: p for p in plan if p[0] == 'edge'}
 
     strips = []
     for (i, j) in edges:
         strip = _edge_strip(nodes, node_z, i, j, degree, grown_edges,
-                            widths, sample)
+                            widths, profiles)
         if strip is not None:
             strips.append(strip)
 
@@ -516,12 +712,14 @@ def _build_corridor_strips(nodes, edges, node_z, wall_hit=None,
         return strips
     steep = _steep_strips(strips)
     layers = getattr(sample, 'layers', None) if sample is not None else None
+    reach = _node_reach(plan, widths)
     for entry in plan:
         if entry[0] != 'disc':
             continue
         trim = (DISC_RAY_TRIM and layers is not None
                 and steep_count.get(entry[1], 0) >= 1)
-        disc = _disc_strip(entry, widths, layers, steep, trim)
+        cap = max(params.RIBBON_HALF_WIDTH, reach.get(entry[1], 0.0))
+        disc = _disc_strip(entry, widths, layers, steep, trim, cap)
         if disc is not None:
             strips.append(disc)
     return strips
@@ -908,6 +1106,79 @@ def _lazy_wall_hit(blocking):
     return wall_hit
 
 
+def _outline_ground_ok(blocking, walkable):
+    """f(a, v, b) -> True when the notch a-v-b may be cut straight along a-b.
+
+    See: docs/commentary/tes5_import_navmesh.md#concave-notches-straightened-against-collision
+    """
+    wall_hit = _lazy_wall_hit(blocking)
+    walk = corridor_grow.walkable_sampler(walkable)
+
+    def ok(a, v, b):
+        """No wall in the actor band over the notch, floor all along the chord."""
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        run = math.hypot(dx, dy)
+        if run < 1e-6:
+            return False
+        tx, ty = dx / run, dy / run
+        off = (v[0] - a[0]) * -ty + (v[1] - a[1]) * tx
+        ux, uy = (-ty, tx) if off >= 0 else (ty, -tx)
+        depth = 0.5 * abs(off) + 1.0
+        cx = 0.5 * (a[0] + b[0]) + ux * depth
+        cy = 0.5 * (a[1] + b[1]) + uy * depth
+        z_lo = min(a[2], b[2], v[2]) + params.RIBBON_GROW_SLAB_Z_BOTTOM
+        z_hi = max(a[2], b[2], v[2]) + params.AGENT_HEIGHT
+        if wall_hit(cx, cy, ux, uy, tx, ty, z_lo, z_hi, depth,
+                    half_w=0.5 * run):
+            return False
+        n = max(1, int(run // params.RIBBON_GROW_STEP))
+        for s in range(n + 1):
+            t = s / n
+            z = a[2] + (b[2] - a[2]) * t
+            got = walk(a[0] + dx * t, a[1] + dy * t, z)
+            if got is None or abs(got - z) > params.MAX_CLIMB:
+                return False
+        return True
+
+    return ok
+
+
+def _ledge_reach(blocking, walkable):
+    """f(x, y, z, dx, dy, limit) -> (floor run, wall_first) from a ledge lip.
+
+    Marches along (dx, dy) with the width-grow's wall slab and floor test:
+    the run is how far the floor at z continues; wall_first is True when a
+    wall taller than a step stands in the way before the floor ends.
+    See: docs/commentary/tes5_import_navmesh.md#ledge-lip-is-pushed-to-the-edge
+    """
+    wall_hit = _lazy_wall_hit(blocking)
+    walk = corridor_grow.walkable_sampler(walkable)
+
+    def reach(x, y, z, dx, dy, limit):
+        """Floor run and wall verdict along one direction from (x, y, z)."""
+        step = LIP_MARCH_STEP
+        d = 0.0
+        while d < limit:
+            nd = d + step
+            mid = 0.5 * (d + nd)
+            if wall_hit(x + dx * mid, y + dy * mid, dx, dy, -dy, dx,
+                        z + params.RIBBON_GROW_SLAB_Z_BOTTOM,
+                        z + params.AGENT_HEIGHT,
+                        0.5 * step + params.RIBBON_GROW_SLAB_DEPTH):
+                return d, True
+            s = walk(x + dx * nd, y + dy * nd, z)
+            if s is None or abs(s - z) > params.MAX_CLIMB:
+                return d, False
+            d = nd
+        return d, False
+
+    return reach
+
+
+#: March step when pushing a ledge lip out to the floor's edge.
+LIP_MARCH_STEP = 4.0
+
+
 def build_corridors(refr_recs, base_model_by_fid, get_collision, nodes, edges,
                     land_rec=None, origin_x=0.0, origin_y=0.0, doors=None,
                     door_bases=None):
@@ -955,7 +1226,9 @@ def build_corridors(refr_recs, base_model_by_fid, get_collision, nodes, edges,
                          else params.CS),
         doors=door_xy, cell_bounds=cell_clip, pin_xy=pin_xy,
         door_pins=door_pins,
-        node_pins=[(nodes[i][0], nodes[i][1]) for i in range(len(nodes))])
+        node_pins=[(nodes[i][0], nodes[i][1]) for i in range(len(nodes))],
+        ground_ok=_outline_ground_ok(blocking, walkable),
+        ledge_reach=_ledge_reach(blocking, walkable))
 
     verts = [tuple(float(c) for c in v) for v in verts]
     tris = [tuple(int(i) for i in t) for t in tris]

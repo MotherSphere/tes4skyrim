@@ -168,6 +168,29 @@ def _runs_along_door_line(guard, x0, y0, x1, y1):
     return False
 
 
+def _grid_stations(x0, y0, x1, y1, target_edge):
+    """Points where the segment's along-direction coordinate crosses a multiple
+    of target_edge, none within a quarter spacing of either end.
+
+    See: docs/commentary/tes5_import_navmesh.md#densify-on-a-world-grid
+    """
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy)
+    if length < 1e-9:
+        return []
+    ux, uy = dx / length, dy / length
+    s0 = x0 * ux + y0 * uy
+    gap = 0.25 * target_edge
+    out = []
+    k = math.floor(s0 / target_edge) + 1
+    while k * target_edge < s0 + length:
+        d = k * target_edge - s0
+        if gap <= d <= length - gap:
+            out.append((x0 + ux * d, y0 + uy * d))
+        k += 1
+    return out
+
+
 def _densified(part, guard, target_edge):
     """`part` with its rings resampled at target_edge, door lines exempt.
 
@@ -185,10 +208,7 @@ def _densified(part, guard, target_edge):
             out.append((x0, y0))
             if _runs_along_door_line(guard, x0, y0, x1, y1):
                 continue
-            n = int(math.hypot(x1 - x0, y1 - y0) // target_edge)
-            for k in range(1, n + 1):
-                f = k / (n + 1)
-                out.append((x0 + (x1 - x0) * f, y0 + (y1 - y0) * f))
+            out.extend(_grid_stations(x0, y0, x1, y1, target_edge))
         return out
 
     shell = ring(part.exterior)

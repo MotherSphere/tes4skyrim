@@ -43,7 +43,7 @@ from tools.navmesh.authored import load_authored, load_authored_full
 from tools.navmesh.bruma_collision import cell_collision, default_esm
 from tools.navmesh.draw import tri_class
 from tools.navmesh.meshedit import (
-    is_stale, load_fix, make_entry, save_fix,
+    free_cell_name, is_stale, load_fix, make_entry, save_fix,
 )
 
 
@@ -103,13 +103,18 @@ def mesh_bake(plugin, cell):
         'edges': [list(e) for e in src.edges],
         'ops': (fix or {}).get('ops', []),
         'stale': is_stale(fix, verts, tris) if fix else False,
+        'saved': (fix or {}).get('result'),
     }
     _CACHE[ck] = out
     return out
 
 
 def mesh_save(plugin, cell, payload):
-    """Commit a correction's ops, re-baking `result` from the live mesh."""
+    """Commit a correction's ops, re-baking `result` from the live mesh.
+
+    `mode` "new" writes a numbered sibling rather than replacing the existing
+    correction, so re-editing a cell never destroys the previous reading.
+    """
     idx = index_for(os.path.join('export', plugin))
     src = idx.cell(cell)
     if src is None:
@@ -118,12 +123,14 @@ def mesh_save(plugin, cell, payload):
     verts, tris = (src.build(ledges_out=ledges) if src.has_pathgrid
                    else ([], []))
     ops = payload.get('ops') or []
-    entry = make_entry(plugin, cell, verts, tris, ops,
+    target = (free_cell_name(plugin, cell)
+              if payload.get('mode') == 'new' else cell)
+    entry = make_entry(plugin, target, verts, tris, ops,
                        our_doors(src, verts, tris),
                        [(int(a), int(b)) for (a, b, _d) in ledges])
-    path = save_fix(plugin, cell, entry)
+    path = save_fix(plugin, target, entry)
     _CACHE.pop(('mesh', plugin, cell), None)
-    return {'saved': path, 'ops': len(ops),
+    return {'saved': path, 'ops': len(ops), 'cell': target,
             'tris': len(entry['result']['tris'])}
 
 

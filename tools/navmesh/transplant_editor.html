@@ -74,8 +74,15 @@
     <label class="chk"><input type="checkbox" id="cPath" checked>pathgrid</label>
     <label class="chk"><input type="checkbox" id="cTri" checked>navmesh</label>
   </div>
+  <div class="grp" id="staleGrp" style="display:none">
+    <label class="chk"><input type="radio" name="src" id="srcLive"
+        checked>current mesh</label>
+    <label class="chk"><input type="radio" name="src" id="srcSaved">saved
+      result</label>
+  </div>
   <div class="grp">
-    <button id="save" class="primary" disabled>Save</button>
+    <button id="save" class="primary" disabled>Overwrite</button>
+    <button id="saveNew" disabled>Save new</button>
     <button id="undo" disabled>Undo</button>
     <button id="reset">Reload</button>
   </div>
@@ -738,7 +745,13 @@ async function loadMesh(plugin, cell) {
     setTimeout(() => { $('busy').style.display = 'none'; }, 2500);
     return;
   }
-  M = d; mOps = d.ops.slice(); mHistory = [];
+  /* Stale ops address a mesh the generator has since renumbered, so replaying
+     them onto the current one silently mixes two different meshes. Load them
+     only when they still apply; otherwise open the saved result instead. */
+  M = d; mHistory = [];
+  mOps = d.stale ? [] : d.ops.slice();
+  if ($('srcSaved')) $('srcSaved').checked = !!(d.stale && d.saved);
+  if ($('srcLive')) $('srcLive').checked = !(d.stale && d.saved);
   meshReset();
   /* One cell at a time: drop EVERY layer of the previous one, including the
      pathgrid and the authored underlay, not just the collision. */
@@ -772,19 +785,20 @@ function frameMesh() {
   applyCamera();
 }
 
-async function meshSave() {
+async function meshSave(mode) {
   $('busy').style.display = 'grid';
   $('busy').textContent = 'saving mesh …';
   try {
     const r = await fetch('/mesh_save?plugin=' + encodeURIComponent(M.plugin) +
                           '&cell=' + encodeURIComponent(M.cell), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ops: mOps })
+      body: JSON.stringify({ ops: mOps, mode: mode })
     });
     const d = await r.json();
-    $('busy').textContent = d.error || ('saved ' + d.ops + ' ops');
+    $('busy').textContent = d.error ||
+      ('saved ' + d.ops + ' ops to ' + d.cell);
     mHistory = [];
-    setTimeout(() => { $('busy').style.display = 'none'; }, 900);
+    setTimeout(() => { $('busy').style.display = 'none'; }, 1200);
   } catch (err) {
     $('busy').textContent = 'save FAILED: ' + err;
     setTimeout(() => { $('busy').style.display = 'none'; }, 2500);
@@ -793,7 +807,7 @@ async function meshSave() {
 }
 
 async function save() {
-  if (mode === 'tri') { await meshSave(); return; }
+  if (mode === 'tri') { await meshSave('overwrite'); return; }
   $('busy').style.display = 'grid';
   $('busy').textContent = 'saving …';
   try {
@@ -846,15 +860,24 @@ function meshDiscard() {
   needsRender = true;
 }
 
+/* Stale ops address vertices the generator has since renumbered, so replaying
+   them paints nonsense. The saved `result` is the correction's real record --
+   view it directly instead, read-only, because ops cannot extend it. */
 function meshReset() {
-  mVerts = M.verts.map(p => p.slice());
-  mTris = M.tris.map(t => t.slice());
-  mDoors = new Set(M.doors);
-  mLinks = new Set((M.ledges || []).map(l => lkey(l[0], l[1])));
+  const saved = showSaved() ? M.saved : null;
+  mVerts = (saved ? saved.verts : M.verts).map(p => p.slice());
+  mTris = (saved ? saved.tris : M.tris).map(t => t.slice());
+  mDoors = new Set(saved ? saved.doors : M.doors);
+  mLinks = new Set(saved ? (saved.links || []).map(l => lkey(l[0], l[1]))
+                         : (M.ledges || []).map(l => lkey(l[0], l[1])));
   mDead = new Set();
   mSelVert = mSelTri = mSnapFrom = mLinkFrom = -1;
   mRing = []; mBuild = false; mNewVerts = new Set();
-  for (const op of mOps) meshApply(op);
+  if (!saved) for (const op of mOps) meshApply(op);
+}
+
+function showSaved() {
+  return !!(M && M.saved && $('srcSaved') && $('srcSaved').checked);
 }
 
 function meshApply(op) {
@@ -879,6 +902,7 @@ function meshApply(op) {
 }
 
 function meshPush(op) {
+  if (showSaved()) return;
   mHistory.push(mOps.length);
   mOps.push(op);
   meshApply(op);
@@ -1096,12 +1120,17 @@ function frameAll() {
 /* -------------------------------------------------------------- status -- */
 function meshStatus() {
   const live = mTris.length - mDead.size;
+  const viewing = showSaved();
+  $('staleGrp').style.display = (M.saved && M.stale) ? '' : 'none';
   $('stat').innerHTML =
     `<b>${live}</b> tris · ${mDoors.size} door · ${mLinks.size} drop link · ` +
     (mOps.length ? `<b>${mOps.length} ops</b>` : 'no edits') +
-    (M.stale ? ' · <span class="warn">ops stale</span>' : '');
-  $('save').disabled = mOps.length === 0;
-  $('undo').disabled = mHistory.length === 0;
+    (M.stale ? ` · <span class="warn">${M.ops.length} ops STALE, ` +
+               'not replayed</span>' : '') +
+    (viewing ? ' · <span class="warn">viewing SAVED result</span>' : '');
+  $('save').disabled = mOps.length === 0 || viewing;
+  $('saveNew').disabled = mOps.length === 0 || viewing;
+  $('undo').disabled = mHistory.length === 0 || viewing;
   $('mode').textContent = 'Mesh · ' + M.plugin + ' · ' + M.cell +
     (mBuild ? ' · BUILD ' + mRing.length + '/3' : '') +
     (mSelVert >= 0 ? ' · vert ' + mSelVert : '') +
@@ -1223,8 +1252,17 @@ $('srcBruma').onclick = () => setSource('bruma');
 $('srcOb').onclick = () => setSource('ob');
 $('srcBoth').onclick = () => setSource('both');
 $('save').onclick = save;
+$('saveNew').onclick = () => meshSave('new');
+/* Switching source re-derives the mesh from scratch; ops are kept so that
+   returning to the current mesh restores the edit in progress. */
+for (const id of ['srcLive', 'srcSaved']) {
+  $(id).onchange = () => { meshReset(); meshRebuild(); status(); };
+}
 $('undo').onclick = undo;
-$('reset').onclick = () => loadCell(G.cell, false);
+/* `G` is null in mesh mode, so Reload has to re-bake the mesh cell instead. */
+$('reset').onclick = () => (mode === 'tri' && M)
+  ? loadMesh(M.plugin, M.cell)
+  : loadCell(G.cell, false);
 $('cell').onchange = e => { if (e.target.value) loadCell(e.target.value, false); };
 for (const id of ['cWall', 'cFloor', 'cNav', 'cGen', 'cPath', 'cTri'])
   $(id).onchange = applyVisibility;

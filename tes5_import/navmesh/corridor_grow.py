@@ -20,15 +20,13 @@ stops one step before the FIRST of:
       (its top is a step up) and what stops a ground-floor corridor widening
       sideways into the footprint of a different storey (the floor there is a
       whole storey away, so it reads as departed).
-  (c) NEIGHBOUR — the midpoint toward the nearest roughly-PARALLEL other
-      pathgrid edge's centerline, so two parallel corridors meet cleanly.
-  (d) the hard cap RIBBON_GROW_MAX_HALF.
+  (c) the hard cap RIBBON_GROW_MAX_HALF.
 
-The march measures against FIXED geometry (the same blocking/walkable soups and
-the same neighbour centerlines every time), never against other corridors'
-already-grown width, so it is order-independent and the output stays
-byte-reproducible.  The overlap the grow creates at junctions and between
-parallel corridors is resolved by the boolean union in corridor_union.
+The march measures against FIXED geometry (the same blocking/walkable soups
+every time), never against other corridors' already-grown width, so it is
+order-independent and the output stays byte-reproducible.  The overlap the
+grow creates at junctions and between parallel corridors is resolved by the
+boolean union in corridor_union.
 """
 
 import math
@@ -60,18 +58,16 @@ def _native_params():
         'slab_z_bottom': float(params.RIBBON_GROW_SLAB_Z_BOTTOM),
         'agent_height': float(params.AGENT_HEIGHT),
         'max_climb': float(params.MAX_CLIMB),
-        'ztol': float(params.RIBBON_GROW_NEIGHBOUR_ZTOL),
-        'pdot': float(params.RIBBON_GROW_PARALLEL_DOT),
         'bisect': float(params.RIBBON_GROW_BISECT),
     }
 
 
-def grow_batch(blocking, walkable, nodes, edges, node_z, stations):
+def grow_batch(blocking, walkable, stations):
     """Grown half-width for every march station, in ONE native call.
 
     stations: (N, 9) float64 -- cx, cy, cz, dirx, diry, tanx, tany, lo,
-    edge_index.  edge_index selects the endpoint pair excluded from the
-    neighbour query (-1 for none).  Returns an (N,) float64 array.
+    edge_index (the planner's own bookkeeping, unused by the march).
+    Returns an (N,) float64 array.
     See: docs/commentary/tes5_import_navmesh.md#grow-is-batched-into-one-native-call
     """
     if not len(stations):
@@ -80,14 +76,8 @@ def grow_batch(blocking, walkable, nodes, edges, node_z, stations):
         if len(blocking) else np.zeros((0, 3, 3), dtype=np.float64)
     wlk = (np.ascontiguousarray(walkable, dtype=np.float64).reshape(-1, 3, 3)
            if walkable is not None and len(walkable) else None)
-    nd = np.ascontiguousarray(
-        [(n[0], n[1]) for n in nodes], dtype=np.float64).reshape(-1, 2) \
-        if len(nodes) else np.zeros((0, 2), dtype=np.float64)
-    eg = np.ascontiguousarray(edges, dtype=np.int32).reshape(-1, 2) \
-        if len(edges) else np.zeros((0, 2), dtype=np.int32)
-    nz = np.ascontiguousarray(node_z, dtype=np.float64)
     st = np.ascontiguousarray(stations, dtype=np.float64).reshape(-1, 9)
-    return _native.grow_strips(blk, wlk, nd, eg, nz, st, _native_params())
+    return _native.grow_strips(blk, wlk, st, _native_params())
 
 
 # ---------------------------------------------------------------------------
@@ -226,12 +216,16 @@ def wall_slab_sampler(blocking):
     """
     tg = _TriGrid(blocking)
     B = tg.B
-    half_w = params.RIBBON_GROW_SLAB_HALF_WIDTH
 
-    def hit(cx, cy, ux, uy, tx, ty, z_lo, z_hi, depth=None):
-        """True if any blocking triangle reaches into the slab."""
+    def hit(cx, cy, ux, uy, tx, ty, z_lo, z_hi, depth=None, half_w=None):
+        """True if any blocking triangle reaches into the slab.
+
+        `half_w` overrides the actor-width tangent extent for a one-off box.
+        """
         if depth is None:
             depth = params.RIBBON_GROW_SLAB_DEPTH
+        if half_w is None:
+            half_w = params.RIBBON_GROW_SLAB_HALF_WIDTH
         for i in tg.candidates(cx, cy):
             if tg.z1[i] < z_lo or tg.z0[i] > z_hi:
                 continue
@@ -241,79 +235,6 @@ def wall_slab_sampler(blocking):
         return False
 
     return hit
-
-
-# ---------------------------------------------------------------------------
-# Nearest roughly-PARALLEL other-edge centerline
-# ---------------------------------------------------------------------------
-
-class NeighbourField:
-    """Nearest perpendicular distance to a roughly-parallel OTHER pathgrid edge.
-
-    See: docs/commentary/tes5_import_navmesh.md#only-parallel-edges-cap-a-width
-    """
-
-    def __init__(self, nodes, edges, node_z):
-        """Index every pathgrid edge into a padded plan-cell grid."""
-        self.segs = []          # (ax, ay, bx, by, dirx, diry, i, j, midz)
-        for (i, j) in edges:
-            if i >= len(nodes) or j >= len(nodes) or i == j:
-                continue
-            ax, ay = nodes[i][0], nodes[i][1]
-            bx, by = nodes[j][0], nodes[j][1]
-            dx, dy = bx - ax, by - ay
-            ln = math.hypot(dx, dy)
-            if ln < 1e-6:
-                continue
-            midz = 0.5 * (node_z[i] + node_z[j])
-            self.segs.append((ax, ay, bx, by, dx / ln, dy / ln, i, j, midz))
-        self.cell = 256.0
-        self.grid = {}
-        if not self.segs:
-            self.minx = self.miny = 0.0
-            return
-        arr = np.asarray([[s[0], s[1], s[2], s[3]] for s in self.segs])
-        self.minx = float(min(arr[:, 0].min(), arr[:, 2].min()))
-        self.miny = float(min(arr[:, 1].min(), arr[:, 3].min()))
-        for si, s in enumerate(self.segs):
-            ax, ay, bx, by = s[0], s[1], s[2], s[3]
-            gx0 = int((min(ax, bx) - self.minx) // self.cell)
-            gx1 = int((max(ax, bx) - self.minx) // self.cell)
-            gy0 = int((min(ay, by) - self.miny) // self.cell)
-            gy1 = int((max(ay, by) - self.miny) // self.cell)
-            for gx in range(gx0 - 1, gx1 + 2):
-                for gy in range(gy0 - 1, gy1 + 2):
-                    self.grid.setdefault((gx, gy), []).append(si)
-
-    def nearest(self, x, y, z, exclude_nodes, dirx, diry):
-        """Distance to the closest parallel edge at this height, else inf."""
-        if not self.segs:
-            return math.inf
-        gx = int((x - self.minx) // self.cell)
-        gy = int((y - self.miny) // self.cell)
-        best = math.inf
-        for si in self.grid.get((gx, gy), ()):
-            ax, ay, bx, by, sdx, sdy, i, j, midz = self.segs[si]
-            if i in exclude_nodes or j in exclude_nodes:
-                continue
-            if abs(midz - z) > params.RIBBON_GROW_NEIGHBOUR_ZTOL:
-                continue
-            if abs(sdx * dirx + sdy * diry) < params.RIBBON_GROW_PARALLEL_DOT:
-                continue                    # not roughly parallel -> not a wall
-            d = _seg_dist(x, y, ax, ay, bx, by)
-            if d < best:
-                best = d
-        return best
-
-
-def _seg_dist(px, py, ax, ay, bx, by):
-    """Plan distance from a point to the segment AB."""
-    dx, dy = bx - ax, by - ay
-    d2 = dx * dx + dy * dy
-    if d2 < 1e-9:
-        return math.hypot(px - ax, py - ay)
-    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / d2))
-    return math.hypot(px - (ax + dx * t), py - (ay + dy * t))
 
 
 # ---------------------------------------------------------------------------
@@ -381,24 +302,21 @@ def _floor_departs(walk_sample, cx, cy, dirx, diry, floor_z, d, lo):
     return s is None or abs(s - floor_z) > params.MAX_CLIMB
 
 
-def grow_half_width(cx, cy, floor_z, dirx, diry, tanx, tany, exclude_nodes,
-                    wall_hit, walk_sample, field, lo=None):
+def grow_half_width(cx, cy, floor_z, dirx, diry, tanx, tany,
+                    wall_hit, walk_sample, lo=None):
     """Grown half-width from center (cx,cy) outward along the unit perpendicular
     (dirx,diry).  (tanx,tany) is the edge tangent (slab width axis).
 
     Stops at the first of: wall slab, walkable-floor departure (> MAX_CLIMB or
-    no walkable there), neighbour midpoint, or the cap.  `lo` is the caller's
-    SOFT per-station floor, which a wall overrides.
-    See: docs/commentary/tes5_import_navmesh.md#soft-floor-never-beats-a-wall
+    no walkable there), or the cap.  `lo` is the caller's SOFT per-station
+    floor, which a wall overrides.
+    See: docs/commentary/tes5_import_navmesh.md#neighbour-cap-removed
     """
     step = params.RIBBON_GROW_STEP
     cap = params.RIBBON_GROW_MAX_HALF
     if lo is None:
         lo = params.RIBBON_GROW_MIN_HALF
-
-    nd = field.nearest(cx, cy, floor_z, exclude_nodes, tanx, tany)
-    neighbour_cap = 0.5 * nd if math.isfinite(nd) else cap
-    hard = min(cap, max(lo, neighbour_cap))
+    hard = max(lo, cap)
 
     z_lo = floor_z + params.RIBBON_GROW_SLAB_Z_BOTTOM
     z_hi = floor_z + params.AGENT_HEIGHT

@@ -72,16 +72,13 @@ def main():
     rng = np.random.default_rng(1234)
     blocking, walkable = make_world(rng)
 
-    # A pathgrid through the room, so the neighbour cap has parallel edges.
-    nodes = [(200.0, 200.0, 0.0), (1000.0, 200.0, 0.0),
+    nodes =[(200.0, 200.0, 0.0), (1000.0, 200.0, 0.0),
              (200.0, 400.0, 0.0), (1000.0, 400.0, 0.0),
              (200.0, 800.0, 0.0), (1000.0, 800.0, 0.0)]
     edges = [(0, 1), (2, 3), (4, 5), (0, 2), (2, 4)]
-    node_z = [0.0] * len(nodes)
 
     wall_hit = cg.wall_slab_sampler(blocking)
     walk_probe = cg.walkable_sampler(walkable)
-    field = cg.NeighbourField(nodes, edges, node_z)
 
     # Random stations across the room, on both perpendiculars of a random edge.
     rows = []
@@ -102,17 +99,17 @@ def main():
         lo = float(rng.choice([0.0, params.RIBBON_GROW_MIN_HALF,
                                params.RIBBON_HALF_WIDTH]))
         rows.append((cx, cy, 0.0, wx, wy, ux, uy, lo, ei))
-        meta.append((cx, cy, wx, wy, ux, uy, lo, (i, j)))
+        meta.append((cx, cy, wx, wy, ux, uy, lo))
 
     st = np.asarray(rows, dtype=np.float64)
-    got = cg.grow_batch(blocking, walkable, nodes, edges, node_z, st)
+    got = cg.grow_batch(blocking, walkable, st)
 
     worst = 0.0
     worst_at = None
     bad = 0
-    for n, (cx, cy, wx, wy, ux, uy, lo, ij) in enumerate(meta):
-        ref = cg.grow_half_width(cx, cy, 0.0, wx, wy, ux, uy, ij,
-                                 wall_hit, walk_probe, field, lo)
+    for n, (cx, cy, wx, wy, ux, uy, lo) in enumerate(meta):
+        ref = cg.grow_half_width(cx, cy, 0.0, wx, wy, ux, uy,
+                                 wall_hit, walk_probe, lo)
         d = abs(ref - float(got[n]))
         if d > worst:
             worst, worst_at = d, (n, ref, float(got[n]), cx, cy, lo)
