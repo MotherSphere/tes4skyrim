@@ -108,6 +108,10 @@ ALLOWED = {
         'root is already one plugin folder; name is a .psc filename',
     ('tes4_export/export_morrowind.py', 'write_export'):
         'root is already one plugin folder; name is a .txt filename',
+    ('tes4_export/morroblivion.py', '_index_models'):
+        'caller resolved via record_dir; name is a .txt filename',
+    ('asset_convert/lod/lod_gen.py', '_overlays_by_asset_dir'):
+        'dirs came from record_dir; name is OVERLAY_MANIFEST_NAME',
 }
 
 
