@@ -210,7 +210,7 @@ Function BeginChosenGame()
     BeginFalloutNV()
   EndIf
 
-  If ChoseSkyrim()
+  If ChoseSkyrim() || ChosenGame == GAME_FALLOUTNV
     Return
   EndIf
 
@@ -220,6 +220,10 @@ Function BeginChosenGame()
   ; that the chosen game's opening cell is up. The same beat vanilla's own
   ; quickstart uses: moveto, a settling Wait, then ShowRaceMenu (menus queue
   ; behind each other, so the converted intro simply resumes when it closes).
+  ;
+  ; FalloutNV is the EXCEPTION and returns above: its intro shows its OWN race
+  ; menu, authored as Doc Mitchell's reflectron at VCG01 stage 36. Asking here
+  ; too put one up before Doc had spoken, then his lines, then the real one.
   Utility.Wait(0.5)
   Game.ShowRaceMenu()
 EndFunction

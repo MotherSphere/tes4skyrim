@@ -111,13 +111,11 @@ def test_patch_skyrim_alone_does_not_drag_in_packaging():
 
 
 @pytest.mark.parametrize("path", [
-    "TESGameSelect/dist/TESGameSelect.esp",
     "TESGameSelect/scripts/source/TESGameSelectQuest.psc",
+    "TESGameSelect/scripts/source/TESGameSelectMQ101.psc",
 ])
 def test_starter_mod_repackages_itself_only(path):
-    """The starter mod is committed prebuilt, so a change to it re-runs only
-    the packaging action -- never a pipeline step, and never the BSA/zip steps,
-    whose archives do not contain it."""
+    """Standing outside the pipeline, it re-runs only the packaging action."""
     assert steps(path) == ["Package Start Mod"]
 
 

@@ -1,10 +1,11 @@
 """Package the TESGameSelect starter mod as a distributable zip.
 
 TESGameSelect ("Threads of Prophecy") is the new-game game selector: it
-intercepts MQ101 so the player picks which converted world to start in. Unlike
-every other mod in output/, it is not converted from a TES4 plugin — its Data
-folder is COMMITTED, prebuilt, at TESGameSelect/dist/. Nothing needs generating;
-it only needs wrapping so it installs like any other converted plugin.
+intercepts MQ101 so the player picks which converted world to start in. It is
+not converted from a TES4 plugin — it is BUILT here, then zipped: the MQ101
+override is spliced from the installed Skyrim.esm and the two scripts are
+compiled, so packaging always ships what the current source produces rather
+than a committed artifact that can fall behind it.
 
 The archive mirrors what `convert.py --pack-zip-only` produces for a converted
 plugin — output/Finished Mods/<name>.zip, contents rooted as a Data folder — so
@@ -24,40 +25,40 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from output_layout import finished_dir
+from tools.release.make_game_select_esp import build as build_start_mod
 
 MOD_NAME = "TESGameSelect"
 
-# The committed, prebuilt Data folder. Not output/TESGameSelect/ — that is
-# where tools/release/make_game_select_esp.py REBUILDS the plugin from the installed
-# Skyrim.esm, which needs the game present and is not what shipping requires.
-DIST_DIR = SCRIPT_DIR / MOD_NAME / "dist"
-
 
 def package(out_root: Path) -> int:
-    if not DIST_DIR.is_dir():
-        print(f"ERROR: {DIST_DIR} not found — the prebuilt starter mod is "
-              f"missing from the repository.")
-        return 1
+    """Build the starter mod, then zip what the build produced.
 
-    files = sorted(p for p in DIST_DIR.rglob('*') if p.is_file())
-    if not files:
-        print(f"ERROR: {DIST_DIR} is empty — nothing to package.")
-        return 1
-
-    zip_path = finished_dir(out_root) / f"{MOD_NAME}.zip"
+    Archive paths are relative to the build root, so the archive root IS the
+    Data folder: the .esp, scripts and seq all sit at top level.
+    """
+    build_dir = out_root / MOD_NAME
 
     print("=" * 54)
     print("  PACKAGE START MOD")
     print("=" * 54)
-    print(f"  Source: {DIST_DIR}")
+    if not build_start_mod(str(build_dir)):
+        print("ERROR: the starter mod did not build — nothing to package.")
+        return 1
+
+    files = sorted(p for p in build_dir.rglob('*') if p.is_file())
+    if not files:
+        print(f"ERROR: {build_dir} is empty — nothing to package.")
+        return 1
+
+    zip_path = finished_dir(out_root) / f"{MOD_NAME}.zip"
+    print()
+    print(f"  Source: {build_dir}")
     print(f"  Output: {zip_path}")
     print()
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for src in files:
-            # Paths are relative to dist/, so the archive root IS the Data
-            # folder: TESGameSelect.esp, scripts\, seq\ all sit at top level.
-            arc = src.relative_to(DIST_DIR)
+            arc = src.relative_to(build_dir)
             zf.write(src, arcname=str(arc))
             print(f"  + {arc}")
 

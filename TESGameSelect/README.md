@@ -18,19 +18,24 @@ A game whose plugin is not in your load order simply never appears in the menu.
 
 ## Installing
 
-Built files are in [dist/](dist/). Copy its contents into your `Data` folder
-(or install the folder as a mod):
+Nothing is prebuilt in this repo — the plugin is built on demand, because its
+`MQ101` override is spliced out of *your* installed `Skyrim.esm`. Press **Pack
+Start Mod** in the GUI, or run:
+
+```bash
+python tools/release/package_start_mod.py
+```
+
+Either produces `output/Finished Mods/TESGameSelect.zip`, whose root IS the
+`Data` folder, so it installs like any other converted mod:
 
 ```
 TESGameSelect.esp
 scripts\TESGameSelectQuest.pex
 scripts\TESGameSelectMQ101.pex
+scripts\source\*.psc                    (compiler input, harmless to keep)
 seq\TESGameSelect.seq                   (empty, see below)
 ```
-
-The script sources are not shipped in `dist` — they live in
-[scripts/source/](scripts/source/) in this repo. Copying them to
-`Data\scripts\source\` is optional and only useful if you intend to recompile.
 
 Enable `TESGameSelect.esp`. It declares only `Skyrim.esm` as a master and finds
 everything else at runtime, so any subset of the games works in any order.
@@ -140,17 +145,16 @@ what `GetFormFromFile` takes, so the load-order byte is irrelevant.
 ## Rebuilding
 
 ```bash
-python tools/release/make_game_select_esp.py --outdir TESGameSelect/dist
+python tools/release/make_game_select_esp.py        # -> output/TESGameSelect/
 python -m pytest tests/test_game_select_esp.py -v
 ```
 
 The build reads `MQ101` out of your installed `Skyrim.esm` (pass `--skyrim-esm`
 to point at another copy), writes the `.esp` and the empty `.seq`, then compiles
-both scripts. With no `--outdir` it writes to `output/TESGameSelect/` instead.
+both scripts. `package_start_mod.py` calls exactly this before zipping, so the
+archive can never lag the sources.
 
 The script sources of record are
 `TESGameSelect/scripts/source/TESGameSelectQuest.psc` and
 `TESGameSelectMQ101.psc`. The build stages a copy of them into
-`<outdir>/scripts/source/` as compiler input; that copy is redundant with the
-repo originals and is not part of what ships, so delete it after a rebuild into
-`dist/`.
+`<outdir>/scripts/source/` as compiler input.

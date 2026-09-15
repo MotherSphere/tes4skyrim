@@ -117,8 +117,8 @@ BUTTONS = [
      "A ship makes port in a land of ash."),
     ("Nehrim  -  You were not chosen. You must make for yourself a name", FID_GLOB_NEHRIM,
      "A godless land waits for no one."),
-    ("Mojave  -  A bullet in your head is not always the end", FID_GLOB_FALLOUTNV,
-     "A courier claws out of a shallow grave beneath a desert sky."),
+    ("Mojave  -  Your life was miraculously spared", FID_GLOB_FALLOUTNV,
+     "A shallow grave stirs beneath a desert sky."),
 ]
 
 #: One MESG per subset of the gated games, so each prologue names only those.
@@ -492,6 +492,34 @@ def stage_sources(root: str, outdir: str) -> None:
             os.path.join(src_dir, name + '.psc'))
 
 
+def build(outdir: str, skyrim_esm: str = None, compile_psc: bool = True) -> bool:
+    """Build the whole Data folder into `outdir`; True when it is shippable.
+
+    The single implementation behind both the CLI and the packager, so a zip
+    can never ship something the CLI would have built differently.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    os.makedirs(outdir, exist_ok=True)
+
+    esm = resolve_skyrim_esm(skyrim_esm)
+    if not esm:
+        return False
+
+    stage_sources(root, outdir)
+
+    print(f'Reading MQ101 from {esm} ...')
+    data, count = build_plugin(esm)
+    esp_path = os.path.join(outdir, PLUGIN_NAME)
+    with open(esp_path, 'wb') as f:
+        f.write(data)
+    print(f'Wrote {esp_path} ({len(data)} bytes, HEDR numRecords={count})')
+
+    seq = write_seq(outdir)
+    print(f'Wrote {seq} (empty — no Start-Game-Enabled quests)')
+
+    return compile_scripts(outdir) if compile_psc else True
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -508,27 +536,9 @@ def main():
 
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     outdir = args.outdir if os.path.isabs(args.outdir) else os.path.join(root, args.outdir)
-    os.makedirs(outdir, exist_ok=True)
-
-    skyrim_esm = resolve_skyrim_esm(args.skyrim_esm)
-    if not skyrim_esm:
+    ok = build(outdir, skyrim_esm=args.skyrim_esm, compile_psc=not args.no_compile)
+    if not ok:
         return 1
-
-    stage_sources(root, outdir)
-
-    print(f'Reading MQ101 from {skyrim_esm} ...')
-    data, count = build_plugin(skyrim_esm)
-    esp_path = os.path.join(outdir, PLUGIN_NAME)
-    with open(esp_path, 'wb') as f:
-        f.write(data)
-    print(f'Wrote {esp_path} ({len(data)} bytes, HEDR numRecords={count})')
-
-    seq = write_seq(outdir)
-    print(f'Wrote {seq} (empty — no Start-Game-Enabled quests)')
-
-    ok = True
-    if not args.no_compile:
-        ok = compile_scripts(outdir)
 
     print('\nShip the contents of this folder as a Data folder:')
     print(f'  {PLUGIN_NAME}')
@@ -536,7 +546,7 @@ def main():
     for name in (SCRIPT_NAME, MQ101_SCRIPT_NAME):
         print(f'  scripts\\{name}.pex')
         print(f'  scripts\\source\\{name}.psc')
-    return 0 if ok else 1
+    return 0
 
 
 if __name__ == '__main__':

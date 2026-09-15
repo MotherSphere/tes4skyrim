@@ -166,9 +166,10 @@ GLOBAL_ACTIONS = [
      "no crash and no log. Applies to a whole master chain at once",
      "To Master", 1),
     ("package_start_mod", "Package Start Mod",
-     "Zip the prebuilt TESGameSelect starter mod (the new-game world "
-     "selector) into output/Finished Mods, ready to install like any "
-     "converted plugin",
+     "Build the TESGameSelect starter mod (the new-game world selector) and "
+     "zip it into output/Finished Mods, ready to install like any "
+     "converted plugin. Needs Skyrim installed: the MQ101 override is "
+     "spliced from its Skyrim.esm",
      "Pack Start Mod", 1),
     ("modify_body_meshes", "Patch Skyrim",
      "Build the ARMA slot-44 body patch for your Skyrim load order",

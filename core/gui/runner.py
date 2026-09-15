@@ -762,8 +762,10 @@ def _stat_part(path: Path, label: str, missing: str) -> str:
 
 
 def _stamp_start_mod(app) -> str:
-    """The committed starter mod's dist tree."""
-    return _tree_stamp(REPO_ROOT / "TESGameSelect" / "dist")
+    """The starter mod's SOURCES: packaging builds from them."""
+    return (_tree_stamp(REPO_ROOT / "TESGameSelect" / "scripts" / "source")
+            + _stat_part(REPO_ROOT / "tools" / "release"
+                         / "make_game_select_esp.py", "gen", "missing"))
 
 
 def _stamp_runtime_dll(app) -> str:

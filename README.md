@@ -184,8 +184,10 @@ game hands off to that game's own character generation, with its real starting
 equipment and start location. Games whose plugin is not in your load order are
 detected at runtime and simply never appear in the menu, so any subset works.
 
-Ready-to-install files are in [TESGameSelect/dist/](TESGameSelect/dist/) — copy
-them into your `Data` folder and enable `TESGameSelect.esp`.
+Build it with the **Pack Start Mod** button (or `python
+tools/release/package_start_mod.py`) to get
+`output/Finished Mods/TESGameSelect.zip`, then install it like any other
+converted mod and enable `TESGameSelect.esp`.
 Because it overrides `MQ101`, it conflicts with other alternate-start mods
 (Live Another Life, Skyrim Unbound, Alternate Perspective) — use one at a time.
 See [TESGameSelect/README.md](TESGameSelect/README.md) for how it works,
