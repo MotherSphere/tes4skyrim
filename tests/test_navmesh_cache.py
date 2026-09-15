@@ -1216,6 +1216,55 @@ def test_environment_records_what_the_tag_cannot_see():
     assert 'shapely' in env and 'geos' in env
 
 
+_GEOM_A = ([(0.0, 0.0, 0.0)], [(0, 0, 0)], [])
+_GEOM_B = ([(9.0, 0.0, 0.0)], [(0, 0, 0)], [])
+
+
+def _prove_with_stub(monkeypatch, geoms, jobs):
+    """Run prove_cache over stubbed cells; returns (checked, bad, rebuilt).
+
+    `geoms` maps a job index to the FRESH geometry for that cell; the STORED
+    geometry is always _GEOM_A, so any other value reads as a mismatch.
+    """
+    from tes5_import.navmesh import from_pgrd, worker as navm_worker
+    rebuilt = []
+
+    def _run(job):
+        """Record the rebuild and hand back this cell's stubbed geometry."""
+        rebuilt.append(job['key'][0])
+        return job['key'], (b'', {'geometry': geoms[job['key'][0]]})
+
+    monkeypatch.setattr(from_pgrd, 'cached_geometry',
+                        lambda *_a: _GEOM_A)
+    monkeypatch.setattr(navm_worker, 'run_job', _run)
+    checked, bad = navm_verify.prove_cache(jobs, ('dir', 'tag'), len(jobs))
+    return checked, bad, rebuilt
+
+
+def test_proving_stops_at_the_first_mismatch(monkeypatch):
+    """One differing cell already decides the verdict -- don't rebuild the rest.
+
+    Every caller refuses on a non-empty `bad`, so cells after the first
+    mismatch cost a full rebuild each to enrich a message nothing reads.
+    """
+    jobs = [_job('interior', i) for i in range(4)]
+    geoms = {0: _GEOM_A, 1: _GEOM_B, 2: _GEOM_A, 3: _GEOM_A}
+    checked, bad, rebuilt = _prove_with_stub(monkeypatch, geoms, jobs)
+    assert rebuilt == [0, 1]
+    assert checked == 2
+    assert [k[0] for k in bad] == [1]
+
+
+def test_proving_compares_every_cell_when_all_reproduce(monkeypatch):
+    """No mismatch means no early exit -- the whole sample must be compared."""
+    jobs = [_job('interior', i) for i in range(4)]
+    geoms = {i: _GEOM_A for i in range(4)}
+    checked, bad, rebuilt = _prove_with_stub(monkeypatch, geoms, jobs)
+    assert rebuilt == [0, 1, 2, 3]
+    assert checked == 4
+    assert bad == []
+
+
 def test_adopt_skips_when_the_stamp_already_matches(tmp_path):
     """A cache this code built needs no adoption; prepare() must not rebuild."""
     cdir = tmp_path / 'navmesh_geom_cache'

@@ -2048,6 +2048,18 @@ entries adopted → 40/40 cache hits, 0 rebuilt**; Nehrim 39/39 → 2,885 adopte
 With a deliberately corrupted entry the same path refused (1/7 differ) and left
 the stamp uncertified.
 
+**Proving stops at the first mismatch.**
+<a id="proving-stops-at-the-first-mismatch"></a>
+Both callers of `cache_audit.prove_cache` — `adopt_if_unchanged` and
+`navmesh_adopt.adopt` — refuse on any non-empty `bad`, so a single differing
+cell has already decided the verdict. Continuing spends a full rebuild per
+remaining cell (**measured 1,869 ms/cell**) to enrich a message nothing reads:
+the refusal prints `N/checked differ` and regenerates either way. A cache that
+has genuinely changed is the common failing case — a real behaviour change
+moves most cells, not one — so the break usually lands on cell 1 and turns a
+~75-second sample into ~2 seconds. `checked` therefore counts cells COMPARED,
+not the sample size, and the refusal line reads `1/1 differ`.
+
 Verifying only cells that ALREADY HIT is not enough on its own — that guards a
 cache whose tag matches but whose geometry does not (GEOS drift, a bad adopt),
 and does nothing when the tag has moved, because then nothing hits at all. Both

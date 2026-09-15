@@ -108,35 +108,6 @@ def load_plugin(plugin: str, offset: int = 1):
     return im, jobs, geom_cache
 
 
-def prove(jobs: list, geom_cache, sample: int) -> tuple:
-    """Rebuild a stratified sample and compare.  (checked, [mismatched keys]).
-
-    Compares the stored payload IGNORING its hash: the hash is exactly what the
-    tag change invalidated, so requiring it to match would refuse every
-    adoption before comparing a single vertex.
-    """
-    from tes5_import.navmesh import worker as navm_worker
-    from tes5_import.navmesh.from_pgrd import cached_geometry, geom_equal
-    picked = list(jobs)
-    navm_verify.mark_jobs(picked, sample)
-    checked, bad = 0, []
-    for job in [j for j in picked if j.get('verify')]:
-        stored = cached_geometry(geom_cache, *job['key'])
-        if stored is None:
-            continue
-        key, (_bytes, meta) = navm_worker.run_job(job)
-        fresh = (meta or {}).get('geometry')
-        if fresh is None:
-            continue
-        checked += 1
-        ok = geom_equal(stored, fresh)
-        if not ok:
-            bad.append(key)
-        print('    %08X %s' % (key[0], 'identical' if ok else 'MISMATCH'),
-              flush=True)
-    return checked, bad
-
-
 def commit(jobs: list, cache_dir: str) -> tuple:
     """Re-key every entry that has a job.  (re-keyed, skipped).
 
@@ -189,13 +160,13 @@ def adopt(plugin: str, sample: int = SAMPLE_DEFAULT,
     print('  environment: %s' % environment())
     print('  proving %d sampled cells reproduce...' % sample, flush=True)
     _im, jobs, geom_cache = load_plugin(plugin, offset)
-    checked, bad = prove(jobs, geom_cache, sample)
+    checked, bad = navm_verify.prove_cache(jobs, geom_cache, sample)
     if not checked:
         print('  REFUSED: no sampled cell had a cache entry to compare.')
         return ADOPT_REFUSED
     if bad:
-        print('  REFUSED: %d/%d sampled cells differ -- a REAL behaviour '
-              'change, not a refactor.' % (len(bad), checked))
+        print('  REFUSED: cell %08X differs after %d compared -- a REAL '
+              'behaviour change, not a refactor.' % (bad[0][0], checked))
         print('  Regenerate instead: python convert.py -f "%s" --import-only'
               % plugin)
         return ADOPT_REFUSED

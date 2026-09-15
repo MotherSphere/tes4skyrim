@@ -144,12 +144,15 @@ def report_verification(cache: dict, geom_cache) -> bool:
     return True
 
 
-def prove_cache(jobs: list, geom_cache, sample: int, quiet: bool = False):
+def prove_cache(jobs: list, geom_cache, sample: int):
     """Rebuild a sample and compare against the STORED payload.  (checked, bad).
 
-    Ignores each entry's stored hash: that hash is exactly what a source change
-    invalidated, so requiring it to match would refuse before comparing a
-    single vertex.  Geometry is the authority on whether a cache still applies.
+    Returns after the FIRST mismatch, so `checked` counts cells compared rather
+    than the sample size.  Ignores each entry's stored hash: that hash is what a
+    source change invalidated, so matching it would refuse before comparing a
+    single vertex.
+
+    See: docs/commentary/tes5_import_navmesh.md#proving-stops-at-the-first-mismatch
     """
     from . import worker as navm_worker
     from .from_pgrd import cached_geometry, geom_equal
@@ -166,11 +169,11 @@ def prove_cache(jobs: list, geom_cache, sample: int, quiet: bool = False):
             continue
         checked += 1
         ok = geom_equal(stored, fresh)
+        print('      %08X %s' % (key[0], 'identical' if ok else 'MISMATCH'),
+              flush=True)
         if not ok:
             bad.append(key)
-        if not quiet:
-            print('      %08X %s' % (key[0], 'identical' if ok else 'MISMATCH'),
-                  flush=True)
+            break
     return checked, bad
 
 
@@ -259,8 +262,8 @@ def adopt_if_unchanged(jobs: list, geom_cache, sample: int = None) -> bool:
         print('    no comparable entries; regenerating.', flush=True)
         return False
     if bad:
-        print('    %d/%d differ -- a real geometry change; regenerating.'
-              % (len(bad), checked), flush=True)
+        print('    cell %08X differs after %d compared -- a real geometry '
+              'change; regenerating.' % (bad[0][0], checked), flush=True)
         return False
     done, _skipped = rekey_cache(jobs, geom_cache)
     try:
