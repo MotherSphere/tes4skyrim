@@ -144,31 +144,54 @@ def report_verification(cache: dict, geom_cache) -> bool:
     return True
 
 
-def prove_cache(jobs: list, geom_cache, sample: int):
-    """Rebuild a sample and compare against the STORED payload.  (checked, bad).
+def _sampled_with_entries(jobs: list, geom_cache, sample: int) -> tuple:
+    """The sampled jobs that HAVE a cache entry, and those entries.
 
-    Returns after the FIRST mismatch, so `checked` counts cells compared rather
-    than the sample size.  Ignores each entry's stored hash: that hash is what a
-    source change invalidated, so matching it would refuse before comparing a
-    single vertex.
-
-    See: docs/commentary/tes5_import_navmesh.md#proving-stops-at-the-first-mismatch
+    Reading the stored payload first keeps un-cached cells out of the rebuild
+    entirely: there is nothing to compare them against.
     """
-    from . import worker as navm_worker
-    from .from_pgrd import cached_geometry, geom_equal
+    from .from_pgrd import cached_geometry
     picked = list(jobs)
     mark_jobs(picked, sample)
-    checked, bad = 0, []
+    todo, stored = [], []
     for job in [j for j in picked if j.get('verify')]:
-        stored = cached_geometry(geom_cache, *job['key'])
-        if stored is None:
-            continue
-        key, (_b, meta) = navm_worker.run_job(job)
+        got = cached_geometry(geom_cache, *job['key'])
+        if got is not None:
+            todo.append(job)
+            stored.append(got)
+    return todo, stored
+
+
+def _rebuild_here(jobs: list):
+    """Rebuild each job in THIS process, yielding (key, result) in order."""
+    from . import worker as navm_worker
+    for job in jobs:
+        yield navm_worker.run_job(job)
+
+
+def prove_cache(jobs: list, geom_cache, sample: int, rebuild=None):
+    """Rebuild a sample and compare against the STORED payload.  (checked, bad).
+
+    `rebuild(jobs)` yields `(key, (bytes, meta))` in submission order; the
+    default rebuilds serially in this process.  Returns after the FIRST
+    mismatch, so `checked` counts cells compared, not the sample size.
+
+    Ignores each entry's stored hash: that hash is what a source change
+    invalidated, so matching it would refuse before comparing a single vertex.
+
+    See: docs/commentary/tes5_import_navmesh.md#proving-runs-on-the-pool
+    """
+    from .from_pgrd import geom_equal
+    todo, stored = _sampled_with_entries(jobs, geom_cache, sample)
+    if not todo:
+        return 0, []
+    checked, bad = 0, []
+    for was, (key, (_b, meta)) in zip(stored, (rebuild or _rebuild_here)(todo)):
         fresh = (meta or {}).get('geometry')
         if fresh is None:
             continue
         checked += 1
-        ok = geom_equal(stored, fresh)
+        ok = geom_equal(was, fresh)
         print('      %08X %s' % (key[0], 'identical' if ok else 'MISMATCH'),
               flush=True)
         if not ok:
@@ -229,7 +252,8 @@ def rekey_cache(jobs: list, geom_cache) -> tuple:
     return done, skipped
 
 
-def adopt_if_unchanged(jobs: list, geom_cache, sample: int = None) -> bool:
+def adopt_if_unchanged(jobs: list, geom_cache, sample: int = None,
+                       rebuild=None) -> bool:
     """Salvage a stale cache whose geometry still reproduces.  True if adopted.
 
     Called before the navmesh pool dispatches.  A source edit moves the tag, so
@@ -257,7 +281,7 @@ def adopt_if_unchanged(jobs: list, geom_cache, sample: int = None) -> bool:
     print('  Navmesh cache: built by different navmesh code -- checking '
           'whether its geometry still reproduces (%d cells)...' % budget,
           flush=True)
-    checked, bad = prove_cache(jobs, geom_cache, budget)
+    checked, bad = prove_cache(jobs, geom_cache, budget, rebuild)
     if not checked:
         print('    no comparable entries; regenerating.', flush=True)
         return False
@@ -291,7 +315,8 @@ def init_context(base_model_by_fid, door_fids, collision_cache,
                  door_centers_cache) -> None:
     """Populate this process's navm_worker globals before any run_job call.
 
-    MUST run before `prepare`, which rebuilds sampled cells in THIS process.
+    MUST run before `prepare`: `rekey_cache` reads these globals in the PARENT,
+    and a serial prover rebuilds cells here too.
     disable_gc=False keeps the parent's collector; the pool's copies pass True.
 
     See: docs/commentary/tes5_import_navmesh.md#verifying-a-cache-against-fresh-geometry
@@ -303,14 +328,15 @@ def init_context(base_model_by_fid, door_fids, collision_cache,
                             door_centers_cache=door_centers_cache)
 
 
-def prepare(jobs: list, geom_cache) -> None:
+def prepare(jobs: list, geom_cache, rebuild=None) -> None:
     """Ready the navmesh cache for this run: adopt if salvageable, then sample.
 
     The one call the import makes.  Adoption rescues a cache whose tag moved
     but whose geometry still reproduces; marking then picks the cells this run
-    re-verifies.  `init_context` MUST have run first.
+    re-verifies.  `rebuild` is the pooled prover; without it adoption proves
+    serially and `init_context` MUST have run first.
     """
     if not geom_cache:
         return
-    adopt_if_unchanged(jobs, geom_cache)
+    adopt_if_unchanged(jobs, geom_cache, rebuild=rebuild)
     mark_jobs(jobs, verify_budget())

@@ -385,33 +385,83 @@ def stamp_navmesh_cache_tag(geom_cache) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _progress(done, total, t0):
+    """Print one `done/total` line with the rate so far."""
+    rate = done / max(time.time() - t0, 1e-6)
+    print(f"    {done}/{total} navmeshes ({rate:.1f}/s)", flush=True)
+
+
+def _progress_every(total) -> int:
+    """Jobs between progress lines: about 40 lines, whatever the plugin size."""
+    return max(1, total // 40)
+
+
 def _run_inline(jobs) -> dict:
     """Convert every job in this process; one tiny job is not worth a pool."""
     cache = {}
-    for job in jobs:
+    total, every, t0 = len(jobs), _progress_every(len(jobs)), time.time()
+    for done, job in enumerate(jobs, 1):
         key, result = navm_worker.run_job(job)
         cache[key] = result
+        if done % every == 0 or done == total:
+            _progress(done, total, t0)
     return cache
 
 
-def _run_pooled(jobs, initargs, n_workers) -> dict:
-    """Convert every job across a process pool.
+def _map_kwargs(n_jobs, n_workers) -> dict:
+    """chunksize/buffersize for a run_job map.
 
     `buffersize` bounds how many jobs are pickled and queued at once; it only
     exists from Python 3.14, and omitting it is the pre-3.14 behaviour.
     """
-    chunksize = max(1, len(jobs) // (n_workers * 8))
-    map_kwargs = {'chunksize': chunksize}
+    chunksize = max(1, n_jobs // (n_workers * 8))
+    kwargs = {'chunksize': chunksize}
     if sys.version_info >= (3, 14):
-        map_kwargs['buffersize'] = n_workers * chunksize * _BUFFER_FACTOR
+        kwargs['buffersize'] = n_workers * chunksize * _BUFFER_FACTOR
+    return kwargs
+
+
+def _pool(initargs, n_workers) -> ProcessPoolExecutor:
+    """A run_job pool whose workers carry this plugin's context."""
+    return ProcessPoolExecutor(max_workers=n_workers,
+                               initializer=navm_worker.init_worker,
+                               initargs=initargs,
+                               max_tasks_per_child=_TASKS_PER_CHILD)
+
+
+def _run_pooled(jobs, initargs, n_workers) -> dict:
+    """Convert every job across a process pool."""
     cache = {}
-    with ProcessPoolExecutor(max_workers=n_workers,
-                             initializer=navm_worker.init_worker,
-                             initargs=initargs,
-                             max_tasks_per_child=_TASKS_PER_CHILD) as ex:
-        for key, result in ex.map(navm_worker.run_job, jobs, **map_kwargs):
+    total, every, t0 = len(jobs), _progress_every(len(jobs)), time.time()
+    with _pool(initargs, n_workers) as ex:
+        for done, (key, result) in enumerate(
+                ex.map(navm_worker.run_job, jobs,
+                       **_map_kwargs(len(jobs), n_workers)), 1):
             cache[key] = result
+            if done % every == 0 or done == total:
+                _progress(done, total, t0)
     return cache
+
+
+def pooled_prover(initargs, n_workers):
+    """A `rebuild` callable for cache_audit.prove_cache, backed by the pool.
+
+    Yields `(key, meta)` in SUBMISSION order, so the first mismatch a caller
+    sees does not depend on which worker finished first.
+
+    See: docs/commentary/tes5_import_navmesh.md#proving-runs-on-the-pool
+    """
+    def _rebuild(jobs):
+        """Rebuild `jobs` across the pool, yielding results in order."""
+        if len(jobs) == 1 or n_workers == 1:
+            for job in jobs:
+                yield navm_worker.run_job(job)
+            return
+        workers = min(n_workers, len(jobs))
+        with _pool(initargs, workers) as ex:
+            yield from ex.map(navm_worker.run_job, jobs,
+                              **_map_kwargs(len(jobs), workers))
+    return _rebuild
 
 
 def precompute_navmeshes(by_type: dict, writer, base_model_by_fid: dict,
@@ -420,8 +470,8 @@ def precompute_navmeshes(by_type: dict, writer, base_model_by_fid: dict,
 
     FormIDs are pre-allocated serially in builder-visit order, so results are
     byte-identical to the single-threaded path regardless of completion order.
-    The worker context is initialized HERE, in the parent, before
-    `navm_verify.prepare` rebuilds any sampled cell.
+    The worker context is initialized HERE, in the parent, because
+    `navm_verify.prepare` re-keys entries from it.
 
     See: docs/commentary/tes5_import_navmesh.md#pool-orchestration
     """
@@ -445,7 +495,8 @@ def precompute_navmeshes(by_type: dict, writer, base_model_by_fid: dict,
     navm_verify.init_context(base_model_by_fid, door_fids, collision_cache,
                              formid_offset, geom_cache,
                              get_injected_formids(), door_centers)
-    navm_verify.prepare(jobs, geom_cache)
+    navm_verify.prepare(jobs, geom_cache,
+                        pooled_prover(initargs, n_workers))
 
     print(f"  Generating {len(jobs)} navmeshes (PGRD->NAVM) "
           f"across {n_workers} processes...")

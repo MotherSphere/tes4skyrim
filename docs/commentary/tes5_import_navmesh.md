@@ -2048,6 +2048,26 @@ entries adopted → 40/40 cache hits, 0 rebuilt**; Nehrim 39/39 → 2,885 adopte
 With a deliberately corrupted entry the same path refused (1/7 differ) and left
 the stamp uncertified.
 
+**Proving runs on the pool, not in the parent.**
+<a id="proving-runs-on-the-pool"></a>
+Proving rebuilds real cells with the same `navm_worker.run_job` the main stage
+uses, so it takes the same parallelism: `pool.pooled_prover` hands
+`cache_audit.prove_cache` a `rebuild` callable backed by the same
+`ProcessPoolExecutor`, initializer and `initargs` as `_run_pooled`. Serially,
+adoption cost the sample size in full cell builds (**1,869 ms/cell measured**,
+so ~75 s for the default 40) immediately before a stage that fans the identical
+call across every worker.
+
+Results are yielded in **submission order** (`ex.map`, not `as_completed`), which
+is what keeps the early exit deterministic: the first mismatch a caller sees is a
+property of the job list, not of which worker happened to finish first. Two runs
+over the same cache therefore refuse on the same cell and report the same
+`checked` count.
+
+`prove_cache` keeps a serial default (`rebuild=None` calls `run_job` directly),
+because `navmesh_adopt` and the tests drive it outside a pool context, and a
+pool of one worker is slower than no pool at all.
+
 **Proving stops at the first mismatch.**
 <a id="proving-stops-at-the-first-mismatch"></a>
 Both callers of `cache_audit.prove_cache` — `adopt_if_unchanged` and
