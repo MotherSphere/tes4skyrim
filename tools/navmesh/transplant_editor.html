@@ -697,10 +697,12 @@ function refreshScore() {
   if (!G) return;
   clearTimeout(scoreTimer);
   scoreTimer = setTimeout(async () => {
-    S = await (await fetch('/score?cell=' + encodeURIComponent(G.cell), {
+    const s = await (await fetch('/score?cell=' + encodeURIComponent(G.cell), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload())
     })).json();
+    if (s.error) return;
+    S = s;
     rebuild(); status();
   }, 90);
 }
@@ -714,6 +716,11 @@ async function loadCell(name, keepView) {
                            + encodeURIComponent(name))).json();
   } catch (err) {
     $('busy').textContent = 'load FAILED: ' + err;
+    return;
+  }
+  if (G.error) {
+    $('busy').textContent = G.error;
+    setTimeout(() => { $('busy').style.display = 'none'; }, 2500);
     return;
   }
   /* Leaving mesh mode's geometry behind would show two cells at once. */
@@ -1381,7 +1388,9 @@ window.addEventListener('resize', resize);
   $('cell').innerHTML = '<option value="">corpus cell…</option>' +
     names.map(n => `<option>${n}</option>`).join('');
   $('plugin').innerHTML = plugs.map(n => `<option>${n}</option>`).join('');
-  await loadCell(names[0], false);
+  /* An empty corpus is normal: the mesh editor reads exports, not the
+     corpus, so leave the viewport idle rather than loading nothing. */
+  if (names.length) await loadCell(names[0], false);
   resize();
 })();
 </script>

@@ -1265,6 +1265,68 @@ def test_proving_compares_every_cell_when_all_reproduce(monkeypatch):
     assert bad == []
 
 
+def test_proving_uses_the_rebuild_callable_it_was_given(monkeypatch):
+    """The pooled prover, not run_job in the parent, does the rebuilding."""
+    from tes5_import.navmesh import from_pgrd, worker as navm_worker
+
+    def _boom(_job):
+        """Serial rebuilds are the regression this test guards against."""
+        raise AssertionError('rebuilt in the parent')
+
+    monkeypatch.setattr(from_pgrd, 'cached_geometry', lambda *_a: _GEOM_A)
+    monkeypatch.setattr(navm_worker, 'run_job', _boom)
+    jobs = [_job('interior', i) for i in range(3)]
+    checked, bad = navm_verify.prove_cache(
+        jobs, ('dir', 'tag'), 3,
+        lambda js: ((j['key'], (b'', {'geometry': _GEOM_A})) for j in js))
+    assert (checked, bad) == (3, [])
+
+
+def test_proving_reports_the_first_mismatch_in_submission_order(monkeypatch):
+    """Out-of-order completion must not change WHICH cell is blamed.
+
+    ex.map yields in submission order, so the verdict is a property of the job
+    list rather than of whichever worker finished first.
+    """
+    from tes5_import.navmesh import from_pgrd
+    monkeypatch.setattr(from_pgrd, 'cached_geometry', lambda *_a: _GEOM_A)
+    jobs = [_job('interior', i) for i in range(4)]
+    geoms = {0: _GEOM_A, 1: _GEOM_B, 2: _GEOM_B, 3: _GEOM_A}
+
+    def _ordered(js):
+        """Yield in submission order, as ex.map does."""
+        return ((j['key'], (b'', {'geometry': geoms[j['key'][0]]}))
+                for j in js)
+
+    checked, bad = navm_verify.prove_cache(jobs, ('dir', 'tag'), 4, _ordered)
+    assert [k[0] for k in bad] == [1]
+    assert checked == 2
+
+
+def test_import_proves_on_the_pool_not_in_the_parent(monkeypatch):
+    """precompute_navmeshes must hand prepare() a pooled rebuild callable."""
+    got = {}
+    monkeypatch.setattr(navm_pool, 'precompute_fallout_navmeshes',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(navm_pool, 'gather_navm_jobs',
+                        lambda *a, **k: [_job('interior', 0)])
+    monkeypatch.setattr(navm_pool, 'navmesh_geom_cache',
+                        lambda *a: ('dir', 'tag'))
+    monkeypatch.setattr(navm_pool, 'navm_worker_count', lambda n: 4)
+    monkeypatch.setattr(navm_verify, 'init_context', lambda *a, **k: None)
+    monkeypatch.setattr(navm_pool, '_run_inline', lambda jobs: {})
+    monkeypatch.setattr(navm_pool, '_run_pooled', lambda *a: {})
+    monkeypatch.setattr(navm_pool, 'get_formid_index_offset', lambda: 0)
+    monkeypatch.setattr(navm_pool, 'get_injected_formids', lambda: {})
+    monkeypatch.setattr(navm_pool, 'stamp_navmesh_cache_tag', lambda *a: None)
+    monkeypatch.setattr(navm_verify, 'prepare',
+                        lambda jobs, gc, rebuild=None: got.setdefault(
+                            'rebuild', rebuild))
+
+    navm_pool.precompute_navmeshes({}, _StubWriter(), {}, set())
+    assert callable(got.get('rebuild'))
+
+
 def test_adopt_skips_when_the_stamp_already_matches(tmp_path):
     """A cache this code built needs no adoption; prepare() must not rebuild."""
     cdir = tmp_path / 'navmesh_geom_cache'
@@ -1308,10 +1370,10 @@ class _StubWriter:
 def test_worker_context_is_initialized_before_any_rebuild(monkeypatch):
     """precompute_navmeshes must init the worker BEFORE navm_verify.prepare.
 
-    prepare() rebuilds sampled cells in the PARENT, and run_job reads globals
-    only init_worker sets.  Initializing after it (as the import did) left
-    _BASE_MODEL_BY_FID empty, so every REFR resolved to no mesh, the cell
-    voxelized bare terrain, and a good cache reported MISMATCH.
+    rekey_cache reads globals only init_worker sets, in the PARENT.
+    Initializing after prepare (as the import did) left _BASE_MODEL_BY_FID
+    empty, so every REFR resolved to no mesh, the cell voxelized bare terrain,
+    and a good cache reported MISMATCH.
     """
     calls = []
     monkeypatch.setattr(navm_pool, 'precompute_fallout_navmeshes',

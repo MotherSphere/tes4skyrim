@@ -12,6 +12,10 @@ the answer into the input.
     python tools/navmesh/transplant_server.py            # all corpus cells
     python tools/navmesh/transplant_server.py --port 8765
 
+The corpus is OPTIONAL: with no fitted cells the transplant view is simply
+empty and the mesh editor -- which reads exports, not the corpus -- still
+serves every plugin cell.
+
 Geometry is baked to JSON once per cell and cached in memory: gathering a
 cell's collision takes seconds, and the page re-fetches on every cell switch.
 
@@ -236,6 +240,8 @@ def bake(cell):
     if cell in _CACHE:
         return _CACHE[cell]
     entry = load(cell)
+    if entry is None:
+        return {'error': 'no corpus entry for %r' % cell}
     nodes, edges = placed_nodes(cell, entry=entry)
     tris, adoors = _authored_full(entry)
     zs = [p[2] for t in tris for p in t] or [0.0]
@@ -362,6 +368,8 @@ def score(cell, edits=None):
     round trip through the corpus file.
     """
     entry = load(cell)
+    if entry is None:
+        return {'error': 'no corpus entry for %r' % cell}
     nodes, edges = placed_nodes(cell, entry=entry)
     dropped = set(entry.get('dropped', []))
     if edits:
@@ -484,13 +492,12 @@ def main():
     ap.add_argument('--no-browser', action='store_true')
     a = ap.parse_args()
     found = cells()
-    if not found:
-        print('no corpus cells in %s -- run `transplant.py fit` first' % CORPUS)
-        return 1
     print('loading the audit index (once, ~10s) ...')
-    index_for(load(found[0]).get('export', DEFAULT_EXPORT))
+    index_for((load(found[0]) if found else {}).get('export', DEFAULT_EXPORT))
     url = 'http://127.0.0.1:%d/' % a.port
-    print('transplant editor: %s\n  cells: %s' % (url, ', '.join(found)))
+    print('transplant editor: %s\n  cells: %s'
+          % (url, ', '.join(found) if found
+             else '(none fitted -- mesh editor only)'))
     if not a.no_browser:
         webbrowser.open(url)
     HTTPServer(('127.0.0.1', a.port), Handler).serve_forever()
