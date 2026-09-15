@@ -28,6 +28,8 @@ from script_convert.command_rows import (
     ACTOR_VALUE_READ_FUNCTIONS, param_types
 )
 from script_convert.commands_falloutnv import FALLOUT_HANDLERS
+from script_convert.constants import typed_already
+from script_convert.constants_falloutnv import FALLOUT_COMMAND_ALIASES
 
 #: TES4 command name (lowercase) -> handler `(ctx, call) -> str | None`.
 REGISTRY: dict = dict(FALLOUT_HANDLERS)
@@ -113,18 +115,14 @@ def stage(ctx, call) -> str:
 
     TES4 spells the quest as the first argument and the stage as the second;
     Papyrus makes the quest the receiver.
+    See: docs/commentary/script_convert.md#quest-property-never-downgrades
     """
     parts = ctx.arg_srcs()
     quest_src = parts[0].strip() if parts else (call.ref or '')
     if not quest_src:
         return None
     prop = safe_property_name(quest_src)
-    # Never DOWNGRADE: the same quest is often reached both as a stage target
-    # and as a cross-script variable owner (`Arena.SetStage 10` beside
-    # `Arena.ChorrolMatch`), and the specific TES4_<script> type is what makes
-    # the variable read compile.  Overwriting it with the base `Quest` failed
-    # every such read ("field or property ChorrolMatch not found").
-    if not _typed_already(ctx, prop):
+    if not typed_already(ctx.sc.property_refs, prop):
         ctx.sc.property_refs[prop] = 'Quest'
     if call.name == 'setstage':
         return f'{prop}.SetStage({call.arg(1, "0") if len(parts) > 1 else 0})'
@@ -143,6 +141,7 @@ def quest_state(ctx, call) -> str:
     StopQuest is `Stop()` -- a run-bit global was tried and REVERTED (see
     docs/commentary/script_convert.md); the fix is the Start() hoist and nothing
     more.
+    See: docs/commentary/script_convert.md#quest-property-never-downgrades
     """
     parts = ctx.arg_srcs()
     quest_src = parts[0].strip() if parts else (call.ref or '')
@@ -157,12 +156,7 @@ def quest_state(ctx, call) -> str:
     # was never started.
     quest_src = ctx._scro_alias_for(quest_src) or quest_src
     prop = safe_property_name(quest_src)
-    # Keep an existing type: a TES4_XxxScript (which extends Quest) still
-    # answers Start/Stop/IsRunning, and the cross-script variable reads that
-    # need that type keep working.  Quest is enough when nothing is known --
-    # the SCPT-derived name would be wrong here, since in TES5 the quest's
-    # VMAD script is TES4_QF_<EditorID> rather than the SCPT name.
-    if not _typed_already(ctx, prop):
+    if not typed_already(ctx.sc.property_refs, prop):
         ctx.sc.property_refs[prop] = 'Quest'
     papyrus = {'startquest': 'Start', 'stopquest': 'Stop',
                'getquestrunning': 'IsRunning',
@@ -1349,20 +1343,6 @@ def set_game_setting(ctx, call) -> str:
     return ctx._gamesetting_write(setting, call.arg(1), call.extends)
 
 
-def _typed_already(ctx, prop: str) -> bool:
-    """Does this property already carry a type?
-
-    CASE-INSENSITIVE: Papyrus is, so `CharacterGen` and `Charactergen` are ONE
-    property -- but they land under different dict keys, and an exact-match
-    guard let a later `SetStage` overwrite the specific `TES4_<script>` type
-    with the base `Quest`.  Every cross-script variable read through it then
-    failed ("field or property speaker not found").
-    """
-    low = prop.lower()
-    return any(name.lower() == low and ptype
-               for name, ptype in ctx.sc.property_refs.items())
-
-
 # ---------------------------------------------------------------------------
 # Player controls
 # ---------------------------------------------------------------------------
@@ -1383,3 +1363,7 @@ def player_controls(ctx, call) -> str:
     ctx.sc.property_refs['TES4ControlsDisabled'] = 'GlobalVariable'
     return (f'Game.{verb}PlayerControls()\n'
             f'TES4ControlsDisabled.SetValue({1 if disabling else 0})')
+
+#: FO3/FNV spellings of shared handlers, bound once every handler is registered.
+REGISTRY.update({alias: REGISTRY[name]
+                 for alias, name in FALLOUT_COMMAND_ALIASES.items()})

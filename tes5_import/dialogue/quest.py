@@ -20,6 +20,7 @@ from ..base.conditions import (CTDA_OR, CTDA_RUN_ON_TARGET,
                                 convert_ctda,
                                 convert_script_var_ctda)
 from .objective_text import short_objective
+from .quest_falloutnv import authored_objectives, has_authored_objectives
 from ..base.text_reader import get_formid_index_offset, remap_formid
 from ..record_types.common import (
     get_formid,
@@ -403,7 +404,8 @@ def _quest_dnam(rec: dict) -> bytes:
     flags = tes4_flags & (QUST_START_GAME_ENABLED | QUST_ALLOW_REPEATED_STAGES)
     if flags & QUST_START_GAME_ENABLED:
         flags |= QUST_STARTS_ENABLED
-    qtype = 8 if _quest_has_journal(rec) else 0
+    qtype = 8 if (_quest_has_journal(rec)
+                  or has_authored_objectives(rec)) else 0
     return struct.pack('<HBBII', flags, priority, 0, 0, qtype)
 
 
@@ -671,12 +673,14 @@ def convert_QUST(rec: dict, fid_to_edid: dict = None,
                  well_known_props: dict = None,
                  unlock_plan: dict = None,
                  unlock_globals: dict = None,
-                 pack_plan=None, xref=None) -> bytes:
+                 pack_plan=None, xref=None,
+                 script_vars: dict = None) -> bytes:
     """QUST -> Quest conversion (the original quest, not the synthetic one).
 
     Order: EDID [VMAD] FULL DNAM NEXT [stages] [objectives] ANAM [aliases].
     unlock_plan/unlock_globals bind the AddTopic unlock GLOB properties for
-    stage result scripts that reveal topics.
+    stage result scripts that reveal topics; script_vars names the quest
+    variables authored objective targets are gated on.
 
     See: docs/commentary/tes5_import_quest.md#quest-conversion
     """
@@ -706,7 +710,10 @@ def convert_QUST(rec: dict, fid_to_edid: dict = None,
     stage_count = get_int(rec, 'StageCount')
     subs += _quest_stages(rec, stage_count)
     alias_by_fid, targets = _quest_targets(rec)
-    subs += _quest_objectives(rec, stage_count, targets)
+    subs += (authored_objectives(rec, alias_by_fid, script_vars or {},
+                                 get_formid_index_offset())
+             if has_authored_objectives(rec)
+             else _quest_objectives(rec, stage_count, targets))
 
     qfid = get_formid(rec, 'FormID')
     alias_packages = _quest_alias_packages(pack_plan, qfid, alias_by_fid)

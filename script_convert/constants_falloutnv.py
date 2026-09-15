@@ -33,6 +33,15 @@ FALLOUT_BLOCK_FILTER_PARAM = {
 }
 
 
+#: FO3/FNV names only commands_falloutnv handles, so the parser reads them AS commands.
+FALLOUT_HANDLED_COMMANDS = frozenset({
+    'setobjectivedisplayed', 'setobjectivecompleted', 'setobjectivefailed',
+    'setquestdelay',
+})
+
+#: FO3/FNV spellings of shared handlers: alias -> the handler's TES4 name.
+FALLOUT_COMMAND_ALIASES = {'cios': 'cast', 'castimmediateonself': 'cast'}
+
 #: FO3/FNV commands as COMMAND_ROWS specs (Cmd keyword arguments); 'MAP'/'ACTOR' name constants.MAP/ACTOR.
 FALLOUT_COMMAND_ROWS = {
     'setenemy': dict(emit='{p0}.SetEnemy({p1}, {b2}, {b3})',
@@ -124,7 +133,6 @@ FALLOUT_COMMAND_ROWS = {
                               flags='actor_only zero_arg cmp_bool'),
     'rewardxp': dict(note='{f} {a} - Skyrim has no experience points'),
     'addnote': dict(note='{f} {a} - Pip-Boy notes have no Skyrim equivalent'),
-    'setquestdelay': dict(note='{f} {a} - a Papyrus quest script polls on its own'),
     'setreputation': dict(note='{f} {a} - Skyrim has no reputation'),
     'addreputation': dict(note='{f} {a} - Skyrim has no reputation'),
     'removereputation': dict(note='{f} {a} - Skyrim has no reputation'),
@@ -132,4 +140,11 @@ FALLOUT_COMMAND_ROWS = {
     'getreputationthreshold': dict(emit='0', note='{f} {a} - Skyrim has no reputation (read as 0)'),
     'isplayerinregion': dict(emit='0', note='{f} {a} - Skyrim has no region query (read as 0)'),
     'hasperk': dict(emit='0', note='{f} {a} - FO3/FNV perks are not converted (read as 0)'),
+    #: Rendered by commands_falloutnv.quest_native; the rows carry the Bool flags.
+    'getobjectivedisplayed': dict(emit='IsObjectiveDisplayed', subj='MAP', bare=True,
+                                  flags='bare_bool cmp_bool'),
+    'getobjectivecompleted': dict(emit='IsObjectiveCompleted', subj='MAP', bare=True,
+                                  flags='bare_bool cmp_bool'),
+    'getobjectivefailed': dict(emit='IsObjectiveFailed', subj='MAP', bare=True,
+                               flags='bare_bool cmp_bool'),
 }

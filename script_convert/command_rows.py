@@ -11,7 +11,9 @@ See: docs/commentary/script_convert.md#command-rows
 """
 
 from script_convert.constants import ACTOR_VALUE_MAP
-from script_convert.constants_falloutnv import FALLOUT_COMMAND_ROWS
+from script_convert.constants_falloutnv import (FALLOUT_COMMAND_ALIASES,
+                                                FALLOUT_COMMAND_ROWS,
+                                                FALLOUT_HANDLED_COMMANDS)
 
 # --------------------------------------------------------------------------
 # The row type and its lookups
@@ -1050,7 +1052,8 @@ HANDLED_COMMANDS = frozenset((
 
 
 #: Rows plus handler-only names. See: docs/commentary/script_convert.md#command-rows
-KNOWN_COMMANDS = frozenset(COMMAND_ROWS) | HANDLED_COMMANDS
+KNOWN_COMMANDS = (frozenset(COMMAND_ROWS) | HANDLED_COMMANDS
+                  | FALLOUT_HANDLED_COMMANDS | frozenset(FALLOUT_COMMAND_ALIASES))
 
 
 #: See: docs/commentary/script_convert.md#papyrus-value-types

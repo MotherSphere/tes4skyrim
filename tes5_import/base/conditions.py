@@ -19,6 +19,8 @@ conditions reference for the methodology.
 import struct
 
 from .constants import ENGINE_GLOBAL_FORMIDS
+from .conditions_falloutnv import (FALLOUT_CTDA_SIZE, fallout_function,
+                                   fallout_run_on)
 from ..generated.ctda_param_types import CTDA_FORMID_PARAMS
 from .text_reader import (_ENGINE_FIXED_FORMIDS, get_formid_index_offset,
                           remap_formid)
@@ -433,6 +435,8 @@ GET_DISPOSITION = 76
 # 419 is GetObjectiveCompleted(Quest, Integer) -- emitting that instead turns
 # every converted disposition gate into an unrelated quest check.
 GET_RELATIONSHIP_RANK = 403
+#: PlayerRef, the ACTOR-typed parameter; never the player base NPC 0x07.
+_PLAYER_REF_FORMID = 0x00000014
 
 # Oblivion's default starting disposition, used when a comparison has to be
 # resolved rather than translated.
@@ -524,44 +528,72 @@ def is_speak_as_record(rec: dict) -> bool:
         return False
 
 
+def _disposition_fields(type_byte: int, data: bytes) -> 'tuple | None':
+    """(comp_raw, func_idx, param1, param2) for a GetDisposition condition.
+
+    None drops a Use Global comparison, whose GLOB cannot be rescaled.
+    See: docs/commentary/tes5_import_conditions.md#disposition-param
+    """
+    if type_byte & CTDA_USE_GLOBAL:
+        return None
+    rank = float(disposition_to_rank(struct.unpack_from('<f', data, 4)[0]))
+    comp_raw = struct.unpack('<I', struct.pack('<f', rank))[0]
+    return comp_raw, GET_RELATIONSHIP_RANK, _PLAYER_REF_FORMID, 0
+
+
+def _convert_params(func_idx: int, param1: int, param2: int,
+                    offset: int) -> 'tuple | None':
+    """(param1, param2) with only FormID slots remapped, or None to drop.
+
+    `func_idx` is the TES5 index.  Actor-value and race parameters are
+    translated between the games' tables rather than remapped.
+    See: docs/commentary/tes5_import_conditions.md#formid-params
+    """
+    fid_slots = CTDA_FORMID_PARAMS.get(func_idx, frozenset())
+    if func_idx in _AV_PARAM_FUNCS:
+        av = param1 if param1 < 0x80000000 else param1 - 0x100000000
+        if av in _TES4_AV_ATTRIBUTES or av not in _TES4_AV_TO_TES5:
+            return None
+        return _TES4_AV_TO_TES5[av], 0
+    if func_idx in _RACE_PARAM_FUNCS:
+        param1 = _map_race_param(param1)
+        if param1 is None:
+            return None
+    elif 1 in fid_slots:
+        param1 = _remap_formid(param1, offset)
+    if 2 in fid_slots:
+        param2 = _remap_formid(param2, offset)
+    return param1, param2
+
+
+def _target_run_on(func_idx: int, run_on_target_ref: 'int | None',
+                   drop_run_on_target: bool) -> 'tuple | None':
+    """(run_on, reference) for a run-on-target condition, or None to drop it.
+
+    A resolved listener retargets to Run On = Reference, except for identity
+    functions; a script-driven topic with no resolvable listener drops.
+    See: docs/commentary/tes5_import_conditions.md#run-on-target
+    """
+    identity = func_idx in _NO_TARGET_RETARGET_FUNCS
+    if run_on_target_ref is not None and not identity:
+        return 2, run_on_target_ref
+    if drop_run_on_target or run_on_target_ref is not None:
+        return None
+    return 1, 0
+
+
 def convert_ctda(raw: bytes, offset: 'int | None' = None,
                  run_on_target_ref: 'int | None' = None,
                  drop_run_on_target: bool = False,
                  in_speak_as_topic: bool = False) -> 'bytes | None':
-    """Convert one 24-byte TES4 CTDA to a 32-byte TES5 CTDA.
+    """Convert one TES4 (24-byte) or FO3/FNV (28-byte) CTDA to a 32-byte TES5 CTDA.
 
     Returns None if the function must be dropped (no faithful TES5 equivalent),
-    so the caller can repair the OR chain. The byte layout is field-compatible;
-    Skyrim only appends Run On / Reference / trailing fields.
-
-    run_on_target_ref / drop_run_on_target handle conditions in SCRIPT-DRIVEN
-    (Say/SayTo) topics: Skyrim's Actor.Say() has no dialogue target, so a
-    RunOn=Target condition evaluates against nothing and can never pass
-    (CharacterGen: every Valen Dreth taunt is race-of-target gated — the whole
-    intro froze). When the script's SayTo target is known and unique, the
-    condition is retargeted to RunOn=Reference on that ref (equivalent — for
-    menu dialogue too, where the target IS the player); when the topic's
-    targets are mixed/unknown, drop_run_on_target discards the condition
-    (Oblivion's call sites already pick speaker+topic, so auto-pass is closer
-    to intent than never-pass).
-
-    `in_speak_as_topic` marks an INFO whose topic is reached ONLY through a
-    TES4 `Say <topic> <flag> <speak-as NPC> <flag>` —
-    `ArenaMatchPlayerRef.Say Announcer 1 ArenaMouth 1`.  Oblivion resolves the
-    speaker's identity to that NPC even though an XMarker emits the sound, so
-    the INFO's SUBJECT-run `GetIsID <thatNPC>` passes.  Skyrim's Say has no
-    such argument, the subject is the emitting marker, and the condition can
-    never pass: no INFO is selected and the line is silent while the caller's
-    timers run on.  That is the same never-pass shape drop_run_on_target
-    already handles on the target side, so it gets the same treatment — the
-    call site has already chosen both speaker and topic.
-
-    🛑 Keyed on the TOPIC, never on the NPC.  An NPC is not "a voice":
-    SEThadon is a real, placed actor who speaks his own dialogue AND lends his
-    identity to a marker-spoken shout, and keying on him stripped the authored
-    `GetIsID(SEThadon)` from lines he delivers himself (53 INFOs name both a
-    voice identity and a real speaker).  A dedicated topic is the authored
-    fact; see talking_activators.py.
+    so the caller can repair the OR chain.  `run_on_target_ref` retargets a
+    run-on-target condition of a script-driven topic onto that listener;
+    `drop_run_on_target` drops it instead; `in_speak_as_topic` drops
+    subject-run actor-identity gates.
+    See: docs/commentary/tes5_import_conditions.md#say-driven-topics
     """
     if offset is None:
         offset = get_formid_index_offset()
@@ -572,126 +604,48 @@ def convert_ctda(raw: bytes, offset: 'int | None' = None,
     func_idx = struct.unpack_from('<H', data, 8)[0]
     param1 = struct.unpack_from('<I', data, 12)[0]
     param2 = struct.unpack_from('<I', data, 16)[0]
+    run_on, reference, fallout = 0, 0, len(raw) >= FALLOUT_CTDA_SIZE
+    if fallout:
+        is_target, run_on, reference = fallout_run_on(
+            raw, lambda fid: _remap_formid(fid, offset))
+        type_byte |= CTDA_RUN_ON_TARGET if is_target else 0
+        func_idx = fallout_function(func_idx)
+        if func_idx is None:
+            return None
 
     if func_idx == GET_DISPOSITION:
-        # Translate onto Skyrim's relationship rank -- see the table above.
-        # A Use Global comparison names a GLOB holding a 0-100 disposition
-        # that cannot be rescaled here, so the gate is dropped rather than
-        # compared against a rank on the wrong scale.
-        if type_byte & CTDA_USE_GLOBAL:
+        fields = _disposition_fields(type_byte, data)
+        if fields is None:
             return None
-        rank = float(disposition_to_rank(struct.unpack_from('<f', data, 4)[0]))
-        comp_raw = struct.unpack('<I', struct.pack('<f', rank))[0]
-        func_idx = GET_RELATIONSHIP_RANK
-        # The parameter is an ACTOR (engine param type 0x06), i.e. a placed
-        # REFERENCE -- so the player is PlayerRef 0x00000014, NOT the player
-        # base NPC 0x00000007. 0x7 is what GetIsID takes (param type 0x15,
-        # ObjectID), and reusing it here handed the engine a TESNPC where it
-        # dereferenced an Actor: EXCEPTION_ACCESS_VIOLATION on the first
-        # GREETING, with the player TESNPC 0x7 sitting in RSI. All 234 vanilla
-        # Skyrim.esm uses of this function pass 0x14 or 0.
-        # Fall through to the shared packer below so RunOn handling stays in
-        # one place.
-        param1, param2 = 0x00000014, 0
+        comp_raw, func_idx, param1, param2 = fields
 
     if func_idx in CHARGEN_CHOICE:
         return _chargen_choice_ctda(type_byte, data, func_idx, param1)
 
-    # Inside a SPEAK-AS topic the speaker is the emitting reference (an
-    # XMarker, a shrine, a door), never the NPC the author named -- Skyrim's
-    # Say has no speak-as argument.  So a subject-run actor-identity gate can
-    # never pass and the line is SILENT, while the caller's timers run on.
-    # Fails OPEN, exactly as the target-side identity drop below does: the
-    # script call site already chose both speaker and topic.
     if in_speak_as_topic and not (type_byte & CTDA_RUN_ON_TARGET) and (
             func_idx in NON_ACTOR_SPEAKER_DROP):
         return None
 
-    if func_idx in _FUNC_DROP:
+    if func_idx in (_VM_VAR_FUNCS if fallout else _FUNC_DROP):
         return None
-    func_idx = _FUNC_REMAP.get(func_idx, func_idx)
+    if not fallout:
+        func_idx = _FUNC_REMAP.get(func_idx, func_idx)
 
-    # Comparison value is a GLOB FormID only when the Use Global flag is set.
     if type_byte & CTDA_USE_GLOBAL:
         comp_raw = _remap_formid(comp_raw, offset)
-    # Only FormID parameters may be load-order remapped. Most functions take a
-    # plain integer or enum, and several are used by the engine as a RAW ARRAY
-    # INDEX -- GetBaseActorValue(Speechcraft=32) remapped to 0x01000020 indexed
-    # 16.7M entries off the actor-value table and crashed the dialogue menu on
-    # every NPC. CTDA_FORMID_PARAMS is keyed by the POST-remap (TES5) index
-    # because that is the function the output file actually invokes.
-    fid_slots = CTDA_FORMID_PARAMS.get(func_idx, frozenset())
-    if func_idx in _AV_PARAM_FUNCS:
-        # Raw index into each game's actor-value table -- the tables do not
-        # align, so pass-through reads an unrelated value. Attributes have no
-        # Skyrim equivalent at all and are dropped (fails open); skills and
-        # shared derived values are translated. See _TES4_AV_TO_TES5.
-        av = param1 if param1 < 0x80000000 else param1 - 0x100000000
-        if av in _TES4_AV_ATTRIBUTES:
-            return None
-        if av not in _TES4_AV_TO_TES5:
-            return None
-        param1, param2 = _TES4_AV_TO_TES5[av], 0
-    elif func_idx in _RACE_PARAM_FUNCS:
-        # RACE records aren't imported: translate the param to the Skyrim
-        # race the converted NPCs actually use, or drop the condition.
-        param1 = _map_race_param(param1)
-        if param1 is None:
-            return None
-    elif 1 in fid_slots:
-        param1 = _remap_formid(param1, offset)
-    if 2 in fid_slots:
-        param2 = _remap_formid(param2, offset)
+    params = _convert_params(func_idx, param1, param2, offset)
+    if params is None:
+        return None
+    param1, param2 = params
 
-    # TES4 "Run on target" flag -> TES5 Run On = 1 (Target). Clear the flag bit
-    # so it isn't double-counted; everything else stays Subject (0).
-    run_on = 0
-    reference = 0
     if type_byte & CTDA_RUN_ON_TARGET:
         type_byte &= ~CTDA_RUN_ON_TARGET
-        identity = func_idx in _NO_TARGET_RETARGET_FUNCS
-        if run_on_target_ref is not None and not identity:
-            run_on = 2                    # Reference
-            reference = run_on_target_ref
-        elif drop_run_on_target:
-            # DROP, even for an identity function.  `identity` must veto
-            # RETARGETING (a GetIsID pinned to a reference compares the wrong
-            # base form and can never pass — the 667-GREETING regression above),
-            # but it must NOT veto DROPPING: dropping does not retarget
-            # anything.  Inside a Say-driven topic there is no dialogue target
-            # at all, so leaving an identity condition on RunOn=Target is not
-            # "falling back" — it is a condition that can NEVER pass, for the
-            # exact reason stated above.  Failing OPEN is right here because the
-            # script call site has already chosen both speaker and topic.
-            #
-            # This is what stalled CharacterGen at stage 26.  The 26->27 bridge
-            # is a single GOODBYE INFO (0005144A, "She's dead. I'm sorry, sire,
-            # but we have to keep moving.") conditioned on
-            # GetIsID(Baurus) AND GetIsID(UrielSeptim)[RunOnTarget] AND
-            # GetStage(CharacterGen)==26.  Baurus delivers it from his poll via
-            # Actor.Say(), so the target-run GetIsID never passed, the GOODBYE
-            # never fired, `setstage charactergen 27` never ran, and the whole
-            # intro stopped with everyone standing in position in silence.
-            # (`setstage 27` from the console resumed it normally, confirming
-            # this condition was the only broken link.)
+        target = _target_run_on(func_idx, run_on_target_ref,
+                                drop_run_on_target)
+        if target is None:
             return None
-        elif run_on_target_ref is not None:
-            # Say-driven topic whose listener WAS resolved ('ref'
-            # disposition), but this is an identity function the veto above
-            # kept off RunOn=Reference.  The same no-target logic applies:
-            # under Say() a RunOn=Target identity can never pass, so
-            # emitting it silences the line.  The resolved listener is the
-            # very NPC the call site addresses, so the authored identity
-            # check is statically satisfied — drop it, exactly as the
-            # 'drop' disposition does.  (First hit: the restored
-            # NPC-conversation head topics, whose GetIsID(<listener>)
-            # [Target] otherwise survived as a dead RunOn=Target.)
-            return None
-        else:
-            run_on = 1                    # Target
+        run_on, reference = target
 
-    # 32-byte TES5 CTDA: type(1)+pad(3) comp(4) func(2)+pad(2) p1(4) p2(4)
-    #                    runOn(4) reference(4) unknown(4)
     return struct.pack('<B3xIHHIIII I',
                        type_byte, comp_raw,
                        func_idx, 0,

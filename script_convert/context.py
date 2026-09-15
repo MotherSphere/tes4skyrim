@@ -47,6 +47,8 @@ class ScriptContext:
     uses_timer: bool = False
     uses_say: bool = False
     uses_say_timer: bool = False
+    #: Authored quest-script delay in seconds (FO3/FNV DATA.Delay); 0 = none.
+    quest_delay: float = 0.0
 
     # --- Emission bookkeeping ----------------------------------------------
     #: Quest -> latch variable, for stage timers.  Per-script: a latch

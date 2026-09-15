@@ -51,11 +51,11 @@ from script_convert.objective_completion import (
     objective_lines,
     parallel_stages,
     residue_stages,
+    superseded_stages,
 )
 from script_convert.pipeline import (
     sanitize_name,
     _pack_wstring,
-    _superseded_stages,
     build_vmad_quest_fragments,
     build_vmad_info_fragment,
     convert_all_scripts,
@@ -1064,12 +1064,10 @@ class TestScroRefTyping:
         return x
 
     def test_scro_does_not_shadow_promoted_quest_script_type(self):
-        from script_convert.pipeline import _add_scro_ref
+        from script_convert.scro_refs import add_scro_ref
         x = self._xref()
         conv = ScriptConverter(x)
-        # SCRO preload runs first and seeds the generic base type...
-        _add_scro_ref(conv, '00017606', x)
-        # ...then the body promotes it to the quest's own script class.
+        add_scro_ref(conv, '00017606', x)
         conv.convert_fragment('set MS14.QuestDone to 1', 'Quest')
         refs = conv.get_property_refs()
         # Exactly one entry, under the safe name, with the specific type.
@@ -1079,11 +1077,11 @@ class TestScroRefTyping:
     def test_scro_preload_after_promotion_does_not_downgrade(self):
         """_preload_stage_scro_refs runs once per stage; a later stage must not
         reset a type an earlier stage's body already promoted."""
-        from script_convert.pipeline import _add_scro_ref
+        from script_convert.scro_refs import add_scro_ref
         x = self._xref()
         conv = ScriptConverter(x)
         conv.convert_fragment('set MS14.QuestDone to 1', 'Quest')
-        _add_scro_ref(conv, '00017606', x)   # next stage re-seeds the SCRO
+        add_scro_ref(conv, '00017606', x)
         assert conv.get_property_refs()['myMS14'] == 'TES4_MS14Script'
 
 
@@ -1117,7 +1115,7 @@ class TestScroAliasRecovery:
 
     def test_rename_with_an_inserted_word_is_recovered(self):
         """NDArmorCuirass -> NDArmorHeavyCuirass1 is NOT a prefix relation."""
-        from script_convert.pipeline import resolve_scro_aliases
+        from script_convert.scro_refs import resolve_scro_aliases
         body = ('; quickstart\nsetstage ND02 0\nsetstage ND02 10\n'
                 'setstage ND02 60\nplayer.additem NDArmorCuirass 1\n'
                 'setstage ND03 10')
@@ -1126,7 +1124,7 @@ class TestScroAliasRecovery:
         assert aliases == {'ndarmorcuirass': 'NDArmorHeavyCuirass1'}
 
     def test_alias_binds_the_property_with_the_records_own_type(self):
-        from script_convert.pipeline import resolve_scro_aliases
+        from script_convert.scro_refs import resolve_scro_aliases
         x = self._xref()
         conv = ScriptConverter(x)
         body = 'player.additem NDArmorCuirass 1\nsetstage ND03 10'
@@ -1139,21 +1137,21 @@ class TestScroAliasRecovery:
 
     def test_a_live_editorid_is_never_redirected(self):
         """Every name resolves, so there is nothing to recover."""
-        from script_convert.pipeline import resolve_scro_aliases
+        from script_convert.scro_refs import resolve_scro_aliases
         body = 'setstage ND02 10\nsetstage ND03 10'
         assert resolve_scro_aliases(
             body, ['01002D3F', '01002D3E'], self._xref()) == {}
 
     def test_ambiguity_is_left_alone(self):
         """Two unspelled SCROs cannot be told apart — bind neither."""
-        from script_convert.pipeline import resolve_scro_aliases
+        from script_convert.scro_refs import resolve_scro_aliases
         body = 'player.additem NDArmorCuirass 1\nplayer.additem NDMystery 1'
         assert resolve_scro_aliases(
             body, ['00000014', '01000ECE', '01000FCA'], self._xref()) == {}
 
     def test_an_unnameable_scro_abandons_recovery(self):
         """A master-owned SCRO this export cannot name could be the target."""
-        from script_convert.pipeline import resolve_scro_aliases
+        from script_convert.scro_refs import resolve_scro_aliases
         body = 'player.additem NDArmorCuirass 1'
         assert resolve_scro_aliases(
             body, ['00000014', '0001BEEF'], self._xref()) == {}
@@ -1165,7 +1163,7 @@ class TestScroAliasRecovery:
         and that stage's `IsXBox` — an OBSE command with no FUNCTION_MAP entry —
         then looked like the rename it paired with, binding a variable to a
         statue."""
-        from script_convert.pipeline import resolve_scro_aliases
+        from script_convert.scro_refs import resolve_scro_aliases
         x = CrossRefGraph()
         for fid, edid, rtype in (
                 ('00008032', 'TG03LlathasasBust', 'STAT'),
@@ -1539,7 +1537,7 @@ class TestQuestObjectiveCompletion:
             'Target[1].FormID': '0000BC72',
             'Target[1].Condition[0].Raw': _stage_gate(_EQ, 20),
         }
-        sup = _superseded_stages(rec, _frags(10, 20))
+        sup = superseded_stages(rec, _frags(10, 20))
         assert sup[(20, 0)] == [10], "stage 20 must complete objective 10"
         assert sup[(10, 0)] == [], "nothing precedes stage 10"
 
@@ -1553,7 +1551,7 @@ class TestQuestObjectiveCompletion:
             'Target[1].FormID': '0000BC69',
             'Target[1].Condition[0].Raw': _stage_gate(_EQ, 55),
         }
-        sup = _superseded_stages(rec, _frags(40, 50, 55))
+        sup = superseded_stages(rec, _frags(40, 50, 55))
         assert sup[(50, 0)] == [], \
             "stage 50 shares 40's live marker — 40 is still in progress"
         assert sup[(55, 0)] == [40, 50], \
@@ -1569,7 +1567,7 @@ class TestQuestObjectiveCompletion:
             'Target[1].FormID': '0000BC69',
             'Target[1].Condition[0].Raw': _stage_gate(_EQ, 20),
         }
-        sup = _superseded_stages(rec, _frags(10, 20, 90))
+        sup = superseded_stages(rec, _frags(10, 20, 90))
         assert 10 not in sup[(20, 0)], \
             "objective 10's marker is still live at 20 — it must stay open"
         assert 10 not in sup[(90, 0)] or sup[(90, 0)] == [20], \
@@ -1586,7 +1584,7 @@ class TestQuestObjectiveCompletion:
             'Target[2].FormID': '0000BC73',
             'Target[2].Condition[0].Raw': _stage_gate(_EQ, 30),
         }
-        sup = _superseded_stages(rec, _frags(10, 20, 30))
+        sup = superseded_stages(rec, _frags(10, 20, 30))
         closes = [s for done in sup.values() for s in done]
         assert closes.count(10) == 1, "objective 10 must be completed once"
         assert sup[(30, 0)] == [20]
@@ -1594,7 +1592,7 @@ class TestQuestObjectiveCompletion:
     def test_no_targets_falls_back_to_linear_log(self):
         """A quest with no QSTA gates has nothing to read, so each entry is
         closed when the log moves on — Oblivion's linear default."""
-        sup = _superseded_stages({}, _frags(10, 20, 30))
+        sup = superseded_stages({}, _frags(10, 20, 30))
         assert sup[(20, 0)] == [10]
         assert sup[(30, 0)] == [20]
 
@@ -1609,7 +1607,7 @@ class TestQuestObjectiveCompletion:
         frags = _frags(50, 60, 70)
         assert residue_stages(rec, frags) == [], \
             "an open-ended gate must not leave objectives unresolvable"
-        sup = _superseded_stages(rec, frags)
+        sup = superseded_stages(rec, frags)
         assert sup[(60, 0)] == [50]
         assert sup[(70, 0)] == [60]
 
@@ -1635,7 +1633,7 @@ class TestQuestObjectiveCompletion:
         }
         frags = [(200, 0, 'Rewarded.', '', True, 0, 0),
                  (201, 0, 'He is dead.', '', True, 1, 0)]
-        sup = _superseded_stages(rec, frags)
+        sup = superseded_stages(rec, frags)
         assert sup[(201, 0)] == [], \
             "a quest-ending stage must not be closed by the other ending"
 
@@ -4726,3 +4724,120 @@ class TestScaleEnumAv:
 
     def test_non_enum_actor_value_is_declined(self, converter):
         assert converter._scale_enum_av('health', '50') is None
+
+
+# ===========================================================================
+# FO3/FNV quest delay and objectives
+# ===========================================================================
+
+class TestAuthoredQuestDelay:
+    """An authored FO3/FNV quest delay is the OnUpdate poll interval.
+
+    See docs/commentary/script_convert.md#poll-interval.
+    """
+
+    SOURCE = "ScriptName CanteenScript\n\nBegin GameMode\n  set x to 1\nEnd\n"
+
+    def _convert(self, converter, delay):
+        """The Papyrus for a bare GameMode quest script polling at `delay`."""
+        converter.sc.quest_delay = delay
+        return converter.convert_standalone('CanteenScript', self.SOURCE,
+                                            'Quest', 'CanteenScript')
+
+    def test_delay_replaces_the_content_driven_interval(self, converter):
+        """300 s authored: the OnInit start and the re-arm both use it."""
+        out = self._convert(converter, 300.0)
+        assert out.count('RegisterForSingleUpdate(300.0)') == 2
+        assert 'RegisterForSingleUpdate(0.5)' not in out
+
+    def test_delay_floors_at_the_fastest_poll(self, converter):
+        """0.01 s authored polls at 0.1 s; a faster registration is every frame anyway."""
+        assert 'RegisterForSingleUpdate(0.1)' in self._convert(converter, 0.01)
+
+    def test_no_delay_keeps_the_half_second_default(self, converter):
+        """A TES4 quest script (delay 0) still polls at 0.5 s."""
+        assert 'RegisterForSingleUpdate(0.5)' in self._convert(converter, 0.0)
+
+    def test_quest_script_delays_keys_the_script_by_scri(self):
+        """Only quests writing a non-zero delay and a SCRI contribute."""
+        from script_convert.poll_interval import quest_script_delays
+        by_type = {'QUST': [{'SCRI': '00174091', 'DATA.Delay': '300'},
+                            {'SCRI': '00000001', 'DATA.Delay': '0'},
+                            {'DATA.Delay': '5'}]}
+        assert quest_script_delays(by_type) == {'00174091': 300.0}
+
+
+class TestFalloutObjectiveCommands:
+    """SetObjectiveDisplayed/Completed and their reads route to the Quest natives.
+
+    See docs/commentary/script_convert.md#fnv-objective-commands.
+    """
+
+    def test_set_displayed_defaults_the_flag_to_true(self, converter_with_quests):
+        """`SetObjectiveDisplayed Q 10` is Q.SetObjectiveDisplayed(10)."""
+        line = conv_line(converter_with_quests,
+                         'SetObjectiveDisplayed MQ01 10', 'Quest')
+        assert line == 'MQ01.SetObjectiveDisplayed(10)'
+
+    def test_set_completed_passes_an_explicit_zero(self, converter_with_quests):
+        """The trailing 0 un-completes, as in the GECK."""
+        line = conv_line(converter_with_quests,
+                         'SetObjectiveCompleted MQ01 20 0', 'Quest')
+        assert line == 'MQ01.SetObjectiveCompleted(20, 0)'
+
+    def test_get_completed_reads_the_quest_native(self, converter_with_quests):
+        """GetObjectiveCompleted is Quest.IsObjectiveCompleted."""
+        expr = conv_expr(converter_with_quests,
+                         'GetObjectiveCompleted MQ01 20 == 1', 'Quest')
+        assert expr.startswith('MQ01.IsObjectiveCompleted(20)')
+
+
+class TestQuestFragmentObjectives:
+    """A quest with authored objectives displays none of its own.
+
+    See docs/commentary/script_convert.md#one-objective-per-stage.
+    """
+
+    def _rec(self, authored):
+        """One journal stage, optionally with an Objective[] block."""
+        rec = {'EditorID': 'VMQ01', 'StageCount': '1', 'Stage[0].Index': '10',
+               'Stage[0].LogCount': '1', 'Stage[0].Log[0].Flags': '0',
+               'Stage[0].Log[0].Text': 'Travel to Novac.'}
+        if authored:
+            rec['ObjectiveCount'] = '1'
+        return rec
+
+    def _psc(self, xref, authored):
+        """The generated _QF_ source for that record."""
+        from script_convert.quest_fragments import (quest_fragment_psc,
+                                                    stage_fragments)
+        rec = self._rec(authored)
+        return quest_fragment_psc(rec, 'VMQ01', xref, stage_fragments(rec), {})[1]
+
+    def test_authored_objectives_suppress_stage_objective_calls(self, xref):
+        """The fragment exists, but displays no stage-indexed objective."""
+        psc = self._psc(xref, True)
+        assert 'Function Fragment_Stage_0010_Item_0()' in psc
+        assert 'SetObjectiveDisplayed' not in psc
+
+    def test_derived_objectives_are_displayed_per_stage(self, xref):
+        """A TES4 quest still displays the objective its stage index names."""
+        assert 'SetObjectiveDisplayed(10, true)' in self._psc(xref, False)
+
+
+class TestFalloutCastAliases:
+    """`cios` / `CastImmediateOnSelf` are the shared `cast` handler.
+
+    See docs/commentary/script_convert.md#fnv-unrouted-commands.
+    """
+
+    def test_cios_casts_the_spell_on_the_receiver(self, converter):
+        """`player.cios X` is X.Cast(player, player), never an NE note."""
+        line = conv_line(converter, 'player.cios TestSpell', 'Quest')
+        assert line == 'TestSpell.Cast(Game.GetPlayer(), Game.GetPlayer())'
+
+    def test_long_spelling_is_the_same_handler(self, converter):
+        """CastImmediateOnSelf converts identically."""
+        line = conv_line(converter, 'player.CastImmediateOnSelf TestSpell',
+                         'Quest')
+        assert line == 'TestSpell.Cast(Game.GetPlayer(), Game.GetPlayer())'

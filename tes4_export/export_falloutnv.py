@@ -15,6 +15,7 @@ from .record_types.common import escape_value
 from .record_types.falloutnv import (EFFECT_TYPES, FALLOUT_BASE_EXPORTERS,
                                      MGEF_EDITOR_IDS, SUPERSEDED_ACTOR_KEYS,
                                      SUPERSEDED_EFFECT_KEYS, export_deltas)
+from .record_types.quest_falloutnv import SUPERSEDED_QUEST_KEYS
 from .tes4_reader import Record, get_string, get_subrecord, read_group_records
 
 #: TXST FormID -> its TX00 diffuse path, rebuilt per source file.
@@ -38,6 +39,8 @@ def superseded_keys(rec: Record) -> tuple:
         return SUPERSEDED_ACTOR_KEYS
     if rec.type in EFFECT_TYPES:
         return SUPERSEDED_EFFECT_KEYS
+    if rec.type == "QUST":
+        return SUPERSEDED_QUEST_KEYS
     return ()
 
 

@@ -656,3 +656,12 @@ FAME_GLOBALS = {
     'getpcinfamy': ('TES4Infamy', 'TES4Infamy.GetValueInt()'),
     'getinfame': ('TES4Infamy', 'TES4Infamy.GetValueInt()'),
 }
+
+
+def typed_already(property_refs: dict, prop: str) -> bool:
+    """Does this property already carry a type, under any casing of its name?
+    See: docs/commentary/script_convert.md#quest-property-never-downgrades
+    """
+    low = prop.lower()
+    return any(name.lower() == low and ptype
+               for name, ptype in property_refs.items())

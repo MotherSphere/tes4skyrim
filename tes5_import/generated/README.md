@@ -8,6 +8,7 @@ editing or deleting anything here.**
 | File | Command |
 |---|---|
 | `ctda_param_types.py` | `python tools/generators/gen_ctda_param_types.py <path>/wbDefinitionsTES5.pas -o tes5_import/generated/ctda_param_types.py` |
+| `ctda_fnv_remap.py` | `python tools/generators/gen_ctda_fnv_remap.py references/xEdit/Core/wbDefinitionsFNV.pas references/xEdit/Core/wbDefinitionsTES5.pas -o tes5_import/generated/ctda_fnv_remap.py` |
 | `vanilla_mgef_data.py` | `python tools/generators/gen_vanilla_mgef_table.py` |
 | `dialog_engine_tables.json` | `python tools/disasm/dialog_engine_extract.py --json tes5_import/generated/dialog_engine_tables.json` |
 

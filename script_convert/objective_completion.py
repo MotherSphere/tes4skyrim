@@ -191,7 +191,7 @@ def _closed_by(rec: dict, fragments: list) -> tuple:
     return closed_by, residue
 
 
-def _superseded_stages(rec: dict, fragments: list) -> dict:
+def superseded_stages(rec: dict, fragments: list) -> dict:
     """{(stage_idx, log_idx): [stage indices this fragment completes]}.
 
     See: docs/commentary/script_convert.md#journal-objective-completion

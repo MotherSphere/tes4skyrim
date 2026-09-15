@@ -823,6 +823,95 @@ class TestQUST:
         assert _sub_order(out).index('NEXT') < _sub_order(out).index('INDX')
 
 
+class TestAuthoredObjectives:
+    """FO3/FNV Objective[] blocks are written as authored, not derived.
+
+    See docs/commentary/tes5_import_quest.md#authored-objectives.
+    """
+
+    #: FNV GetDisabled (35), Run On 2 (Reference) 00177D36 -- a real VMQ01 target gate.
+    REF_CTDA = '000000000000803f23000000000000000000000002000000367d1700'
+
+    def _rec(self):
+        """VMQ01 in miniature: a stage with no CNAM and two authored objectives."""
+        return {
+            'FormID': '000842DD', 'RecordFlags': '0', 'EditorID': 'VMQ01',
+            'DATA.Flags': '0', 'DATA.Priority': '100', 'DATA.Delay': '0',
+            'StageCount': '1', 'Stage[0].Index': '10', 'Stage[0].LogCount': '1',
+            'Stage[0].Log[0].Flags': '0',
+            'ObjectiveCount': '2',
+            'Objective[0].Index': '40', 'Objective[0].Text': 'Head to Novac.',
+            'Objective[0].TargetCount': '2',
+            'Objective[0].Target[0].FormID': '0009289B',
+            'Objective[0].Target[0].Flags': '1',
+            'Objective[0].Target[0].ConditionCount': '1',
+            'Objective[0].Target[0].Condition[0].Raw': self.REF_CTDA,
+            'Objective[0].Target[1].FormID': '000CDF13',
+            'Objective[0].Target[1].Flags': '0',
+            'Objective[1].Index': '50', 'Objective[1].Text': 'Intercept the Khans.',
+            'Objective[1].TargetCount': '1',
+            'Objective[1].Target[0].FormID': '0009289B',
+            'Objective[1].Target[0].Flags': '1',
+        }
+
+    def test_objectives_keep_their_authored_index_and_text(self):
+        """QOBJ is the authored index; NNAM the authored line, verbatim."""
+        out = convert_QUST(self._rec())
+        qobjs = [struct.unpack('<H', q)[0] for q in _find_all_subrecords(out, b'QOBJ')]
+        assert qobjs == [40, 50]
+        nnams = [n.rstrip(b'\0') for n in _find_all_subrecords(out, b'NNAM')]
+        assert nnams == [b'Head to Novac.', b'Intercept the Khans.']
+
+    def test_targets_share_aliases_and_keep_their_conditions(self):
+        """One alias per distinct target; the CTDA follows its QSTA with Run On kept."""
+        out = convert_QUST(self._rec())
+        qstas = _find_all_subrecords(out, b'QSTA')
+        assert [struct.unpack_from('<i', q)[0] for q in qstas] == [0, 1, 0]
+        assert [q[4] for q in qstas] == [1, 0, 1]
+        assert struct.unpack('<I', _find_subrecord(out, b'ANAM'))[0] == 2
+        ctda = _find_subrecord(out, b'CTDA')
+        assert len(ctda) == 32
+        assert struct.unpack_from('<H', ctda, 8)[0] == 35
+        assert struct.unpack_from('<II', ctda, 20) == (2, 0x00177D36)
+        order = _sub_order(out)
+        assert order.index('CTDA') == order.index('QSTA') + 1
+
+    def test_authored_objectives_make_the_quest_a_journal_quest(self):
+        """No CNAM anywhere, yet the quest must list: type 8, not 0."""
+        dnam = _find_subrecord(convert_QUST(self._rec()), b'DNAM')
+        assert struct.unpack_from('<I', dnam, 8)[0] == 8
+
+
+class TestFalloutConditions:
+    """A 28-byte CTDA is Fallout's: function remapped, Run On carried.
+
+    See docs/commentary/tes5_import_conditions.md#fallout-ctda.
+    """
+
+    def test_moved_function_is_renumbered(self):
+        """GetIsVoiceType is 427 in FNV and 426 in Skyrim."""
+        raw = bytes.fromhex('000000000000803fab010000dd420800000000000000000000000000')
+        out = convert_ctda(raw)
+        assert struct.unpack_from('<H', out, 8)[0] == 426
+
+    def test_absent_function_is_dropped(self):
+        """GetObjectiveCompleted (420) has no Skyrim function."""
+        raw = bytes.fromhex('000000000000803fa4010000dd420800000000000000000000000000')
+        assert convert_ctda(raw) is None
+
+    def test_tes4_index_at_a_fallout_slot_is_not_misread(self):
+        """A 24-byte raw is TES4: 427 there is GetPlantedExplosive and stays put."""
+        raw = bytes.fromhex('000000000000803fab010000dd42080000000000000000')
+        assert struct.unpack_from('<H', convert_ctda(raw), 8)[0] == 427
+
+    def test_run_on_target_takes_the_tes4_target_path(self):
+        """Fallout Run On 1 is TES4's run-on-target bit, dropped under drop_run_on_target."""
+        raw = bytes.fromhex('000000000000803f2e000000000000000000000001000000'
+                            '00000000')
+        assert struct.unpack_from('<I', convert_ctda(raw), 20)[0] == 1
+        assert convert_ctda(raw, drop_run_on_target=True) is None
+
+
 # ---------------------------------------------------------------------------
 # DLBR / DLVW
 # ---------------------------------------------------------------------------

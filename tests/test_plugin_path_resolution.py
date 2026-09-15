@@ -104,7 +104,7 @@ ALLOWED = {
         'name came OUT of the root, so the folder exists',
     ('tools/validate/objective_completion_audit.py', 'sweep'):
         'name came OUT of the root, so the folder exists',
-    ('script_convert/pipeline.py', 'build_script_context'):
+    ('script_convert/context_setup.py', 'deploy_static_scripts'):
         'root is already one plugin folder; name is a .psc filename',
     ('tes4_export/export_morrowind.py', 'write_export'):
         'root is already one plugin folder; name is a .txt filename',

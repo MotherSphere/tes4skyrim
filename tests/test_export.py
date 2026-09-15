@@ -670,3 +670,64 @@ class TestFalloutActorAcbs:
     def test_a_tes4_sized_acbs_is_left_to_the_shared_exporter(self):
         """A 16-byte ACBS is TES4's, so this emitter must not touch it."""
         assert self._lines(('ACBS', self.RAW[:16])) == {}
+
+
+class TestFalloutQuestDeltas:
+    """FO3/FNV QUST: the 8-byte DATA delay and the QOBJ/NNAM objectives.
+
+    See docs/commentary/tes4_export_falloutnv.md#quest-delay-and-objectives.
+    """
+
+    #: PreordVault13CanteenQuest DATA (FalloutNV.esm 00174095): flags 0x11, priority 50, delay 300.
+    CANTEEN_DATA = bytes.fromhex('1132436100009643')
+    #: VMQ01 objective 40 target 0: FormID 0009289B, flag 1, three unused bytes.
+    QSTA = bytes.fromhex('9b28090001f94707')
+    #: A 28-byte FNV CTDA (GetQuestVariable VMQ01, Run On 3) under that target.
+    CTDA = bytes.fromhex('000000000000803f4f000000dd420800030000000000000000000000')
+
+    def _lines(self, *subs):
+        """The FO3/FNV delta lines of a QUST built from (signature, bytes)."""
+        from tes4_export.tes4_reader import Record, Subrecord
+        from tes4_export.record_types.falloutnv import export_deltas
+        rec = Record(type='QUST', data_size=0, flags=0, form_id=0x00174095,
+                     subrecords=[Subrecord(t, d) for t, d in subs])
+        out = {}
+        for line in export_deltas(rec):
+            key, _, value = line.partition('=')
+            out[key] = value
+        return out
+
+    def test_delay_float_is_emitted(self):
+        """The 300 s canteen delay reaches the text; no objectives, no block."""
+        got = self._lines(('DATA', self.CANTEEN_DATA))
+        assert got['DATA.Delay'] == '300'
+        assert 'ObjectiveCount' not in got
+
+    def test_objectives_group_their_targets_and_conditions(self):
+        """Targets and their CTDAs nest under the objective they follow."""
+        got = self._lines(
+            ('DATA', self.CANTEEN_DATA),
+            ('QOBJ', (40).to_bytes(4, 'little')),
+            ('NNAM', b'Head to Novac.\0'),
+            ('QSTA', self.QSTA), ('CTDA', self.CTDA),
+            ('QOBJ', (50).to_bytes(4, 'little')),
+            ('NNAM', b'Intercept the Khans.\0'),
+        )
+        assert got['ObjectiveCount'] == '2'
+        assert got['Objective[0].Index'] == '40'
+        assert got['Objective[0].Text'] == 'Head to Novac.'
+        assert got['Objective[0].TargetCount'] == '1'
+        assert got['Objective[0].Target[0].FormID'] == '0009289B'
+        assert got['Objective[0].Target[0].Flags'] == '1'
+        assert got['Objective[0].Target[0].ConditionCount'] == '1'
+        assert got['Objective[0].Target[0].Condition[0].Raw'] == self.CTDA.hex()
+        assert got['Objective[1].Index'] == '50'
+        assert got['Objective[1].TargetCount'] == '0'
+
+    def test_flat_target_lines_are_superseded_for_quests(self):
+        """The TES4 walker's flat Target[] lines are dropped for an FNV QUST."""
+        from tes4_export.export_falloutnv import superseded_keys
+        from tes4_export.tes4_reader import Record
+        rec = Record(type='QUST', data_size=0, flags=0, form_id=1)
+        assert 'Target[' in superseded_keys(rec)
+        assert 'TargetCount=' in superseded_keys(rec)

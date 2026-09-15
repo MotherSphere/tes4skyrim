@@ -26,6 +26,7 @@ from script_convert import resolve_name as _resolve_name
 from script_convert import assemble as _assemble
 from script_convert import commands as _commands
 from script_convert.context import ScriptContext
+from script_convert.poll_interval import update_interval
 from script_convert.emit import dispatch as _dispatch
 from script_convert.cross_ref import CrossRefGraph
 from script_convert.tes4.parser import (
@@ -526,7 +527,8 @@ class ScriptConverter:
         """
         prev = self.sc
         self.sc = ScriptContext(property_refs=dict(prev.property_refs),
-                                scro_aliases=dict(prev.scro_aliases))
+                                scro_aliases=dict(prev.scro_aliases),
+                                quest_delay=prev.quest_delay)
         return _assemble.build(self, name, source, extends, editor_id)
 
     def convert_fragment(self, source: str, extends: str = 'Quest') -> list[str]:
@@ -1365,26 +1367,7 @@ class ScriptConverter:
     _GAMEMODE_GATE = 'TES4Polyfill.SafeGameModeGate(Self)'
 
     def _get_update_interval(self) -> str:
-        if self.sc.uses_getsecondspassed:
-            return '0.1'
-        # A script that drives a spoken line with a timer (`set T to Say ...`)
-        # ticks fast: its `T <= 0` guard is what starts the next line, so the
-        # tick is pure dead air between lines (TES4 ran it every frame).
-        #
-        # 0.1s was tried and measurably LENGTHENED the gaps, so
-        # it was set to 0.25s.  That measurement was taken when every SayLine
-        # also blocked on Utility.Wait(0.05) for its claim handshake and
-        # Utility.Wait(0.25) after any busy wait, and when fragments blocked
-        # the dispatch path -- the VM was saturated by the Say path itself and
-        # extra poll passes queued behind it.  All three are gone, so the
-        # contention that made a faster tick counterproductive is gone with
-        # them, and 0.15s buys back most of the tick latency without
-        # returning to the 0.1s that was measured as too aggressive.
-        if self.sc.uses_say_timer:
-            return '0.15'
-        if self.sc.uses_timer:
-            return '0.25'
-        return '0.5'
+        return update_interval(self.sc)
 
 
     def _parse_source(self, source: str):

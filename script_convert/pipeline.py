@@ -2,20 +2,17 @@
 
 import argparse
 import json
-import shutil
 import os
 import re
 import struct
 
-from tes5_import.base.text_reader import parse_export_file
 from core.worker_budget import worker_count
 
 from asset_convert.game_paths import (current_namespace,
                                       set_namespace)
-from script_convert.constants import (sanitize_name, safe_property_name, record_type_to_papyrus, papyrus_script_name,
+from script_convert.constants import (sanitize_name, papyrus_script_name,
                                      SERVICE_MENU_CALL, UDF_WIDE_TYPES,
                                      script_prefix)
-from script_convert.command_rows import KNOWN_COMMANDS
 from script_convert.conversation_sequence import (
     sequence_gate,
     split_counter_step,
@@ -26,14 +23,24 @@ from script_convert.conversation_sequence import (
 )
 from script_convert.cross_ref import CrossRefGraph, master_names
 from script_convert.converter import ScriptConverter
-from script_convert.objective_completion import (
-    _superseded_stages,
-    objective_lines,
-    sweep_targets,
-)
+from script_convert.context_setup import (
+    build_xref, chargen_menu_plan, deploy_static_scripts, load_bounds_cache,
+    load_records, prepare_output_dir, quest_edids_by_fid,
+    service_menu_topics, topic_unlock_globals)
+from script_convert.message_menus import build_message_plan
+from script_convert.poll_interval import quest_script_delays
+from script_convert.quest_fragments import (quest_fragment_psc,
+                                            scripted_count, stage_fragments)
+from script_convert.say_durations import scan_voice_durations
+from script_convert.scro_refs import (preload_scro_refs, resolve_scro_aliases,
+                                      scro_list)
 from script_convert.symbols import property_declarations, IMPLICIT_NAMES
 from script_convert.tes5.blocks import Kind, classify
-from output_layout import assets_for
+from tes5_import.dialogue.conversations import (build_conversation_plan,
+                                                generate_driver_psc)
+from tes5_import.dialogue.converter import (DIAL_TYPE_SERVICE,
+                                            SERVICE_MENU_TOPICS)
+from tes5_import.dialogue.unlocks import build_unlock_plan
 
 
 # ===========================================================================
@@ -114,7 +121,8 @@ def _script_worker_init(xref, output_dir, info_reveals, service_topics,
                         quest_edid_by_fid=None, topic_unlock_globals=None,
                         message_menus=None, mesh_bounds_cache=None,
                         chargen_menus=None, say_topics=None,
-                        music_cues=None, namespace=None):
+                        music_cues=None, namespace=None,
+                        quest_delays=None):
     """Seed one worker with the parent state that spawning does not carry.
 
     `namespace` is installed FIRST: the generated-script prefix derives from
@@ -134,7 +142,8 @@ def _script_worker_init(xref, output_dir, info_reveals, service_topics,
                        service_topics=service_topics,
                        stage_reveals=stage_reveals,
                        quest_script_vars=quest_script_vars or {},
-                       quest_edid_by_fid=quest_edid_by_fid or {})
+                       quest_edid_by_fid=quest_edid_by_fid or {},
+                       quest_delays=quest_delays or {})
     # Class-level, so every ScriptConverter a worker builds sees the measured
     # voice-line lengths (per INFO for the Begin fragments, per topic for the
     # SayLine fallback).
@@ -199,258 +208,74 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
 
     Returns {'initargs': tuple for _script_worker_init, 'scpt_work': [...],
     'info_work': [...], 'qust_work': [...], 'stats': dict}.  Shared by
-    convert_all_scripts (the pipeline stage) and tools/script/convert_scripts_subset.py
-    (a filtered rebuild of named scripts for iteration), so a subset build is
-    the SAME conversion as the full one — same say-timer owners, unlock plan,
-    durations and menu plans — never a parallel approximation of it.
+    convert_all_scripts and tools/script/convert_scripts_subset.py, so a
+    subset build is the SAME conversion as the full one.
+    See: docs/commentary/script_convert.md#script-output-dir
     """
-    # 🛑 START FROM AN EMPTY DIRECTORY.  Which scripts the conversion produces
-    # changes with the plan and with the source records, and nothing used to
-    # delete the ones that stopped being generated — so they SURVIVED in
-    # output/ and kept being attached.  Measured: scoping
-    # speaker-kind Say-timer owners stopped generating 10,268 bogus INFO
-    # fragments, but the stale .psc/.pex stayed on disk, so Uriel Septim's
-    # GREETING went on binding a fragment that cast him to two scripts he does
-    # not carry: the line kept its subtitle on screen and never advanced to
-    # its remaining two responses.
-    #
-    # Wiping is the honest form of that guarantee.  Every alternative
-    # (prefix lists, mtime "written this run" checks) needs a growing set of
-    # exceptions for the static scripts deployed alongside the generated ones,
-    # and each exception is another way to keep a stale file.  After a wipe,
-    # anything present IS something this run produced.  Both source and
-    # compiled output are cleared: a stale .pex is worse than a stale .psc,
-    # because the VM loads it whether or not the source is still there.
-    if os.path.isdir(output_dir):
-            shutil.rmtree(output_dir)
-    pex_dir = os.path.dirname(output_dir)
-    if os.path.isdir(pex_dir):
-        for _n in os.listdir(pex_dir):
-            if _n.lower().endswith('.pex'):
-                try:
-                    os.remove(os.path.join(pex_dir, _n))
-                except OSError:
-                    pass
-    os.makedirs(output_dir, exist_ok=True)
-
-    from tes5_import.base.mesh_bounds import load_mesh_bounds
-    from asset_convert.collision.collision_extract import bounds_cache_is_current
-    _bounds_cache = str(assets_for(export_dir) / 'mesh_bounds_cache.json')
-    # A cache from before the HELD bit existed loads fine and answers 0 for
-    # every mesh, so the release silently vanishes from every converted script.
-    # This step cannot rebuild it (--scripts-only runs with no mesh scan), so
-    # say so instead of emitting quietly-wrong scripts.
-    if not bounds_cache_is_current(_bounds_cache):
-        print("  WARNING: mesh bounds cache is missing or predates the current "
-              "schema.\n"
-              "           Breakaway/trap havok releases will NOT be emitted "
-              "(planks and traps\n"
-              "           will hang instead of falling).  Run the import or "
-              "meshes step to\n"
-              f"           rebuild it: {_bounds_cache}")
-    load_mesh_bounds(_bounds_cache, quiet=True)
-
-    # Deploy static scripts (TES4Polyfill + shared service-menu fragments) so
-    # they compile alongside the generated ones.
-    #
-    # ONLY a masterless plugin (Oblivion.esm, Nehrim.esm) owns these. They are
-    # plugin-independent — TES4Polyfill is Hidden with none but Global
-    # functions, and the two service fragments are stateless TopicInfos — so a
-    # dependent plugin shipping its own copy just duplicates the master's
-    # .psc/.pex under the same script name, and whichever loads last wins.
-    # Dependents still CALL them: the generated bodies reference
-    # `TES4Polyfill.*` and INFO VMADs name the service fragments, both of
-    # which resolve to the master's shipped copy (phase_compile puts every
-    # master's source dir on the -h header path).
-    static_dir = os.path.join(os.path.dirname(__file__), 'static_scripts')
-    if master_names(export_dir):
-        print('  Static scripts: skipped (owned by this plugin\'s master)')
-        # Remove copies an older (pre-skip) build left in this plugin's
-        # output. They are poison twice over: the stale .psc shadows the
-        # master's fresh copy on the compile header path (Translation.esp's
-        # Aug-1 TES4Polyfill had no ReleaseBreakaway, so every script calling
-        # it failed to compile), and the stale .pex ships under the same
-        # script name as the master's — whichever loads last wins in-game.
-        if os.path.isdir(static_dir):
-            for name in os.listdir(static_dir):
-                if not name.endswith('.psc'):
-                    continue
-                stale_psc = os.path.join(output_dir, name)
-                stale_pex = os.path.join(os.path.dirname(output_dir),
-                                         name[:-4] + '.pex')
-                for stale in (stale_psc, stale_pex):
-                    if os.path.isfile(stale):
-                        os.remove(stale)
-                        print(f'    removed stale master-owned copy: {stale}')
-    else:
-        if os.path.isdir(static_dir):
-            for name in os.listdir(static_dir):
-                if name.endswith('.psc'):
-                    shutil.copy2(os.path.join(static_dir, name),
-                                 os.path.join(output_dir, name))
-
-    # Phase 1: Build cross-reference graph
-    print('  Building cross-reference graph...')
-    xref = CrossRefGraph()
-    xref.load_from_export(export_dir)
-    print(f'    {len(xref.formid_to_edid)} FormID->EditorID mappings')
-    print(f'    {len(xref.script_formid_to_edid)} scripts, {len(xref.quest_edids)} quests')
-
-    # Phase 1.5: Analyze cross-script ref-as-int patterns
-    scpt_path = os.path.join(export_dir, 'SCPT.txt')
-    if os.path.exists(scpt_path):
-        xref.build_ref_as_int_map(scpt_path)
-        if xref.ref_as_int:
-            print(f'    {len(xref.ref_as_int)} ref variables detected as integer-only (cross-script)')
-
-    from tes5_import.dialogue.unlocks import build_unlock_plan
-    by_type = {}
-    for sig in ('DIAL', 'INFO', 'QUST', 'SCPT', 'NPC_'):
-        path = os.path.join(export_dir, f'{sig}.txt')
-        by_type[sig] = parse_export_file(path) if os.path.exists(path) else []
+    prepare_output_dir(output_dir)
+    bounds_cache = load_bounds_cache(export_dir)
+    deploy_static_scripts(export_dir, output_dir)
+    xref = build_xref(export_dir)
+    by_type = load_records(export_dir, ('DIAL', 'INFO', 'QUST', 'SCPT', 'NPC_'))
     unlock_plan = build_unlock_plan(by_type)
     print(f'    AddTopic unlocks: {len(unlock_plan["gated"])} gated topics, '
           f'{len(unlock_plan["info_reveals"])} revealer INFOs')
-
     stats = _new_stats()
-
-    from tes5_import.dialogue.converter import (DIAL_TYPE_SERVICE, SERVICE_MENU_TOPICS)
-    service_topics = {}
-    for rec in by_type.get('DIAL', []):
-        edid = rec.get('EditorID', '')
-        if (edid in SERVICE_MENU_TOPICS
-                and rec.get('DATA.Type', '') == str(DIAL_TYPE_SERVICE)):
-            service_topics[rec.get('FormID', '')] = SERVICE_MENU_TOPICS[edid][0]
-
-    # Phases 2-4: convert SCPT records, INFO result scripts and QUST stage
-    # scripts. Records that produce no output are filtered here so they are
-    # never pickled to a worker; the remaining work is chunked into (kind,
-    # records) jobs that all share one process pool.
-    scpt_work = []
-    scpt_path = os.path.join(export_dir, 'SCPT.txt')
-    if os.path.exists(scpt_path):
-        scpt_records = parse_export_file(scpt_path)
-        stats['scpt_total'] = len(scpt_records)
-        scpt_work = [r for r in scpt_records
-                     if r.get('SCTX', '').strip()]
-
-    info_reveals = unlock_plan['info_reveals']
-
-    # EVERY INFO produces a fragment (Begin/End line hooks for
-    # TES4Polyfill.SayLine, plus its result script / unlocks / service menu
-    # when it has them) — see _info_batch.  The importer writes a VMAD on
-    # every INFO to match; there is deliberately no "which INFOs" plan for the
-    # two sides to disagree on.
-    info_work = [r for r in by_type.get('INFO', []) if r.get('FormID')]
-    qust_work = [r for r in by_type.get('QUST', []) if r.get('EditorID', '')]
+    stats['scpt_total'] = len(by_type['SCPT'])
+    scpt_work = [r for r in by_type['SCPT'] if r.get('SCTX', '').strip()]
+    info_work = [r for r in by_type['INFO'] if r.get('FormID')]
+    qust_work = [r for r in by_type['QUST'] if r.get('EditorID', '')]
     print(f'  Converting {len(scpt_work)} SCPT / {len(info_work)} INFO / '
           f'{len(qust_work)} QUST scripts...')
-
-    # Measured spoken-line lengths: each INFO's Begin fragment reports its
-    # own line's length to TES4Polyfill.SayLine, and the per-topic maximum is
-    # the fallback for a line with no voice file.
-    from script_convert.say_durations import scan_voice_durations
     say_durations = scan_voice_durations(export_dir)
     if say_durations:
         print(f'    voice durations: {len(say_durations)} lines/topics '
               f'measured (Say() timers)')
-
-    # Which topics a script drives via Say/SayTo -- the ONLY INFOs that need a
-    # timing fragment for TES4Polyfill.SayLine.  Computed here, before the
-    # worker pool, so every process sees the same set (see scan_say_topics).
     say_topics = scan_say_topic_fids(by_type)
     ScriptConverter.say_topics = say_topics
     print(f'    script-driven topics: {len(say_topics)}')
-
     quest_script_vars = build_quest_script_vars(by_type)
-    quest_edid_by_fid = {int(r.get('FormID','0'),16) & 0xFFFFFF:
-                         (r.get('EditorID') or '')
-                         for r in by_type.get('QUST', [])
-                         if r.get('FormID')}
-
-    # NPC-to-NPC conversation driver: the generated TES4NPCConv<plugin>.psc
-    # replays Oblivion's engine-scheduled quest-advancing conversations
-    # (CharacterGen 26→27, MQ16, MS91, ...).  MUST be built from the same
-    # plan the importer bound the driver quest's VMAD against — the
-    # message_menus/dialog_unlocks mirroring contract.  Masterless plugins
-    # only, mirroring the importer's gate (a dependent plugin's copy would
-    # collide with its master's script name).
-    if not master_names(export_dir):
-        from tes5_import.dialogue.conversations import (build_conversation_plan,
-                                                   generate_driver_psc)
-        conv_by_type = dict(by_type)
-        for sig in ('ACHR', 'ACRE'):
-            _p = os.path.join(export_dir, f'{sig}.txt')
-            conv_by_type[sig] = (parse_export_file(_p)
-                                 if os.path.exists(_p) else [])
-        _stem = os.path.splitext(
-            os.path.basename(os.path.normpath(export_dir)))[0]
-        conv_plan = build_conversation_plan(
-            conv_by_type, script_vars=quest_script_vars, plugin_stem=_stem)
-        conv_psc = generate_driver_psc(conv_plan, say_durations)
-        if conv_psc:
-            write_psc(output_dir, conv_plan['script_name'], conv_psc)
-            print(f"    NPC conversations: {len(conv_plan['chains'])} chains "
-                  f"-> {conv_plan['script_name']}.psc "
-                  f"({len(conv_plan['skipped'])} skipped)")
-
-    # `AddTopic X` in a SCRIPT body is the third reveal route (alongside INFO
-    # fragments and quest stages), so it needs the gated topic's global by
-    # EditorID. Keyed off the same unlock_plan the other two use, so all three
-    # set the identical global the importer binds.
-    topic_unlock_globals = {}
-    for d in by_type.get('DIAL', []):
-        edid = (d.get('EditorID') or '').lower()
-        if not edid:
-            continue
-        try:
-            fid24 = int(d.get('FormID', '0'), 16) & 0xFFFFFF
-        except (TypeError, ValueError):
-            continue
-        gname = unlock_plan['gated'].get(fid24)
-        if gname:
-            topic_unlock_globals[edid] = gname
-
-    # Button-MessageBox plan — the SAME analysis the importer runs to author
-    # the MESG records, so the Message properties emitted here bind to them.
-    from .message_menus import build_message_plan
-    message_menus = build_message_plan(by_type.get('SCPT', []))
+    _write_conversation_driver(export_dir, output_dir, by_type,
+                               quest_script_vars, say_durations)
+    message_menus = build_message_plan(by_type['SCPT'])
     if message_menus:
-        n_sites = sum(len(v) for v in message_menus.values())
-        print(f'    Button menus: {n_sites} MessageBox sites in '
-              f'{len(message_menus)} scripts')
-
-    # Chargen menu plan (ShowBirthsignMenu / ShowClassMenu → modal
-    # Message.Show() pages) — shared with the importer, which authors the
-    # MESG records at fixed FormIDs (message_menus.build_chargen_menus).
-    from .message_menus import build_chargen_menus
-    chargen_menus = {}
-    _bsgn_p = os.path.join(export_dir, 'BSGN.txt')
-    _clas_p = os.path.join(export_dir, 'CLAS.txt')
-    if os.path.exists(_bsgn_p) or os.path.exists(_clas_p):
-        _spel_map = {}
-        _spel_p = os.path.join(export_dir, 'SPEL.txt')
-        if os.path.exists(_spel_p):
-            for _r in parse_export_file(_spel_p):
-                _f, _e = _r.get('FormID'), _r.get('EditorID')
-                if _f and _e:
-                    _spel_map[int(_f, 16) & 0xFFFFFF] = _e
-        chargen_menus = build_chargen_menus(
-            parse_export_file(_bsgn_p) if os.path.exists(_bsgn_p) else [],
-            parse_export_file(_clas_p) if os.path.exists(_clas_p) else [],
-            _spel_map)
-        if chargen_menus:
-            print('    Chargen menus: ' + ', '.join(
-                f"{k} ({len(v['actions'])} options, {len(v['pages'])} pages)"
-                for k, v in sorted(chargen_menus.items())))
-
-    initargs = (xref, output_dir, info_reveals, service_topics,
+        print(f'    Button menus: {sum(len(v) for v in message_menus.values())} '
+              f'MessageBox sites in {len(message_menus)} scripts')
+    initargs = (xref, output_dir, unlock_plan['info_reveals'],
+                service_menu_topics(by_type, SERVICE_MENU_TOPICS,
+                                    DIAL_TYPE_SERVICE),
                 unlock_plan['stage_reveals'], say_durations,
-                quest_script_vars, quest_edid_by_fid, topic_unlock_globals,
-                message_menus, _bounds_cache, chargen_menus, say_topics,
-                _load_music_cues(output_dir), current_namespace())
+                quest_script_vars, quest_edids_by_fid(by_type),
+                topic_unlock_globals(by_type, unlock_plan), message_menus,
+                bounds_cache, chargen_menu_plan(export_dir), say_topics,
+                _load_music_cues(output_dir), current_namespace(),
+                quest_script_delays(by_type))
     return {'initargs': initargs, 'scpt_work': scpt_work,
             'info_work': info_work, 'qust_work': qust_work, 'stats': stats}
+
+
+def _write_conversation_driver(export_dir: str, output_dir: str,
+                               by_type: dict, quest_script_vars: dict,
+                               say_durations: dict) -> None:
+    """Generate the NPC-to-NPC conversation driver script of a masterless plugin.
+
+    Built from the same plan the importer bound the driver quest's VMAD
+    against; a dependent plugin's copy would collide with its master's name.
+    """
+    if master_names(export_dir):
+        return
+    conv_by_type = dict(by_type)
+    conv_by_type.update(load_records(export_dir, ('ACHR', 'ACRE')))
+    stem = os.path.splitext(
+        os.path.basename(os.path.normpath(export_dir)))[0]
+    plan = build_conversation_plan(conv_by_type, script_vars=quest_script_vars,
+                                   plugin_stem=stem)
+    psc = generate_driver_psc(plan, say_durations)
+    if psc:
+        write_psc(output_dir, plan['script_name'], psc)
+        print(f"    NPC conversations: {len(plan['chains'])} chains "
+              f"-> {plan['script_name']}.psc "
+              f"({len(plan['skipped'])} skipped)")
 
 
 def convert_all_scripts(export_dir: str, output_dir: str, workers: int = None) -> dict:
@@ -650,12 +475,13 @@ def _scpt_batch(records: list, output_dir: str, xref: CrossRefGraph, stats: dict
         try:
             extends = xref.get_extends_class(formid)
             conv = ScriptConverter(xref)
-            # Pre-populate external references from SCRO entries
-            _preload_scro_refs(conv, rec, xref)
+            preload_scro_refs(conv, rec, xref)
             # Recover names the source text spells staler than the SCRO table
             # the engine runs off (see resolve_scro_aliases).
             conv.set_scro_aliases(resolve_scro_aliases(
-                sctx, _scro_list(rec), xref))
+                sctx, scro_list(rec), xref))
+            conv.sc.quest_delay = _WORKER_CTX.get('quest_delays', {}).get(
+                formid.upper(), 0.0)
             name = sanitize_name(edid or f'Script_{formid}')
             papyrus = conv.convert_standalone(name, sctx, extends, edid)
 
@@ -853,9 +679,9 @@ def _info_batch(records: list, output_dir: str, xref: CrossRefGraph,
             prop_refs = {}
             if has_script:
                 conv = ScriptConverter(xref)
-                _preload_scro_refs(conv, rec, xref)
+                preload_scro_refs(conv, rec, xref)
                 conv.set_scro_aliases(resolve_scro_aliases(
-                    result_script, _scro_list(rec), xref))
+                    result_script, scro_list(rec), xref))
                 body_lines = conv.convert_fragment(result_script, 'TopicInfo')
                 prop_refs = dict(conv.sc.property_refs)
 
@@ -904,384 +730,29 @@ def _info_batch(records: list, output_dir: str, xref: CrossRefGraph,
 
 def _qust_batch(records: list, output_dir: str, xref: CrossRefGraph,
                 stats: dict, stage_reveals: dict = None):
-    """Convert a batch of QUST records into Quest fragment .psc files.
-
-    A fragment is generated for every stage that has journal log text (CNAM),
-    whether or not it also has a result script.  Each fragment calls
-    SetObjectiveDisplayed / SetObjectiveCompleted so the quest appears in the
-    Skyrim journal — without those calls CNAM text is never visible.
+    """Write one `_QF_` script per QUST that has stage fragments.
 
     stage_reveals ({(quest_edid_lower, stage): [unlock global names]}) marks
-    stages whose TES4 result scripts contained `AddTopic X`: the fragment sets
-    the unlock globals (the AddTopic command itself is a no-op in conversion).
+    stages whose TES4 result scripts contained `AddTopic X`.
+    See: docs/commentary/script_convert.md#quest-fragments
     """
     stage_reveals = stage_reveals or {}
-
     for rec in records:
         edid = rec.get('EditorID', '')
-        if not edid:
-            continue
-
-        stage_count_str = rec.get('StageCount', '0')
-        try:
-            stage_count = int(stage_count_str)
-        except ValueError:
-            continue
-
-        # Collect all stages that need a fragment:
-        # - stages with log text (need objective calls even if no result script)
-        # - stages with result scripts (need script body)
-        # Each entry: (stage_idx, log_idx, log_text, result_script, complete_flag, stage_arr_idx, log_arr_idx)
-        fragments = []
-        for i in range(stage_count):
-            stage_idx_str = rec.get(f'Stage[{i}].Index', '0')
-            try:
-                stage_idx = int(stage_idx_str)
-            except ValueError:
-                continue
-
-            log_count_str = rec.get(f'Stage[{i}].LogCount', '0')
-            try:
-                log_count = int(log_count_str)
-            except ValueError:
-                continue
-
-            for j in range(log_count):
-                log_text = rec.get(f'Stage[{i}].Log[{j}].Text', '')
-                script = rec.get(f'Stage[{i}].Log[{j}].ResultScript', '')
-                log_flags_str = rec.get(f'Stage[{i}].Log[{j}].Flags', '0')
-                try:
-                    log_flags = int(log_flags_str)
-                except ValueError:
-                    log_flags = 0
-                complete_flag = bool(log_flags & 0x01)
-                if log_text or (script and script.strip()):
-                    fragments.append((stage_idx, j, log_text, script, complete_flag, i, j))
-
+        fragments = stage_fragments(rec) if edid else []
         if not fragments:
             continue
-
-        # Which objectives each stage finishes, recovered from the TES4 target
-        # stage-gates.  (convert_QUST emits one QOBJ per stage index that has log
-        # text, so the stage indices here are exactly the objectives on the record.)
-        supersedes = _superseded_stages(rec, fragments)
-        sweepable = sweep_targets(rec, fragments, edid)
-
-        # Count only fragments that have result scripts for stats
-        scripted_count = sum(1 for f in fragments if f[3] and f[3].strip())
-        stats['qust_total'] += scripted_count
-
+        scripted = scripted_count(fragments)
+        stats['qust_total'] += scripted
         try:
-            conv = ScriptConverter(xref)
-            # Pre-populate external references from SCRO entries
-            _preload_scro_refs(conv, rec, xref)
-            script_name = papyrus_script_name(edid, script_prefix('_QF_'))
-            out_lines = [
-                f'ScriptName {script_name} extends Quest Hidden',
-                '',
-            ]
-
-            # A stage has ONE objective (index = stage index) no matter how many
-            # journal entries it carried in TES4 — MQ01's tutorial stages ship a
-            # gamepad text and a keyboard text, and emitting the objective calls
-            # per entry displayed the same objective twice.
-            objective_emitted = set()
-            uses_chargen_latch = False
-            for stage_idx, log_idx, log_text, script_src, complete_flag, stage_arr_idx, log_arr_idx in fragments:
-                # Load per-stage SCROs for this fragment
-                _preload_stage_scro_refs(conv, rec, xref, stage_arr_idx, log_arr_idx)
-                # Recover any name this stage's TEXT spells staler than the
-                # SCRO table the engine actually runs off (see
-                # resolve_scro_aliases).
-                conv.set_scro_aliases(resolve_scro_aliases(
-                    script_src or '',
-                    _scro_list(rec, f'Stage[{stage_arr_idx}].Log[{log_arr_idx}].'),
-                    xref))
-                func_name = f'Fragment_Stage_{stage_idx:04d}_Item_{log_idx}'
-                out_lines.append(f'Function {func_name}()')
-                if stage_idx in objective_emitted:
-                    log_text = None
-                elif log_text:
-                    objective_emitted.add(stage_idx)
-                if log_text:
-                    out_lines.extend(objective_lines(
-                        supersedes, sweepable, stage_idx, log_idx))
-                # TES4 QSDT 0x01 is "complete the QUEST" — it is not per-objective,
-                # it marks the stage that ENDS the quest (TES4 has no fail bit; a
-                # quest's success and failure endings are both just flag 0x01, and
-                # 89 of Oblivion's 390 quests have several such stages).  The quest
-                # is over, so nothing may be left hanging as an open bullet.  We
-                # cannot know statically which branch the player took to get here,
-                # so let the engine settle it: CompleteAllObjectives() closes
-                # whatever is still displayed and leaves the never-shown entries of
-                # the skipped branch alone.
-                if complete_flag:
-                    out_lines.append('  CompleteAllObjectives()')
-                    out_lines.append('  CompleteQuest()')
-                # AddTopic unlock globals revealed by this stage's TES4 script
-                for gname in stage_reveals.get((edid.lower(), stage_idx), []):
-                    out_lines.append(f'  {gname}.SetValue(1)')
-                # Original result script body (if any)
-                if script_src and script_src.strip():
-                    body_lines = conv.convert_fragment(script_src, 'Quest')
-                    out_lines.extend(body_lines)
-                    # convert_fragment resets per-fragment state; accumulate
-                    # the chargen-menu latch across all of this QF's fragments.
-                    uses_chargen_latch = (uses_chargen_latch
-                                          or conv.sc.uses_chargen_menus)
-                out_lines.append('EndFunction')
-                out_lines.append('')
-
-            # Insert property declarations after ScriptName line
-            if uses_chargen_latch:
-                # Script-scope re-entrancy latch for the modal chargen menus
-                # (see the converter's ShowBirthsignMenu emission).
-                out_lines.insert(2, 'Bool TES4_ChargenMenuBusy = False')
-            quest_globals = sorted({g for (q, _s), gs in stage_reveals.items()
-                                    if q == edid.lower() for g in gs})
-            for gi, gname in enumerate(quest_globals):
-                out_lines.insert(2 + gi, f'GlobalVariable Property {gname} Auto')
-            prop_refs = conv.get_property_refs()
-            if prop_refs:
-                # Merge case-variant keys: pick the most specific type (non-Quest wins)
-                merged: dict[str, tuple[str, str]] = {}  # lower_name -> (canonical_name, type)
-                for pname, ptype in sorted(prop_refs.items()):
-                    key = pname.lower()
-                    if key in merged:
-                        existing_name, existing_type = merged[key]
-                        # Keep the more specific type; prefer the first-seen
-                        # (SCRO-canonical) name so it matches the VMAD binding.
-                        if existing_type == 'Quest' and ptype != 'Quest':
-                            merged[key] = (existing_name, ptype)
-                        elif ptype == 'ActorBase' and existing_type != 'ActorBase':
-                            # Base typing from a base-semantics function
-                            # (SetEssential base) must win over ANY reference
-                            # type — including Actor and Actor-derived TES4_*
-                            # scripts. The VMAD binds this property to a base
-                            # (NPC_/CREA) record, and a reference-typed property
-                            # bound to a base is UNBINDABLE: Papyrus aborts the
-                            # whole script's init, so the quest never finishes
-                            # initialising and its aliases never fill. (FGC01Rats:
-                            # QuillWeave, an NPC_ base, was typed as the Actor
-                            # script TES4_FGC01QuillweaveScript.)
-                            merged[key] = (existing_name, ptype)
-                        # else: keep existing (already specific, or both Quest)
-                    else:
-                        merged[key] = (pname, ptype)
-                insert_idx = 2  # After ScriptName + blank line
-                # quest_globals above already declared the stage-reveal unlock
-                # globals. The converter ALSO registers them now that a script
-                # `AddTopic X` emits TES4Unlock_X.SetValue(1), and a stage whose
-                # result script contains that AddTopic is reached by both paths
-                # — so without this seed the same name is declared twice
-                # ("property with `TES4Unlock_...` name already exists").
-                declared = {g.lower() for g in quest_globals}
-                lines = property_declarations(
-                    {n: t for n, t in merged.values()}, declared)
-                out_lines[insert_idx:insert_idx] = lines + ['']
-
-            # GetInCell prefix-family helpers the stage bodies call by name.
-            out_lines.extend(conv.get_cell_family_helpers())
-
-            papyrus = '\n'.join(out_lines)
+            script_name, papyrus = quest_fragment_psc(
+                rec, edid, xref, fragments, stage_reveals)
             write_psc(output_dir, script_name, papyrus)
-            stats['qust_ok'] += scripted_count
+            stats['qust_ok'] += scripted
             stats['todo_count'] += papyrus.count(';TODO')
         except Exception as e:
-            stats['qust_err'] += scripted_count
+            stats['qust_err'] += scripted
             stats['errors'].append(f'QUST {edid}: {e}')
-
-
-# The player, in both spellings a TES4 SCRO can carry — skipped when
-# pre-loading SCRO refs, because `player`/`playerref` is a KEYWORD the converter
-# emits as `Game.GetPlayer()`, never a bound property.
-#
-# 0x14 is PlayerRef (the placed reference); 0x07 is the player's base NPC_, and
-# a script that writes `Player.AddItem` lists THAT one.  Only 0x14 was skipped,
-# so 0x07 fell through to the generic path and was typed by whatever script the
-# plugin attaches to the player base — giving every caller a property
-# `TES4_GlobalplayerScript Property Player` that then failed to convert to
-# ObjectReference at each `X.GetDistance(Player)` / `MoveTo(Player)` call site
-# (242 Nehrim scripts).  Vanilla Oblivion attaches no script to the player base,
-# which is why this only ever surfaced on Nehrim.
-_PLAYER_FORMIDS = frozenset({'00000014', '00000007'})
-
-
-def _preload_scro_refs(conv: 'ScriptConverter', rec: dict, xref: CrossRefGraph):
-    """Pre-populate converter property_refs from SCRO entries in a record."""
-    i = 0
-    while True:
-        key = f'SCRO[{i}]'
-        fid = rec.get(key)
-        if fid is None:
-            break
-        i += 1
-        _add_scro_ref(conv, fid, xref)
-
-
-def _preload_stage_scro_refs(conv: 'ScriptConverter', rec: dict, xref: CrossRefGraph,
-                              stage_arr_idx: int, log_arr_idx: int):
-    """Pre-populate converter property_refs from per-stage/log SCRO entries."""
-    k = 0
-    while True:
-        key = f'Stage[{stage_arr_idx}].Log[{log_arr_idx}].SCRO[{k}]'
-        fid = rec.get(key)
-        if fid is None:
-            break
-        k += 1
-        _add_scro_ref(conv, fid, xref)
-
-
-# Control-flow and type keywords, which are never a form reference.  Only used
-# to walk a script body looking for form names — see resolve_scro_aliases.
-_SCRO_WALK_SKIP_KEYWORDS = frozenset({
-    'begin', 'end', 'if', 'elseif', 'else', 'endif', 'while', 'loop',
-    'endwhile', 'return', 'set', 'to', 'short', 'long', 'float', 'ref',
-    'int', 'string_var', 'array_var', 'scn', 'scriptname', 'let', 'eval',
-    'foreach', 'break', 'continue',
-})
-
-
-def _scro_body_tokens(body: str) -> list:
-    """Return the candidate form-reference names in a TES4 script body.
-
-    A dotted `NDLathonREF.disable` contributes only its RECEIVER, which is the
-    part that names a form.  Comments are stripped, quotes around a name are
-    dropped but the name kept, numeric literals never match, and command names
-    are skipped (a command is not a form).  The result is a superset: locals and
-    unknown OBSE commands survive, which resolve_scro_aliases handles by
-    construction.
-    """
-    lines = []
-    for raw in body.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
-        lines.append(raw.split(';', 1)[0])
-    # Oblivion's parser accepts QUOTES around any EditorID and the vanilla
-    # scripts use them (`PlaceAtMe "TG03LlathasasBust" 1,0,0`).  A quoted name is
-    # a form reference like any other, so drop the quotes rather than the name:
-    # stripping the whole literal made TG03LlathasasBust look like a SCRO the
-    # body never spells, and that stage's `IsXBox` — an OBSE command with no
-    # command entry — then looked like the rename it paired with.
-    text = re.sub(r'"([^"]*)"', r' \1 ', '\n'.join(lines))
-    out = []
-    for m in re.finditer(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?',
-                         text):
-        head = m.group(0).split('.', 1)[0]
-        low = head.lower()
-        if low in _SCRO_WALK_SKIP_KEYWORDS or low in KNOWN_COMMANDS:
-            continue
-        out.append(head)
-    return out
-
-
-def resolve_scro_aliases(body: str, scros: list, xref: CrossRefGraph) -> dict:
-    """Map a name in `body` that resolves to NO record onto its SCRO EditorID.
-
-    Oblivion runs the COMPILED script, not the source text the CK shows, and the
-    two can disagree.  Knights.esp's quest-stage result scripts still read
-    `player.additem NDArmorCuirass 1` and `player.additem NDLL0WeaponSword 1` —
-    names no record in the plugin carries — while the SCRO tables those same
-    stages ship bind 01000ECE (NDArmorHeavyCuirass1, "Cuirass of the Crusader")
-    and 01000FCA (NDLL0WeaponSwordLvl100).  The records were renamed after the
-    scripts were last compiled; the engine kept handing out the right items
-    because it reads the SCRO FormID, so the stale spellings never showed
-    in-game.
-
-    Converting the TEXT, those names resolve to nothing, declare no property and
-    reach the compiler undefined — which fails the CHECKER, so no .pex is emitted
-    for the whole script and every OTHER stage of the quest dies with it.  These
-    are the fragments that hand out the Crusader relics.
-
-    The recovery is a SET DIFFERENCE, not a positional walk: the compiler's
-    emission order does not follow source order (`player.additem X` emits the
-    receiver first), but the CONTENTS of the table are exact.  A SCRO whose
-    EditorID the body never spells is a form the script references under some
-    other name, and a body name that resolves to no record is a reference with no
-    form — when there is exactly ONE of each, they are the same reference and the
-    binding is certain.
-
-    Anything less certain is left alone.  Measured over Knights.esp's 146 stage
-    result scripts: 119 have neither an unspelled SCRO nor an unresolvable name,
-    5 have exactly one of each (the five renames above), and the remaining 22
-    have unresolvable names but NO unspelled SCRO — master-owned records and
-    local variables, correctly untouched.
-    """
-    if not scros:
-        return {}
-    tokens = _scro_body_tokens(body)
-    if not tokens:
-        return {}
-    spelled = {t.lower() for t in tokens}
-
-    # SCROs the body never names.  The player is skipped: it is referenced by a
-    # KEYWORD, not an EditorID, so it is never "unspelled" in the relevant sense.
-    unspelled = []
-    for fid in scros:
-        if fid in _PLAYER_FORMIDS:
-            continue
-        edid = xref.formid_to_edid.get(fid)
-        if not edid:
-            # A form this export cannot name (master-owned). It could be the
-            # target of any unresolvable name here, so nothing is certain.
-            return {}
-        if edid.lower() not in spelled:
-            unspelled.append(edid)
-    if len(unspelled) != 1:
-        return {}
-
-    unresolved = []
-    for tok in dict.fromkeys(tokens):
-        low = tok.lower()
-        if low in ('player', 'playerref'):
-            continue
-        if xref.edid_to_formid.get(low):
-            continue
-        unresolved.append(tok)
-    if len(unresolved) != 1:
-        return {}
-    return {unresolved[0].lower(): unspelled[0]}
-
-
-def _scro_list(rec: dict, prefix: str = '') -> list:
-    """Return a record's SCRO FormIDs in table order (optionally a stage log's)."""
-    out = []
-    i = 0
-    while True:
-        fid = rec.get(f'{prefix}SCRO[{i}]')
-        if fid is None:
-            break
-        out.append(fid)
-        i += 1
-    return out
-
-
-def _add_scro_ref(conv: 'ScriptConverter', fid: str, xref: CrossRefGraph):
-    """Add a single SCRO FormID as a property ref on the converter."""
-    if fid in _PLAYER_FORMIDS:
-        return
-    edid = xref.formid_to_edid.get(fid)
-    if not edid:
-        return
-    rtype = xref.record_type.get(fid, '')
-    ptype = record_type_to_papyrus(rtype)
-    # Prefer attached SCPT-derived type for cross-script property accesses
-    # (e.g. Arena.AnnounceWin). For QUST records, start with 'Quest' base type —
-    # the specific type will be promoted later if the script body uses dot-notation
-    # variable access (e.g. Arena.AnnounceWin) which the converter handles.
-    if rtype != 'QUST':
-        script_type = xref.get_record_script_type(edid)
-        if script_type:
-            ptype = script_type
-    key = safe_property_name(edid)
-    cur = conv.sc.property_refs.get(key, '')
-    if cur and cur != 'Quest' and ptype == 'Quest':
-        return
-    # Never overwrite an ActorBase typing set by a base-semantics function
-    # (SetEssential base). The SCRO here is the base record, so a reference /
-    # Actor-script type would be UNBINDABLE against the base and abort the whole
-    # script's init. ActorBase is a hard constraint, not a promotable guess.
-    if cur == 'ActorBase':
-        return
-    conv.sc.property_refs[key] = ptype
 
 
 # ===========================================================================

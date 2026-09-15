@@ -2047,3 +2047,24 @@ OR flag so the returned list is a standalone AND-group.
 Identity and voice conditions are deliberately excluded: the response topic
 already carries its own `GetIsID`, and only the missing TIMING gate is inherited.
 An always-available greeting has no timing conditions and yields an empty list.
+
+### <a id="authored-objectives"></a>Authored objectives (FO3/FNV)
+
+**Code:** `tes5_import/dialogue/quest_falloutnv.py`, called from `convert_QUST`.
+
+An export carrying `Objective[]` blocks
+([what FNV authors](tes4_export_falloutnv.md#objectives)) is written
+verbatim: `QOBJ` = the authored index, `FNAM` 0, `NNAM` = the authored text,
+one `QSTA` per target with the target's own conditions after it (Skyrim.esm
+carries CTDAs under QSTA the same way). Targets become forced-reference
+aliases through the same `alias_by_fid` table the derived path fills, so
+alias packages and the ANAM count are unchanged.
+
+The derived objective-per-journal-stage path is skipped for such a quest, and
+the quest is journal type 8 (Side) whether or not any stage has `CNAM` text:
+most FNV stages have none, and a type-0 quest never lists in the journal no
+matter how many objectives its scripts display.
+
+Target conditions go through `convert_ctda_list_with_strings` so a
+`GetQuestVariable` gate (160 of FNV's 1,229 target conditions) becomes the
+`GetVMQuestVariable` read with its CIS2 name, rather than a dropped marker.

@@ -64,3 +64,122 @@ read a comparable number.
 
 Changing either to match the BOOK table would make the condition read a value
 the actor never trains, so it would compare against a constant.
+
+## <a id="fallout-ctda"></a>A Fallout CTDA is 28 bytes and numbers its functions differently
+
+**Code:** `tes5_import/base/conditions_falloutnv.py`, applied by `convert_ctda`;
+table: `tes5_import/generated/ctda_fnv_remap.py` from
+`tools/generators/gen_ctda_fnv_remap.py`.
+
+FO3/FNV write TES4's 20 shared bytes, then an explicit **Run On** u32 and a
+**Reference** u32 where TES4 has 4 unused bytes (xEdit `wbDefinitionsFNV.pas`
+`wbConditions`). The length is the format signal: a 28-byte raw is Fallout, a
+24-byte raw is TES4, so no per-game switch is needed.
+
+Census over FalloutNV.esm's 59,664 INFO conditions: Run On 0 (Subject) 55,872,
+1 (Target) 2,905, 2 (Reference) 821, 3 (Combat Target) 66. TES4's type-byte
+bit `0x02` (run on target) is set on **none** of them, so Run On = Target is
+translated onto that bit and takes the same Say-topic retargeting/drop path
+TES4 conditions get; the other values pass through with the reference
+load-order remapped.
+
+### Function indices
+
+Skyrim's table (402 functions) and Fallout's (452) agree only up to the point
+where the games diverged. Joined by name: **58 functions moved slot, 237 have
+no Skyrim function** (a slot Skyrim reuses for another name counts as absent).
+Before the remap every Fallout index passed through unchanged, so
+`GetIsVoiceType` (427) invoked Skyrim's 427 `GetPlantedExplosive`.
+
+Measured over the export (function, count):
+
+| Record | Conditions | Same slot | Moved | Absent |
+|---|---|---|---|---|
+| INFO | 59,664 | 38,665 | 17,573 (GetIsVoiceType 16,833; GetQuestCompleted 324; HasPerk 123) | 3,426 (GetReputationThreshold 1,565; GetObjectiveCompleted 966; GetObjectiveDisplayed 745) |
+| PACK | 2,992 | 2,861 | 37 | 94 |
+| QUST | 1,501 | 1,254 | 169 | 78 |
+| ALCH | 341 | 11 | 151 (HasPerk 147) | 179 (IsHardcore) |
+
+Absent functions are dropped, failing open, the way TES4's `_FUNC_DROP` does.
+`GetDisposition` (76) is absent in Skyrim but is kept on the Fallout path too so
+the disposition-tier evaluation applies. `GetScriptVariable` (53) and
+`GetQuestVariable` (79) keep TES4's treatment: the strings path rewrites them
+to the VM reads, every other path drops them.
+
+## <a id="convert-ctda-phases"></a>`convert_ctda`: the three phases and why each is shaped as it is
+
+**Code:** `tes5_import/base/conditions.py` `convert_ctda`, `_disposition_fields`,
+`_convert_params`, `_target_run_on`.
+
+### <a id="say-driven-topics"></a>Why a condition needs `run_on_target_ref` and `in_speak_as_topic`
+
+Skyrim's `Actor.Say()` has no dialogue target, so in a SCRIPT-DRIVEN (Say/SayTo)
+topic a Run On = Target condition evaluates against nothing and can never pass
+(CharacterGen: every Valen Dreth taunt is race-of-target gated, and the whole
+intro froze). When the script's SayTo target is known and unique the condition
+is retargeted to Run On = Reference on that ref, which is equivalent, for menu
+dialogue too, where the target IS the player. When the topic's targets are
+mixed or unknown, `drop_run_on_target` discards the condition: Oblivion's call
+sites already pick speaker and topic, so auto-pass is closer to intent than
+never-pass.
+
+`in_speak_as_topic` marks an INFO whose topic is reached ONLY through a TES4
+`Say <topic> <flag> <speak-as NPC> <flag>` (`ArenaMatchPlayerRef.Say Announcer
+1 ArenaMouth 1`). Oblivion resolves the speaker's identity to that NPC even
+though an XMarker emits the sound, so the INFO's subject-run `GetIsID
+<thatNPC>` passes. Skyrim's Say has no such argument, the subject is the
+emitting marker, and the condition can never pass: no INFO is selected and the
+line is silent while the caller's timers run on. That is the same never-pass
+shape `drop_run_on_target` handles on the target side, so it gets the same
+treatment. It is keyed on the TOPIC, never on the NPC: an NPC is not "a voice".
+SEThadon is a real placed actor who speaks his own dialogue AND lends his
+identity to a marker-spoken shout, and keying on him stripped the authored
+`GetIsID(SEThadon)` from lines he delivers himself (53 INFOs name both a voice
+identity and a real speaker). A dedicated topic is the authored fact; see
+`talking_activators.py`.
+
+### <a id="disposition-param"></a>GetDisposition becomes GetRelationshipRank on PlayerRef
+
+The 0-100 disposition is translated onto Skyrim's relationship rank
+(`disposition_to_rank`). A Use Global comparison names a GLOB holding a
+disposition that cannot be rescaled, so that gate is dropped rather than
+compared against a rank on the wrong scale. The parameter is an ACTOR (engine
+param type 0x06), a placed REFERENCE, so the player is PlayerRef `0x14`, NOT
+the player base NPC `0x07`. `0x07` is what GetIsID takes (param type 0x15,
+ObjectID); reusing it handed the engine a TESNPC where it dereferenced an
+Actor: EXCEPTION_ACCESS_VIOLATION on the first GREETING with the player TESNPC
+in RSI. All 234 vanilla Skyrim.esm uses of the function pass `0x14` or 0.
+
+### <a id="formid-params"></a>Only FormID parameters are load-order remapped
+
+Most functions take a plain integer, enum or float, and the engine uses
+several as a RAW ARRAY INDEX: `GetBaseActorValue(Speechcraft=32)` remapped to
+`0x01000020` indexed 16.7M entries off the actor-value table and crashed the
+dialogue menu on every NPC. `CTDA_FORMID_PARAMS` is keyed by the POST-remap
+(TES5) index because that is the function the output invokes. Actor-value
+parameters are a raw index into each game's own table, which do not align:
+attributes have no Skyrim equivalent and drop (fail open); skills and shared
+derived values translate through `_TES4_AV_TO_TES5`. Race parameters translate
+to the Skyrim race the converted NPCs actually use (`_map_race_param`), or the
+condition drops.
+
+### <a id="run-on-target"></a>Run On = Target under a script-driven topic
+
+TES4's run-on-target flag bit becomes TES5 Run On = 1 (Target) and the bit is
+cleared so it is not double-counted. In a Say-driven topic there is no
+dialogue target, so a target-run condition can never pass. With a resolved,
+unique listener the condition is retargeted to Run On = Reference on that ref,
+EXCEPT for identity functions (`_NO_TARGET_RETARGET_FUNCS`): a GetIsID pinned
+to a reference compares the wrong base form and can never pass, the
+667-GREETING regression. Dropping is different from retargeting and the
+identity veto must NOT block it: this is what stalled CharacterGen at stage 26.
+The 26 to 27 bridge is a single GOODBYE INFO (`0005144A`, "She's dead. I'm
+sorry, sire, but we have to keep moving.") conditioned on GetIsID(Baurus) AND
+GetIsID(UrielSeptim)[RunOnTarget] AND GetStage(CharacterGen)==26. Baurus
+delivers it from his poll via Actor.Say(), so the target-run GetIsID never
+passed, `setstage charactergen 27` never ran, and the intro stopped in
+silence; `setstage 27` from the console resumed it. A resolved listener with
+an identity function is likewise dropped: the listener IS the NPC the call
+site addresses, so the authored check is statically satisfied (first hit: the
+restored NPC-conversation head topics, whose GetIsID(listener)[Target]
+otherwise survived as a dead Run On = Target).

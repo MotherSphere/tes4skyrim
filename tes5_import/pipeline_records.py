@@ -263,7 +263,8 @@ def _convert_qust(st, export_dir: str, phase_done, skip_types) -> None:
                                           well_known_props=WELL_KNOWN_PROPERTIES,
                                           unlock_plan=st.unlock_plan,
                                           unlock_globals=st.unlock_globals,
-                                          pack_plan=st.pack_plan, xref=st.xref)
+                                          pack_plan=st.pack_plan, xref=st.xref,
+                                          script_vars=st._script_vars)
                 st.writer.add_record('QUST', qust_bytes)
                 st.converted += 1
                 fid = get_formid(rec, 'FormID')
