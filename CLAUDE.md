@@ -147,6 +147,7 @@ regenerate scripts, so a behavioural regression means reading
    — GOG/AE, **not DRM-packed**, so it disassembles statically (the *Steam*
    copy is encrypted). Crash logs map across via the Address Library.
    Disassembly is a first resort, not a last one.
+   The SkyrimVR exe is at `D:\SteamLibrary\steamapps\common\SkyrimVR\SkyrimVR.exe.unpacked.exe`
 2. <a id="ck-is-a-source"></a>**`CreationKit.exe` (Steam) — NOT DRM-packed, and
    the BEST source for why a record is REJECTED.** Asserts carry file+line, and
    it keeps 1,114 Bethesda source paths, 17k diagnostic strings, and 433 record

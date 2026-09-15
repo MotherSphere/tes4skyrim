@@ -42,6 +42,24 @@ if errorlevel 1 (
     exit /b 1
 )
 echo [build] OK -^> %~dp0TESRuntime.dll
+
+REM HavokWorldSize is its OWN DLL from its OWN source folder: it shares no code
+REM with the plugin and needs neither the Address Library nor any engine
+REM contract, so a fault in it must not take TESRuntime down with it.  Built
+REM here so both ship together.
+pushd "%~dp0havok_world_size"
+if not exist obj mkdir obj
+echo [build] compiling HavokWorldSize...
+cl /nologo /LD /EHsc /std:c++17 /O2 /MD /W3 /DNDEBUG ^
+   havok_world_size.cpp /Fo:obj\ /Fe:..\HavokWorldSize.dll ^
+   /link /IMPLIB:obj\HavokWorldSize.lib /OPT:REF /OPT:ICF
+if errorlevel 1 (
+    echo [build] ERROR: HavokWorldSize failed
+    popd
+    exit /b 1
+)
+popd
+echo [build] OK -^> %~dp0HavokWorldSize.dll
 goto composetest
 
 :cacheonly

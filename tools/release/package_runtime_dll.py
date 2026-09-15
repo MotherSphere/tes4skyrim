@@ -1,4 +1,4 @@
-"""Package TESRuntime.dll as its own distributable SKSE mod.
+"""Package the converter's SKSE DLLs as one distributable mod.
 
 The DLL is not a plugin asset: one copy serves every converted mod, so it
 ships alone rather than beside any plugin's meshes. Each converted mod
@@ -27,17 +27,29 @@ from output_layout import finished_dir
 
 MOD_NAME = "TESRuntime"
 
-#: Built by tes_runtime/build.bat; the one file this mod exists to deliver.
-DLL_PATH = SCRIPT_DIR / "tes_runtime" / "TESRuntime.dll"
+SRC_DIR = SCRIPT_DIR / "tes_runtime"
 
-#: Where the DLL sits inside the archive's Data root.
-ARCNAME = Path("SKSE") / "Plugins" / "TESRuntime.dll"
+PLUGINS = Path("SKSE") / "Plugins"
+
+#: Built by tes_runtime/build.bat; without this the archive has no reason to exist.
+REQUIRED = ((SRC_DIR / "TESRuntime.dll", PLUGINS / "TESRuntime.dll"),)
+OPTIONAL = (
+    (SRC_DIR / "HavokWorldSize.dll", PLUGINS / "HavokWorldSize.dll"),
+    (SRC_DIR / "havok_world_size" / "HavokWorldSize.ini",
+     PLUGINS / "HavokWorldSize.ini"),
+)
 
 
 def package(out_root: Path) -> int:
-    """Zip the built DLL into <out_root>/Finished Mods/TESRuntime.zip."""
-    if not DLL_PATH.is_file():
-        print(f"ERROR: {DLL_PATH} not found — build it first with "
+    """Zip the built DLLs into <out_root>/Finished Mods/TESRuntime.zip.
+
+    HavokWorldSize ships in the same archive but stays a SEPARATE DLL: it
+    shares no code and needs no Address Library, so a fault in it must not take
+    TESRuntime down. Missing optional files are skipped, not fatal.
+    """
+    missing = [src for src, _ in REQUIRED if not src.is_file()]
+    if missing:
+        print(f"ERROR: {missing[0]} not found — build it first with "
               f"tes_runtime\\build.bat.")
         return 1
 
@@ -46,19 +58,27 @@ def package(out_root: Path) -> int:
     print("=" * 54)
     print("  PACKAGE RUNTIME DLL")
     print("=" * 54)
-    print(f"  Source: {DLL_PATH}")
+    print(f"  Source: {SRC_DIR}")
     print(f"  Output: {zip_path}")
     print()
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(DLL_PATH, arcname=str(ARCNAME))
-        print(f"  + {ARCNAME}")
+        for src, arc in REQUIRED:
+            zf.write(src, arcname=str(arc))
+            print(f"  + {arc}")
+        for src, arc in OPTIONAL:
+            if src.is_file():
+                zf.write(src, arcname=str(arc))
+                print(f"  + {arc}")
+            else:
+                print(f"  - {arc} (not built, skipped)")
 
     size = zip_path.stat().st_size
     print()
     print(f"Packaged -> {zip_path} ({size:,} bytes)")
     print("Install it like any other converted mod: the archive root is the "
-          "Data folder. It needs SKSE and the Address Library.")
+          "Data folder. TESRuntime needs SKSE and the Address Library; "
+          "HavokWorldSize needs only SKSE.")
     return 0
 
 

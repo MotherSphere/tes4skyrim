@@ -18,6 +18,34 @@ in `SkyrimSE.exe` and resolved through the Address Library (no raw RVAs):
    sidecars the importer writes to `SKSE\Plugins\TESRuntime\`:
    [docs/commentary/asset_convert_falloutnv.md#dismemberment](../docs/commentary/asset_convert_falloutnv.md#dismemberment).
 
+## HavokWorldSize.dll
+
+Source in `havok_world_size/`. Built by the same `build.bat` and packaged in
+the same archive, but its own source folder and a **separate DLL** — it shares
+no code with `plugin/` and needs no Address Library, so a fault in it cannot
+take TESRuntime down.
+
+It widens Skyrim's Havok broad-phase world AABB past its vanilla ±64 cells,
+which is what breaks physics and interactions far from the world origin. The
+limit is a single `.rdata` float (`3745.38232421875` havok m = 262,144 game
+units = 64 × 4096) that the `hkpWorldCinfo` setup loads as the broad-phase
+extent; objects outside it clamp to `hkpBroadPhaseBorder`.
+
+It finds that constant **by value** (a 16-byte-aligned broadcast quad), not by
+address, so no Address Library is needed and no build is hardcoded — verified
+to occur exactly once in SSE GOG/AE, SSE Steam and the **unpacked** Skyrim VR
+binary. Exports `SKSEPlugin_Query` as well as `SKSEPlugin_Version`, matching
+TESRuntime, so one DLL is discoverable on SE, AE and VR.
+
+`HavokWorldSize.ini` sets `fWorldCells` (default 128; use the SMALLEST value
+covering your worldspace — the broad-phase key step doubles with it) and
+`bDryRun=1` to log the site without writing. Log:
+`Documents\My Games\Skyrim Special Edition\SKSE\HavokWorldSize.log`.
+Runtime-only: no record data, no FormIDs, so removing it fully reverts.
+Analysis: [docs/audits/worldspace_havok_range.md](../docs/audits/worldspace_havok_range.md).
+
+## Building
+
 Build with `build.bat` (MSVC x64 only). `build.bat cache-only` builds
 `TESRuntime_CacheOnly.dll` instead: job 1 alone, with `engine.cpp`, `guns.cpp`
 and `sever.cpp` not compiled in, so the cache composition can be tested with

@@ -214,6 +214,15 @@ If you'd like to use any modded Oblivion assets such as models or textures, firs
 See [tes_runtime/README.md](tes_runtime/README.md) for the details and for
 building it yourself.
 
+#### HavokWorldSize
+
+`HavokWorldSize.dll` installs alongside TESRuntime as a separate plugin. Skyrim's
+physics only works within 64 cells of the world center — past that, NPCs bounce
+in and out of the ground and you can't open doors or hit anything. Big
+worldspaces like Tamriel Rebuilt go well beyond that, so this widens the limit.
+Edit `Data\SKSE\Plugins\HavokWorldSize.ini` to change it (128 by default; use the
+smallest that fits your worldspace).
+
 #### Changing the gun reload key
 
 The reload key defaults to **mouse button 4** and the iron-sight (zoom) key to
