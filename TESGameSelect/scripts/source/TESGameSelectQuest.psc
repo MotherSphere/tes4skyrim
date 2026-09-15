@@ -18,6 +18,7 @@ never appears in the menu.}
 String Property OblivionPlugin     = "Oblivion.esm"     Auto
 String Property NehrimPlugin       = "Nehrim.esm"       Auto
 String Property MorroblivionPlugin = "Morrowind_ob.esm" Auto
+String Property FalloutNVPlugin     = "FalloutNV.esm"   Auto
 
 ; ---------------------------------------------------------------------------
 ; Per-game entry points. GetFormFromFile takes a form's ID *within its own
@@ -45,6 +46,16 @@ Int Property NehrimChargenStage    = 5          Auto
 Int Property MorroChargenID        = 0x00F0A28C Auto
 Int Property MorroStartMarkerID    = 0x00F0A278 Auto
 Int Property MorroChargenStage     = 1          Auto
+
+; FalloutNV  VCG00 00102037 — stage 0 IS the whole opening: it moves the player
+;            to VCG01PlayerStartMarkerREF 00103E6B, sets the hour, forces the
+;            cemetery weather, plays the intro and advances itself to stage 90,
+;            which reaches Doc Mitchell's house. Nothing to dress the player in:
+;            FalloutNV's player record carries only the Pip-Boy and its glove,
+;            and that same stage opens by removing both.
+Int Property FalloutNVChargenID     = 0x00102037 Auto
+Int Property FalloutNVStartMarkerID = 0x00103E6B Auto
+Int Property FalloutNVChargenStage  = 0          Auto
 
 ; ---------------------------------------------------------------------------
 ; Starting equipment. On a new game the player carries Skyrim's base-record
@@ -89,12 +100,33 @@ Int Property NehrimNoteID          = 0x00000AED Auto
 ; against fixed ring identities while its conditions hide arbitrary subsets.
 ; So the returned index maps directly onto the GAME_* constants below.
 ; ---------------------------------------------------------------------------
-Message Property GameSelectMenu Auto
+; The prompt, one variant per subset of the gated games. A MESG's DESC prologue
+; names each game in turn and carries no condition, so the variant whose text
+; names exactly the installed set is chosen at runtime by MenuFor(). Bit 0 is
+; Oblivion, bit 1 Morroblivion, bit 2 Nehrim, bit 3 FalloutNV — the gated
+; BUTTONS order in make_game_select_esp.py.
+Message Property Menu00 Auto
+Message Property Menu01 Auto
+Message Property Menu02 Auto
+Message Property Menu03 Auto
+Message Property Menu04 Auto
+Message Property Menu05 Auto
+Message Property Menu06 Auto
+Message Property Menu07 Auto
+Message Property Menu08 Auto
+Message Property Menu09 Auto
+Message Property Menu10 Auto
+Message Property Menu11 Auto
+Message Property Menu12 Auto
+Message Property Menu13 Auto
+Message Property Menu14 Auto
+Message Property Menu15 Auto
 
 GlobalVariable Property HasSkyrim       Auto
 GlobalVariable Property HasOblivion     Auto
 GlobalVariable Property HasNehrim       Auto
 GlobalVariable Property HasMorroblivion Auto
+GlobalVariable Property HasFalloutNV    Auto
 
 ; Set true the moment the menu has been shown, so a second entry (quest
 ; restart, re-add on an existing save, a stray SetStage) can never re-ask.
@@ -110,9 +142,14 @@ Int Property GAME_SKYRIM       = 0 AutoReadOnly
 Int Property GAME_OBLIVION     = 1 AutoReadOnly
 Int Property GAME_MORROBLIVION = 2 AutoReadOnly
 Int Property GAME_NEHRIM       = 3 AutoReadOnly
+Int Property GAME_FALLOUTNV    = 4 AutoReadOnly
 
 ; Number of games offered, counting Skyrim. 1 means "Skyrim only" — no menu.
 Int gameCount
+
+; Bitmask of the installed gated games, picking the MESG variant whose prologue
+; names exactly them: bit 0 Oblivion, 1 Morroblivion, 2 Nehrim, 3 FalloutNV.
+Int installedMask
 
 ; ---------------------------------------------------------------------------
 ; Selection: show the menu and record the choice. NO side effects — the
@@ -142,11 +179,11 @@ Function RunSelection()
 
   ; The returned index is the button's own index in the MESG, unaffected by
   ; which buttons the conditions hid — so it IS the game id.
-  Int game = GameSelectMenu.Show()
+  Int game = MenuFor(installedMask).Show()
 
   ; An unexpected index (a mod-added button, a cancelled menu) is treated as
   ; Skyrim: the safe direction, since it leaves the vanilla start intact.
-  If game != GAME_OBLIVION && game != GAME_NEHRIM && game != GAME_MORROBLIVION
+  If game < GAME_OBLIVION || game > GAME_FALLOUTNV
     game = GAME_SKYRIM
   EndIf
   ChosenGame = game
@@ -169,6 +206,8 @@ Function BeginChosenGame()
     BeginNehrim()
   ElseIf ChosenGame == GAME_MORROBLIVION
     BeginMorroblivion()
+  ElseIf ChosenGame == GAME_FALLOUTNV
+    BeginFalloutNV()
   EndIf
 
   If ChoseSkyrim()
@@ -191,16 +230,20 @@ EndFunction
 
 Function DetectInstalledGames()
   gameCount = 0
+  installedMask = 0
 
-  ; Skyrim is always available — it is the game we are running inside.
-  SetGate(HasSkyrim, true)
-  SetGate(HasOblivion, IsPluginPresent(OblivionPlugin, OblivionChargenID))
-  SetGate(HasNehrim, IsPluginPresent(NehrimPlugin, NehrimChargenID))
+  ; Skyrim is always available — it is the game we are running inside, and it
+  ; owns no mask bit because its prologue line is unconditional.
+  SetGate(HasSkyrim, true, 0)
+  SetGate(HasOblivion, IsPluginPresent(OblivionPlugin, OblivionChargenID), 1)
   SetGate(HasMorroblivion, \
-          IsPluginPresent(MorroblivionPlugin, MorroChargenID))
+          IsPluginPresent(MorroblivionPlugin, MorroChargenID), 2)
+  SetGate(HasNehrim, IsPluginPresent(NehrimPlugin, NehrimChargenID), 4)
+  SetGate(HasFalloutNV, \
+          IsPluginPresent(FalloutNVPlugin, FalloutNVChargenID), 8)
 EndFunction
 
-Function SetGate(GlobalVariable gate, Bool present)
+Function SetGate(GlobalVariable gate, Bool present, Int maskBit)
   ; The global drives that button's MESG condition: 1 shows it, 0 hides it.
   If gate != None
     If present
@@ -212,7 +255,46 @@ Function SetGate(GlobalVariable gate, Bool present)
 
   If present
     gameCount += 1
+    installedMask += maskBit
   EndIf
+EndFunction
+
+; The MESG variant whose prologue names exactly the installed games. Papyrus
+; has no array of properties, so the 16 are bound individually and selected
+; here; the build emits one per mask value, so every branch is filled.
+Message Function MenuFor(Int mask)
+  If mask == 0
+    Return Menu00
+  ElseIf mask == 1
+    Return Menu01
+  ElseIf mask == 2
+    Return Menu02
+  ElseIf mask == 3
+    Return Menu03
+  ElseIf mask == 4
+    Return Menu04
+  ElseIf mask == 5
+    Return Menu05
+  ElseIf mask == 6
+    Return Menu06
+  ElseIf mask == 7
+    Return Menu07
+  ElseIf mask == 8
+    Return Menu08
+  ElseIf mask == 9
+    Return Menu09
+  ElseIf mask == 10
+    Return Menu10
+  ElseIf mask == 11
+    Return Menu11
+  ElseIf mask == 12
+    Return Menu12
+  ElseIf mask == 13
+    Return Menu13
+  ElseIf mask == 14
+    Return Menu14
+  EndIf
+  Return Menu15
 EndFunction
 
 Bool Function IsPluginPresent(String plugin, Int probeID)
@@ -298,6 +380,21 @@ Function BeginMorroblivion()
 
   HandOff(chargen, MorroChargenStage, \
           GetRefFrom(MorroStartMarkerID, MorroblivionPlugin))
+EndFunction
+
+Function BeginFalloutNV()
+  Quest chargen = GetQuestFrom(FalloutNVChargenID, FalloutNVPlugin)
+  If chargen == None
+    FallBackToSkyrim()
+    Return
+  EndIf
+
+  ; Nothing to wear: VCG00 stage 0 strips the Pip-Boy the player record carries,
+  ; so only Skyrim's own debug inventory has to go.
+  StripPlayer()
+
+  HandOff(chargen, FalloutNVChargenStage, \
+          GetRefFrom(FalloutNVStartMarkerID, FalloutNVPlugin))
 EndFunction
 
 Function FallBackToSkyrim()

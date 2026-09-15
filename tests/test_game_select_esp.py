@@ -14,8 +14,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.release.make_game_select_esp import (BUTTONS, FID_MESG, FID_QUST, FID_MQ101,
-                                        FID_GLOB_OBLIVION, FID_GLOB_NEHRIM,
-                                        FID_GLOB_MORROBLIVION, GLOBALS,
+                                        GLOBALS,
                                         QUEST_TYPE_NONE, FID_GAMEHOUR,
                                         FID_HOLDING_CELL_MARKER,
                                         MQ101_TAKEOVER_STAGE,
@@ -24,7 +23,29 @@ from tools.release.make_game_select_esp import (BUTTONS, FID_MESG, FID_QUST, FID
                                         MQ101_VANILLA_FRAGMENT_SCRIPT,
                                         FUNC_GET_GLOBAL_VALUE, SCRIPT_NAME,
                                         MQ101_SCRIPT_NAME, build_plugin,
+                                        MESG_VARIANTS, prologue_for,
                                         _skip_script_entry)
+
+
+def test_every_installed_set_has_a_menu_variant(built):
+    """MenuFor() indexes by mask, so all 2**gated variants must exist."""
+    _data, _count, recs = built
+    for mask in range(MESG_VARIANTS):
+        assert ('MESG', FID_MESG + mask) in recs, f'no MESG for mask {mask}'
+
+
+def test_prologue_names_only_installed_games():
+    """A game absent from the mask must not be described; Skyrim's line is
+    unconditional and always present."""
+    gated = [i for i, b in enumerate(BUTTONS) if b[1] is not None]
+    for mask in range(MESG_VARIANTS):
+        text = prologue_for(mask)
+        assert BUTTONS[0][2] in text, 'Skyrim line is unconditional'
+        for bit, idx in enumerate(gated):
+            present = bool(mask & (1 << bit))
+            assert (BUTTONS[idx][2] in text) == present, (
+                f'mask {mask}: {BUTTONS[idx][2]!r} should '
+                f'{"appear" if present else "be hidden"}')
 from tes5_import.base.tes5_reader import records
 
 
@@ -72,13 +93,13 @@ def test_header_declares_only_skyrim_master(built):
 
 
 def test_hedr_count_matches_contents(built):
-    """HEDR must count records + GRUPs. The engine walks the file by this
-    number, so an undercount silently drops records."""
+    """HEDR must count records + GRUPs; the engine walks the file by it, so an
+    undercount silently drops records. One GLOB per game, one MESG per
+    installed-game set, two QUST (selector + MQ101), three top-level GRUPs."""
     data, count, recs = built
     hedr = dict(recs[('TES4', 0)])['HEDR']
     assert struct.unpack('<I', hedr[4:8])[0] == count
-    # 4 GLOB + 1 MESG + 2 QUST (selector + MQ101 override) + 3 top-level GRUPs
-    assert count == 10
+    assert count == len(GLOBALS) + MESG_VARIANTS + 2 + 3
 
 
 def test_selector_quest_is_not_start_game_enabled(built):
@@ -105,16 +126,18 @@ def test_seq_is_empty(built, tmp_path):
 def test_button_order_matches_game_ids(built):
     """Buttons must be declared in GAME_* order: a hidden button does not
     renumber the rest, so Show()'s return value IS the game id. Reordering
-    these without editing the script starts the wrong game."""
+    these without editing the script starts the wrong game.
+
+    The expectation is derived from BUTTONS rather than frozen as a snapshot:
+    the contract is that the record's ITXT order IS the declared order, not
+    that a given game sits at a given index. Index 0 is the one fixed point —
+    it is the unconditional button.
+    """
     _data, _count, recs = built
     subs = recs[('MESG', FID_MESG)]
     texts = [p.rstrip(b'\0').decode() for t, p in subs if t == 'ITXT']
-    # Derive the expectation from BUTTONS rather than freezing a snapshot
-    # of it: the contract is that the record's ITXT order IS the declared
-    # order, not that a given game sits at a given index.
-    assert texts == [text for text, _gate in BUTTONS]
-    assert len(texts) == len(BUTTONS) == 4
-    # Index 0 is the one fixed point: it is the unconditional button.
+    assert texts == [b[0] for b in BUTTONS]
+    assert len(texts) == len(BUTTONS) == 5
     assert BUTTONS[0][1] is None
     assert texts[0].startswith('Skyrim')
 
@@ -141,16 +164,14 @@ def test_skyrim_button_is_unconditional_others_are_gated(built):
             conds.setdefault(idx, []).append(param1)
 
     assert 0 not in conds, 'Skyrim button must stay unconditional'
-    # Each remaining button is gated on exactly its own global, in
-    # BUTTONS order -- follow the list instead of restating it.
-    for idx, (_text, gate) in enumerate(BUTTONS):
+    for idx, button in enumerate(BUTTONS):
+        gate = button[1]
         if gate is None:
             assert idx not in conds
         else:
             assert conds[idx] == [gate]
-    # All three converted games are represented, each exactly once.
     assert sorted(g for gs in conds.values() for g in gs) == sorted(
-        [FID_GLOB_OBLIVION, FID_GLOB_NEHRIM, FID_GLOB_MORROBLIVION])
+        b[1] for b in BUTTONS if b[1] is not None)
 
 
 def test_mesg_is_a_message_box(built):
@@ -190,13 +211,10 @@ def test_vmad_binds_every_script_property(built):
         assert alias == -1
         props[pname] = fid
 
-    assert props == {
-        'GameSelectMenu': FID_MESG,
-        'HasSkyrim': GLOBALS[0][0],
-        'HasOblivion': FID_GLOB_OBLIVION,
-        'HasNehrim': FID_GLOB_NEHRIM,
-        'HasMorroblivion': FID_GLOB_MORROBLIVION,
-    }
+    expected = {edid.replace('TESGS_', ''): fid for fid, edid in GLOBALS}
+    for mask in range(MESG_VARIANTS):
+        expected[f'Menu{mask:02d}'] = FID_MESG + mask
+    assert props == expected
     assert pos == len(vmad), 'VMAD must be fully consumed'
 
 
@@ -343,25 +361,22 @@ def test_mq101_takeover_script_properties_bound(built):
 
 def test_script_source_declares_matching_game_constants():
     """The .psc GAME_* ids must line up with the MESG button order; they are
-    the mapping from a clicked button to the game that gets started."""
+    the mapping from a clicked button to the game that gets started.
+
+    The button's index IS the game id, so a game's .psc constant must equal its
+    position in BUTTONS. Deriving that here means a reorder in one file without
+    the other fails loudly instead of silently launching the wrong game.
+    """
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     psc = os.path.join(root, 'TESGameSelect', 'scripts', 'source',
                        SCRIPT_NAME + '.psc')
     text = open(psc, encoding='utf-8').read()
 
-    # The button's index IS the game id, so the .psc constant for a game
-    # must equal that game's position in BUTTONS. Deriving it here means a
-    # reorder in one file without the other fails loudly instead of
-    # silently launching the wrong game.
-    glob_to_const = {
-        None:                  'GAME_SKYRIM',
-        FID_GLOB_OBLIVION:     'GAME_OBLIVION',
-        FID_GLOB_NEHRIM:       'GAME_NEHRIM',
-        FID_GLOB_MORROBLIVION: 'GAME_MORROBLIVION',
-    }
-    expected = {glob_to_const[gate]: idx
-                for idx, (_text, gate) in enumerate(BUTTONS)}
-    assert len(expected) == len(BUTTONS) == 4
+    glob_to_const = {fid: 'GAME_' + edid.replace('TESGS_Has', '').upper()
+                     for fid, edid in GLOBALS}
+    glob_to_const[None] = 'GAME_SKYRIM'
+    expected = {glob_to_const[b[1]]: idx for idx, b in enumerate(BUTTONS)}
+    assert len(expected) == len(BUTTONS) == 5
 
     for name, value in sorted(expected.items(), key=lambda kv: kv[1]):
         assert f'Property {name}' in text

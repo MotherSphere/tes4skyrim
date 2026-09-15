@@ -1,24 +1,31 @@
 """Build TESGameSelect.esp — the "Threads of Prophecy" new-game game selector.
 
 A standalone, redistributable Skyrim SE plugin. On a new game it detects which
-converted TES games are present in the load order (Oblivion, Nehrim,
-Morroblivion) and offers the player a choice of which game to begin; picking one
-hands control to that game's own character generation. Picking Skyrim leaves the
-vanilla opening untouched.
+converted games are present in the load order (Oblivion, Nehrim, Morroblivion,
+Fallout: New Vegas) and offers the player a choice of which game to begin;
+picking one hands control to that game's own character generation. Picking
+Skyrim leaves the vanilla opening untouched.
 
 Structure (all authored from scratch — no TES4 source):
 
-  GLOB x4   TESGS_HasSkyrim / HasOblivion / HasNehrim / HasMorroblivion.
-            Set by the quest script from its detection pass. The three
-            converted-game globals each gate one menu button so absent games
-            are not offered; TESGS_HasSkyrim gates nothing (Skyrim's button is
-            unconditional) and exists so the detection state is inspectable
-            in-game with `sqv` / `getglobalvalue` when diagnosing a menu that
-            offered the wrong set.
-  MESG      TESGSGameSelectMSG — the prompt. All four buttons are declared; the
-            three converted-game buttons carry a GetGlobalValue(<its global>)
-            == 1 condition, which is how vanilla builds a menu whose buttons
-            vary at runtime (dunMiddenNamesMenuMSG uses the same pattern).
+  GLOB x5   TESGS_HasSkyrim / HasOblivion / HasNehrim / HasMorroblivion /
+            HasFalloutNV. Set by the quest script from its detection pass. The
+            four converted-game globals each gate one menu button so absent
+            games are not offered; TESGS_HasSkyrim gates nothing (Skyrim's
+            button is unconditional) and exists so the detection state is
+            inspectable in-game with `sqv` / `getglobalvalue` when diagnosing a
+            menu that offered the wrong set.
+  MESG x16  TESGSGameSelectMSG<mask> — the prompt, one variant per subset of
+            the four gated games. All five buttons are declared in every
+            variant; the four converted-game buttons carry a
+            GetGlobalValue(<its global>) == 1 condition, which is how vanilla
+            builds a menu whose buttons vary at runtime (dunMiddenNamesMenuMSG
+            uses the same pattern). The variants exist for the DESC prologue,
+            which names each game in turn and CANNOT be hidden: MESG has no
+            top-level condition slot (xEdit wbDefinitionsTES5.pas — CTDA lives
+            only inside the Menu Button struct) and Show() substitutes floats
+            only. So each variant's DESC names exactly its own subset and the
+            script shows the one matching what it detected.
   QUST      TESGSGameSelect — Start Game Enabled, script-only (no stages, no
             aliases), carrying the VMAD that attaches TESGameSelectQuest.psc
             with its Message/GlobalVariable properties bound.
@@ -60,6 +67,7 @@ FID_GLOB_SKYRIM       = 0x01000800
 FID_GLOB_OBLIVION     = 0x01000801
 FID_GLOB_NEHRIM       = 0x01000802
 FID_GLOB_MORROBLIVION = 0x01000803
+FID_GLOB_FALLOUTNV    = 0x01000804
 FID_MESG              = 0x01000810
 FID_QUST              = 0x01000820
 
@@ -95,39 +103,33 @@ QUEST_TYPE_NONE = 0
 # CTDA function index 74 = GetGlobalValue(Global). Operator 0x00 is '=='.
 FUNC_GET_GLOBAL_VALUE = 74
 
-PROLOGUE = (
-    "The threads of prophecy gather, but fate has not yet chosen its weave.\n\n"
-    "A cart of prisoners rolls toward death.\n"
-    "An Emperor dreams of a stranger in a cell.\n"
-    "A ship makes port in a land of ash.\n"
-    "A godless land waits for no one.\n\n"
-    "Where does fate bind you?"
-)
+PROLOGUE_OPEN = (
+    "The threads of prophecy gather, but fate has not yet chosen its weave.")
+PROLOGUE_CLOSE = "Where does fate bind you?"
 
-# Button order here MUST match the GAME_* constants in TESGameSelectQuest.psc:
-# Skyrim=0, Oblivion=1, Morroblivion=2, Nehrim=3. Reordering this list without
-# renumbering those constants silently launches the WRONG GAME — the button
-# index is the only thing tying a button to a game.
-# A hidden button does NOT renumber the others — Message.Show() returns the
-# button's own index regardless of which conditions passed (vanilla's
-# dunMiddenHandSculptureSCRIPT depends on exactly this) — so index == game id.
-#
-# Skyrim's button carries NO condition and is therefore always drawn, matching
-# dunMiddenNamesMenuMSG, whose final "do nothing" button is likewise
-# unconditional. That guarantees the menu always has at least one valid choice
-# and can never trap the player with nothing to click.
+#: (button text, gate global, prologue line). INDEX IS THE GAME ID — append only.
 BUTTONS = [
-    ("Skyrim  -  Your name is written upon the executioner's block", None),
-    ("Cyrodiil  -  The Emperor has dreamt of you",                 FID_GLOB_OBLIVION),
-    ("Vvardenfell  -  A prophecy of old foretold your birth",     FID_GLOB_MORROBLIVION),
-    ("Nehrim  -  You were not chosen. You must make for yourself a name",      FID_GLOB_NEHRIM),
+    ("Skyrim  -  Your name is written upon the executioner's block", None,
+     "A cart of prisoners rolls toward death."),
+    ("Cyrodiil  -  The Emperor has dreamt of you", FID_GLOB_OBLIVION,
+     "An Emperor dreams of a stranger in a cell."),
+    ("Vvardenfell  -  A prophecy of old foretold your birth", FID_GLOB_MORROBLIVION,
+     "A ship makes port in a land of ash."),
+    ("Nehrim  -  You were not chosen. You must make for yourself a name", FID_GLOB_NEHRIM,
+     "A godless land waits for no one."),
+    ("Mojave  -  A bullet in your head is not always the end", FID_GLOB_FALLOUTNV,
+     "A courier claws out of a shallow grave beneath a desert sky."),
 ]
+
+#: One MESG per subset of the gated games, so each prologue names only those.
+MESG_VARIANTS = 1 << sum(1 for _t, gate, _l in BUTTONS if gate is not None)
 
 GLOBALS = [
     (FID_GLOB_SKYRIM,       'TESGS_HasSkyrim'),
     (FID_GLOB_OBLIVION,     'TESGS_HasOblivion'),
     (FID_GLOB_NEHRIM,       'TESGS_HasNehrim'),
     (FID_GLOB_MORROBLIVION, 'TESGS_HasMorroblivion'),
+    (FID_GLOB_FALLOUTNV,    'TESGS_HasFalloutNV'),
 ]
 
 
@@ -140,23 +142,41 @@ def build_glob(fid: int, edid: str) -> bytes:
     return pack_record('GLOB', fid, 0, subs)
 
 
-def build_mesg() -> bytes:
-    """The message box. DNAM bit 0 = Message Box (a full modal with buttons,
-    not a corner notification); bit 1 (Auto Display) stays clear because the
-    script shows it explicitly and reads the button index back."""
-    subs = pack_string_subrecord('EDID', 'TESGSGameSelectMSG')
-    subs += pack_string_subrecord('DESC', PROLOGUE)
+def prologue_for(mask: int) -> str:
+    """The prompt text for one installed-game set, as a bitmask over the GATED
+    entries of BUTTONS (bit 0 = BUTTONS[1], bit 1 = BUTTONS[2], ...).
+
+    Skyrim's line is unconditional, like its button; every other line appears
+    only when its bit is set, so an absent game is never described.
+    """
+    lines = [PROLOGUE_OPEN, '']
+    for idx, (_text, gate, line) in enumerate(BUTTONS):
+        if gate is None or mask & (1 << (idx - 1)):
+            lines.append(line)
+    return '\n'.join(lines + ['', PROLOGUE_CLOSE])
+
+
+def build_mesg(mask: int) -> bytes:
+    """One message-box variant, its DESC naming only the installed games.
+
+    DNAM bit 0 = Message Box (a modal with buttons, not a corner notification);
+    bit 1 (Auto Display) stays clear because the script shows it and reads the
+    button index back. Every variant declares ALL buttons with their usual
+    conditions, so a button's index equals its game id in whichever is shown.
+    """
+    subs = pack_string_subrecord('EDID', f'TESGSGameSelectMSG{mask:02d}')
+    subs += pack_string_subrecord('DESC', prologue_for(mask))
     subs += pack_string_subrecord('FULL', 'The Threads of Prophecy')
     # INAM is a required leftover ("Icon (unused)") and is always NULL in vanilla.
     subs += pack_formid_subrecord('INAM', 0)
     subs += pack_uint32_subrecord('DNAM', 0x00000001)   # Message Box
-    for text, gate_fid in BUTTONS:
+    for text, gate_fid, _line in BUTTONS:
         subs += pack_string_subrecord('ITXT', text)
         if gate_fid is not None:
             subs += pack_subrecord('CTDA', build_ctda(
                 FUNC_GET_GLOBAL_VALUE, param1=gate_fid, comp_value=1.0,
                 operator=0x00))
-    return pack_record('MESG', FID_MESG, 0, subs)
+    return pack_record('MESG', FID_MESG + mask, 0, subs)
 
 
 def build_qust() -> bytes:
@@ -167,15 +187,10 @@ def build_qust() -> bytes:
     OnInit instead is what made the menu appear twice — OnInit fires again
     whenever the quest restarts or is re-added to a save.
     """
-    vmad = build_vmad_object_script(
-        SCRIPT_NAME,
-        object_props={
-            'GameSelectMenu':  FID_MESG,
-            'HasSkyrim':       FID_GLOB_SKYRIM,
-            'HasOblivion':     FID_GLOB_OBLIVION,
-            'HasNehrim':       FID_GLOB_NEHRIM,
-            'HasMorroblivion': FID_GLOB_MORROBLIVION,
-        })
+    props = {edid.replace('TESGS_', ''): fid for fid, edid in GLOBALS}
+    for mask in range(MESG_VARIANTS):
+        props[f'Menu{mask:02d}'] = FID_MESG + mask
+    vmad = build_vmad_object_script(SCRIPT_NAME, object_props=props)
 
     subs = pack_string_subrecord('EDID', 'TESGSGameSelect')
     subs += pack_subrecord('VMAD', vmad)
@@ -366,7 +381,8 @@ def build_plugin(skyrim_esm: str) -> bytes:
     """
     groups = [
         pack_top_group('GLOB', b''.join(build_glob(f, e) for f, e in GLOBALS)),
-        pack_top_group('MESG', build_mesg()),
+        pack_top_group('MESG', b''.join(build_mesg(m)
+                                        for m in range(MESG_VARIANTS))),
         pack_top_group('QUST', build_qust() + build_mq101_override(skyrim_esm)),
     ]
     count = sum(count_records_and_groups(g) for g in groups)
