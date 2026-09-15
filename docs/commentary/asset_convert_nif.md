@@ -1092,7 +1092,7 @@ format, leaving their triangle partitions alone.
 ## Inventory-marker orientation
 <a id="inventory-marker-orientation"></a>
 
-**Code:** `_finalise_inv_markers` in `asset_convert/nif/nif_converter.py`
+**Code:** `finalise_inv_markers` in `asset_convert/character/equipment_rig.py`
 
 Weapons and shields sit in Skyrim's normalized attachment frames — the Prn node
 convention and the SHIELD attach transform — so the vanilla-derived constant
@@ -1107,6 +1107,24 @@ Meshes never viewed in an inventory simply carry an inert extra-data block.
 
 A skinned non-equipment mesh is skipped: it poses through its bones rather than
 its node transforms, so geometry analysis would misjudge it.
+
+### No source game authors this — computing it is not a fallback
+<a id="no-authored-inventory-orientation"></a>
+
+`BSInvMarker` is `versions="#SKY_AND_LATER#"` in `references/nifxml/nif.xml`: the
+block does not exist in the TES4 or FO3/FNV formats, so there is no authored
+rotation to prefer for ANY source game. Measured: 0 of 15,013
+`export/FalloutNV.esm/meshes` NIFs contain the string `BSInvMarker`, against
+1,499 of 17,216 in `references/Skyrim Meshes` — the same scan, so the zero is
+real and not a broken query. Neither does the record side carry one: the FNV
+`WEAP`/`ARMO` definitions in `references/xEdit/Core/wbDefinitionsFNV.pas` have
+no rotation, zoom, pitch or yaw field anywhere.
+
+The reason is that Fallout 3 and New Vegas have no 3D inventory viewer at all —
+the Pip-Boy lists items as flat `MICN`/`ICON` 2D icons, which need no
+orientation. Skyrim's rotating 3D preview is a new feature with no predecessor
+data, so geometry analysis is the ONLY source for the value. Do not add an
+"honor the authored marker" branch for FNV; there is nothing for it to read.
 
 ## Dangling back-references after the root swap
 <a id="dangling-root-back-references"></a>

@@ -625,6 +625,11 @@ __all__ = ['resolve_property_formid', 'digit_stripped_formid']
 #: TES4 block types whose body becomes the OnUpdate poll.
 POLL_BLOCKS = ('gamemode', 'scripteffectupdate')
 
+#: `begin MenuMode <id>` -> menu whose close runs it; docs/commentary/script_convert.md#menumode-with-a-menu-id
+MENU_ID_NAMES = {
+    '1036': 'RaceSex Menu',
+}
+
 
 #: Reference types, WIDEST first: the later one is the more specific.
 REF_SPECIFICITY = ('Form', 'ObjectReference', 'Actor')

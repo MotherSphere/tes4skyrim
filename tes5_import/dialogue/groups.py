@@ -10,7 +10,7 @@ See: docs/commentary/tes5_import_dialogue.md#branches-views-topic-ownership
 import re
 import struct
 from collections import defaultdict
-from ..base.text_reader import get_formid_index_offset
+from ..base.text_reader import get_formid_index_offset, info_result_script
 from .quest import (bark_choice_gate_bytes, compute_quest_priorities,
                     has_quest_state_condition, quest_state_ctdas)
 from ..base.writer import pack_group
@@ -77,7 +77,7 @@ def _scan_startable_quests(by_type: dict) -> set:
             if k.endswith('ResultScript'):
                 harvest(v if isinstance(v, str) else '')
     for r in by_type.get('INFO', []):
-        harvest(r.get('ResultScript', ''))
+        harvest(info_result_script(r))
 
     startable_quests.clear()
     if by_type.get('SCPT'):

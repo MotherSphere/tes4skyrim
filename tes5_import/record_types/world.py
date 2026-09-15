@@ -894,6 +894,33 @@ def _refr_data(rec: dict, scale) -> bytes:
         _safe_angle(get_float(rec, 'RotZ'))))
 
 
+def _refr_head(rec: dict) -> bytes:
+    """EDID, NAME and the XPRM primitive of a REFR.
+
+    An invisible-marker base is substituted with its Skyrim.esm equivalent so
+    the ref points into index 0.  Oblivion.esm ships 6 refs on the MapMarker
+    base with no XMRK data (campsite/battle position markers); the map code
+    treats every 0x10-based ref as a map marker, so they ground to XMarker.
+    FO3/FNV trigger volumes are XPRM primitives, byte-identical to TES5's, so
+    the raw subrecord is copied through.
+    See: docs/commentary/tes4_export_falloutnv.md#trigger-primitives
+    """
+    subs = b''
+    edid = get_str(rec, 'EditorID')
+    if edid:
+        subs += pack_string_subrecord('EDID', edid)
+    name_raw = int(rec.get('NAME', '0') or '0', 16)
+    name_fid = _refr_base_formid(rec, name_raw)
+    if name_raw == 0x10 and get_str(rec, 'MapMarker') != '1':
+        name_fid = 0x0000003B
+    if name_fid:
+        subs += pack_formid_subrecord('NAME', name_fid)
+    primitive = get_str(rec, 'XPRM.Raw')
+    if primitive:
+        subs += pack_subrecord('XPRM', bytes.fromhex(primitive))
+    return subs
+
+
 def convert_REFR(rec: dict) -> bytes:
     """REFR — placed object reference.
 
@@ -909,26 +936,7 @@ def convert_REFR(rec: dict) -> bytes:
     The `object_scripts` import stays INSIDE the body.
     See: docs/reference/tes5_import_architecture.md#object-scripts-import-is-deferred
     """
-    subs = b''
-    edid = get_str(rec, 'EditorID')
-    if edid:
-        subs += pack_string_subrecord('EDID', edid)
-
-    # NAME = base object FormID (required)
-    # For invisible marker base objects, substitute the Skyrim.esm equivalent
-    # so REFRs point into Skyrim.esm (index 0) rather than our remapped copy.
-    name_raw = int(rec.get('NAME', '0') or '0', 16)
-    name_fid = _refr_base_formid(rec, name_raw)
-    # Oblivion.esm ships 6 refs on the MapMarker base with no XMRK marker
-    # data at all (campsite/battle position markers). Skyrim's map code
-    # treats every 0x10-based ref as a map marker and the CK flags them
-    # ("Mapmarker ref does not have map marker data") — they are plain
-    # position markers, so ground them to XMarker.
-    if name_raw == 0x10 and get_str(rec, 'MapMarker') != '1':
-        name_fid = 0x0000003B
-    if name_fid:
-        subs += pack_formid_subrecord('NAME', name_fid)
-
+    subs = _refr_head(rec)
     subs += _refr_xtel(rec)
 
     lock_bytes, barrier_door = _refr_xloc(rec)

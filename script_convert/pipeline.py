@@ -36,6 +36,7 @@ from script_convert.scro_refs import (preload_scro_refs, resolve_scro_aliases,
                                       scro_list)
 from script_convert.symbols import property_declarations, IMPLICIT_NAMES
 from script_convert.tes5.blocks import Kind, classify
+from tes5_import.base.text_reader import info_result_script
 from tes5_import.dialogue.conversations import (build_conversation_plan,
                                                 generate_driver_psc)
 from tes5_import.dialogue.converter import (DIAL_TYPE_SERVICE,
@@ -216,7 +217,8 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
     bounds_cache = load_bounds_cache(export_dir)
     deploy_static_scripts(export_dir, output_dir)
     xref = build_xref(export_dir)
-    by_type = load_records(export_dir, ('DIAL', 'INFO', 'QUST', 'SCPT', 'NPC_'))
+    by_type = load_records(export_dir, ('DIAL', 'INFO', 'QUST', 'SCPT', 'NPC_',
+                                        'MESG'))
     unlock_plan = build_unlock_plan(by_type)
     print(f'    AddTopic unlocks: {len(unlock_plan["gated"])} gated topics, '
           f'{len(unlock_plan["info_reveals"])} revealer INFOs')
@@ -237,7 +239,7 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
     quest_script_vars = build_quest_script_vars(by_type)
     _write_conversation_driver(export_dir, output_dir, by_type,
                                quest_script_vars, say_durations)
-    message_menus = build_message_plan(by_type['SCPT'])
+    message_menus = build_message_plan(by_type['SCPT'], by_type['MESG'])
     if message_menus:
         print(f'    Button menus: {sum(len(v) for v in message_menus.values())} '
               f'MessageBox sites in {len(message_menus)} scripts')
@@ -641,8 +643,8 @@ def _info_batch(records: list, output_dir: str, xref: CrossRefGraph,
     say_durations = ScriptConverter.say_durations or {}
 
     for rec in records:
-        result_script = rec.get('ResultScript', '')
-        has_script = bool(result_script and result_script.strip())
+        result_script = info_result_script(rec)
+        has_script = bool(result_script.strip())
         formid = rec.get('FormID', '')
         if not formid:
             continue
@@ -892,16 +894,11 @@ def scan_say_topic_fids(by_type: dict) -> set:
 def scan_say_topics(by_type: dict) -> set:
     """Topic EditorIDs (lowercase) that a TES4 script drives via Say/SayTo.
 
-    Computed ONCE, before the worker pool starts, because the fragment
-    emitter and the VMAD writer run in DIFFERENT PROCESSES -- a set filled
-    while converting SCPT records is invisible to the process converting
-    INFO records, so this cannot be collected as a side effect of conversion.
-
-    Every candidate is validated against the real DIAL EditorIDs: the naive
-    regex also matches English prose ("say it was spiked", "say anything"),
-    and Oblivion's script comments are full of it.  Requiring the token to
-    name an actual topic removes those without needing a comment-aware
-    parser -- measured on Oblivion.esm: 98 raw candidates -> 31 real topics.
+    Computed once, before the worker pool starts: the fragment emitter and
+    the VMAD writer run in different processes.  A candidate must name a real
+    DIAL, which drops the prose the regex also matches (Oblivion.esm: 98 raw
+    candidates -> 31 topics).  Every script field the export uses is read on
+    every record (SCTX, ResultScript, ResultScriptEnd, ScriptText).
     """
     dial_edids = {(r.get('EditorID') or '').strip().lower()
                   for r in by_type.get('DIAL', [])}
@@ -912,11 +909,8 @@ def scan_say_topics(by_type: dict) -> set:
     topics = set()
     for kind in ('SCPT', 'INFO', 'QUST'):
         for rec in by_type.get(kind, []):
-            # Field names differ per record type in the export: a SCPT keeps
-            # its body in SCTX, an INFO's result script is ResultScript, and a
-            # QUST stage's is also ResultScript.  Checking all of them on
-            # every record is cheaper than branching and cannot miss one.
-            for field in ('SCTX', 'ResultScript', 'ScriptText'):
+            for field in ('SCTX', 'ResultScript', 'ResultScriptEnd',
+                          'ScriptText'):
                 text = rec.get(field) or ''
                 if not text:
                     continue
@@ -949,7 +943,7 @@ def info_needs_fragment(rec: dict, info_reveals: dict = None,
     info_reveals = info_reveals or {}
     service_topics = service_topics or {}
 
-    result_script = (rec.get('ResultScript') or '').strip()
+    result_script = info_result_script(rec).strip()
     if result_script:
         code = [ln for ln in result_script.splitlines()
                 if ln.strip() and not ln.strip().startswith(';')]

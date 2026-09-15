@@ -154,6 +154,15 @@ def parse_export_file(filepath: str) -> list:
     return parse_file_range((filepath, 0, size))
 
 
+def info_result_script(rec: dict) -> str:
+    """An INFO's whole result script: its Begin text, then FO3/FNV's End text.
+
+    See: docs/commentary/tes4_export_falloutnv.md#info-end-script
+    """
+    parts = (rec.get('ResultScript') or '', rec.get('ResultScriptEnd') or '')
+    return '\n'.join(p for p in parts if p)
+
+
 def parse_export_directory(export_dir: str, type_filter: set = None) -> list:
     """Parse all per-type export files from a directory in parallel.
 

@@ -1057,24 +1057,7 @@ class CrossRefGraph:
         for scn_low, sctx in script_sources.items():
             _scan_text_for_cross_access(sctx)
 
-        # Scan THIS plugin's INFO result scripts and QUST stage scripts for
-        # cross-script access.  Unlike the SCPT scan above this is a pure union
-        # (it only ADDS names that must become Properties), and a master's own
-        # INFO/QUST fragments are emitted by the master's own conversion run,
-        # so the masters' copies are deliberately not scanned here.
-        for extra_file, field_name in [('INFO.txt', 'ResultScript'), ('QUST.txt', 'SCTX')]:
-            extra_path = os.path.join(export_dir, extra_file)
-            if not os.path.isfile(extra_path):
-                continue
-            try:
-                with open(extra_path, 'r', encoding='utf-8') as f:
-                    for raw_line in f:
-                        if raw_line.startswith(field_name + '='):
-                            text = raw_line[len(field_name) + 1:].strip()
-                            text = text.replace('\\r\\n', '\n').replace('\\n', '\n')
-                            _scan_text_for_cross_access(text)
-            except Exception:
-                pass
+        _scan_plugin_result_scripts(export_dir, _scan_text_for_cross_access)
 
         self.cross_script_vars = cross_script_vars
     def is_remote_ref_var(self, owner_edid: str, var_name: str) -> bool:
@@ -1124,3 +1107,29 @@ def _strip_comments(text: str) -> str:
     """
     nl = chr(10)
     return nl.join(line.split(';', 1)[0] for line in text.split(nl))
+
+
+def _scan_plugin_result_scripts(export_dir: str, scan) -> None:
+    """Feed THIS plugin's INFO result scripts (both halves) and QUST stage
+    scripts to `scan`: a pure union that only ADDS names which must become
+    Properties.  The masters' copies are not read -- each master's own run
+    emits its fragments."""
+    for extra_file, field_name in [('INFO.txt', 'ResultScript'),
+                                   ('INFO.txt', 'ResultScriptEnd'),
+                                   ('QUST.txt', 'SCTX')]:
+        prefix = field_name + '='
+        for raw_line in _export_lines(os.path.join(export_dir, extra_file)):
+            if raw_line.startswith(prefix):
+                text = raw_line[len(prefix):].strip()
+                scan(text.replace('\\r\\n', '\n').replace('\\n', '\n'))
+
+
+def _export_lines(path: str):
+    """The lines of one export file; nothing when it is missing or unreadable."""
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            yield from f
+    except (OSError, UnicodeDecodeError):
+        return

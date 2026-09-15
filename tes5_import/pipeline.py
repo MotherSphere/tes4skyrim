@@ -410,7 +410,8 @@ def _prescan_menu_records(by_type: dict, writer, _SC, _step_done):
     See: docs/commentary/tes5_import_pipeline.md#phase-0-chargen-menu-ids
     """
     from script_convert.message_menus import build_message_plan
-    message_plan = build_message_plan(by_type.get('SCPT', []))
+    message_plan = build_message_plan(by_type.get('SCPT', []),
+                                      by_type.get('MESG', []))
     message_mesgs = create_message_menu_records(writer, message_plan)
     _SC.message_menus = message_plan
     WELL_KNOWN_PROPERTIES.update(message_mesgs)

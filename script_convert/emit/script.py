@@ -18,6 +18,7 @@ each statement's trailing source comment.
 
 from __future__ import annotations
 
+from script_convert.constants import safe_property_name
 from script_convert.stage_latch import guard_stage_timer
 from script_convert.emit import stmt as S
 from script_convert.tes4 import nodes as N
@@ -29,6 +30,16 @@ INDENT = '  '
 # ---------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------
+
+def fragment_local(conv, var) -> str:
+    """The declaration of a fragment-local TES4 variable, typed as the body
+    left it (an actor-only call promotes a `ref` to Actor) and never doubled
+    as a property; reference types start as None."""
+    ptype = conv.sc.var_types[var.name.lower()]
+    conv.sc.property_refs.pop(safe_property_name(var.name), None)
+    init = {'Float': '0.0', 'Int': '0'}.get(ptype, 'None')
+    return '  %s %s = %s' % (ptype, var.name, init)
+
 
 def emit_body(conv, body, extends: str, depth: int = 0) -> list[str]:
     """Papyrus lines for a list of statement nodes, indented from `depth`.

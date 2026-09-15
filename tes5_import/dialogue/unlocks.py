@@ -40,6 +40,7 @@ FormIDs so the plan is identical regardless of the load-order offset.
 
 import re
 from collections import defaultdict
+from ..base.text_reader import info_result_script
 
 _RE_ADDTOPIC = re.compile(r'\baddtopic[\s,]+(\w+)', re.IGNORECASE)
 
@@ -112,7 +113,7 @@ def _info_explicit_targets(infos: list, edid_to_fid24: dict) -> set:
     targets = set()
     for rec in infos:
         targets.update(_low24(v) for v in _indexed_values(rec, 'AddTopic'))
-        targets.update(_script_addtopic_fids(rec.get('ResultScript', ''),
+        targets.update(_script_addtopic_fids(info_result_script(rec),
                                              edid_to_fid24))
     targets.discard(0)
     return targets
@@ -216,8 +217,7 @@ def _info_explicit_globals(rec: dict, gated: dict,
     found = set()
     for val in _indexed_values(rec, 'AddTopic'):
         found.add(gated.get(_low24(val)))
-    for fid24 in _script_addtopic_fids(rec.get('ResultScript', ''),
-                                       edid_to_fid24):
+    for fid24 in _script_addtopic_fids(info_result_script(rec), edid_to_fid24):
         found.add(gated.get(fid24))
     for val in _indexed_values(rec, 'Choice'):
         found.add(gated.get(_low24(val)))

@@ -44,7 +44,8 @@ import re
 import struct
 from collections import defaultdict
 
-from ..base.text_reader import get_formid_index_offset, remap_formid
+from ..base.text_reader import (get_formid_index_offset, info_result_script,
+                                remap_formid)
 from ..base.constants import ENGINE_GLOBAL_FORMIDS
 from ..base.equivalents import TES4_ITEM_FORMID_TO_SKYRIM
 from ..record_types.common import (
@@ -637,7 +638,7 @@ def _info_vmad(rec: dict, reveal_props, service_menu: str, xref,
     See: docs/commentary/tes5_import_dialogue.md#info-fragment-emission
     """
     info_fid = get_str(rec, 'FormID') or ''
-    result_script = get_str(rec, 'ResultScript')
+    result_script = info_result_script(rec)
     code_lines = []
     if result_script:
         code_lines = [ln for ln in result_script.strip().splitlines()
@@ -906,7 +907,7 @@ def _collect_script_texts(by_type: dict) -> list:
     scripts, and each QUST stage log's result script, in that order."""
     texts = [get_str(r, 'SCTX') or '' for r in by_type.get('SCPT', [])]
     for r in by_type.get('INFO', []):
-        texts.append(get_str(r, 'ResultScript') or '')
+        texts.append(info_result_script(r))
     for r in by_type.get('QUST', []):
         i = 0
         while f'Stage[{i}].Index' in r:

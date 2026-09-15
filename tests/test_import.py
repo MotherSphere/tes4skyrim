@@ -803,6 +803,19 @@ class TestConverters:
         data = self._get_subrecord_data(result, 'DATA')
         assert len(data) == 24  # 6 floats
 
+    def test_refr_trigger_primitive_round_trips(self):
+        """An FO3/FNV XPRM (trigger volume) is copied verbatim after NAME: the
+        layout is TES5's own, and without it OnTriggerEnter never fires."""
+        raw = ('80A69A4288A5A4430000E0420000803F0000803F8180003F9A99193E'
+               '01000000')
+        rec = {'Signature': 'REFR', 'FormID': '00001000', 'RecordFlags': '0',
+               'NAME': '00012345', 'XPRM.Raw': raw,
+               'PosX': '0.0', 'PosY': '0.0', 'PosZ': '0.0',
+               'RotX': '0.0', 'RotY': '0.0', 'RotZ': '0.0'}
+        result = convert_REFR(rec)
+        assert self._get_subrecord_data(result, 'XPRM') == bytes.fromhex(raw)
+        assert result.index(b'NAME') < result.index(b'XPRM') < result.index(b'DATA')
+
     def test_land(self):
         # Minimal LAND record
         vhgt = b'\x00' * 1093  # Standard VHGT size

@@ -21,6 +21,23 @@ from .common import (emit_float, emit_formid, emit_model, emit_raw_hex,
 FALLOUT_HEDR_MIN = 1.2
 
 
+def info_result_scripts(rec: Record) -> tuple:
+    """(Begin, End) result-script text of an INFO.
+
+    FO3/FNV embed TWO scripts in an INFO, Begin then End, split by the NEXT
+    marker; TES4 embeds one, which counts as Begin.
+    See: docs/commentary/tes4_export_falloutnv.md#info-end-script
+    """
+    texts = ['', '']
+    slot = 0
+    for sub in rec.subrecords:
+        if sub.type == 'NEXT':
+            slot = 1
+        elif sub.type == 'SCTX':
+            texts[slot] = get_string(sub)
+    return tuple(texts)
+
+
 def is_fallout(hedr_version: float) -> bool:
     """True when a plugin's HEDR version marks it FO3/FNV rather than TES4."""
     return hedr_version >= FALLOUT_HEDR_MIN
@@ -73,6 +90,7 @@ def _emit_refr_deltas(lines: list, rec: Record):
         lines.append(f"XPRM.BoundX={bx}")
         lines.append(f"XPRM.BoundY={by}")
         lines.append(f"XPRM.BoundZ={bz}")
+        emit_raw_hex(lines, "XPRM.Raw", xprm)
 
     xrds = get_subrecord(rec, "XRDS")
     if xrds and len(xrds.data) >= 4:

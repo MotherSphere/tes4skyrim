@@ -47,6 +47,8 @@ unbound, which the generated script guards against but cannot repair.
 import re
 import struct
 
+from ..base.text_reader import info_result_script
+
 # TES4 CTDA layout constants (24-byte raw conditions from the export dump).
 CTDA_OR = 0x01
 CTDA_RUN_ON_TARGET = 0x02
@@ -333,8 +335,8 @@ def _same_quest_closure(head: dict, quest_raw: str, info_by_dial: dict) -> list:
 
 def _is_quest_advancing(head: dict, closure: list) -> bool:
     """True when the head or its closure advances the quest."""
-    return bool(_QUEST_ADVANCING_RE.search(head.get('ResultScript', ''))
-                or any(_QUEST_ADVANCING_RE.search(i.get('ResultScript', ''))
+    return bool(_QUEST_ADVANCING_RE.search(info_result_script(head))
+                or any(_QUEST_ADVANCING_RE.search(info_result_script(i))
                        for i in closure))
 
 

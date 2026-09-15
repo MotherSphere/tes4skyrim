@@ -47,6 +47,27 @@ def _is_header_dir(d: Path) -> bool:
     return d.is_dir() and (d / "Debug.psc").is_file()
 
 
+def find_skse_source_scripts(config: dict) -> str:
+    """SKSE's own header directory, or '' when it is not installed.
+
+    SKSE installs alongside the vanilla headers rather than into them (vanilla
+    holds Debug.psc, SKSE holds UI.psc), so a build that calls an SKSE native
+    needs BOTH on the compiler's include path.
+    See: docs/commentary/script_convert.md#menumode-with-a-menu-id
+    """
+    data = config.get("tes5DataPath") or find_game_path("skyrimse")
+    if not data:
+        return ""
+    data_dir = Path(data)
+    if data_dir.name.lower() != "data":
+        data_dir = data_dir / "Data"
+    for parts in _HEADER_DIRS:
+        cand = data_dir.joinpath(*parts)
+        if cand.is_dir() and (cand / "UI.psc").is_file():
+            return str(cand)
+    return ""
+
+
 def _extract_scripts_zip(zip_path: Path, data_dir: Path) -> str:
     """Unpack the Papyrus sources out of Data/Scripts.zip, in place.
 
@@ -74,10 +95,11 @@ def _extract_scripts_zip(zip_path: Path, data_dir: Path) -> str:
 
 
 def find_skyrim_source_scripts(config: dict) -> str:
-    """The vanilla Papyrus header directory, unpacking Scripts.zip if needed.
+    """The Papyrus header directory, unpacking Scripts.zip if needed.
 
     The single lookup every caller uses, so preflight, the release tools and
-    the compile phase all agree on where the headers are.
+    the compile phase all agree on where the headers are. SKSE's own headers
+    sit in a SEPARATE directory; `find_skse_source_scripts` finds those.
     See: docs/commentary/script_convert.md#vanilla-headers
     """
     data = config.get("tes5DataPath") or find_game_path("skyrimse")
@@ -106,19 +128,23 @@ class _Compiler:
     """One plugin's compile run: the paths, the two strategies, the report."""
 
     def __init__(self, file_name, compiler, headers, script_src, script_out,
-                 master_src_dirs):
+                 master_src_dirs, skse_headers=""):
         """Hold the resolved paths for one plugin's compile."""
         self.file_name = file_name
         self.compiler = compiler
         self.headers = headers
+        self.skse_headers = skse_headers
         self.script_src = script_src
         self.script_out = script_out
         self.master_src_dirs = master_src_dirs
         self.psc_files = sorted(script_src.glob("*.psc"))
 
     def _header_args(self) -> list:
-        """`-h` arguments: vanilla headers, this plugin's, then its masters'."""
-        args = ["-h", str(self.headers), "-h", str(self.script_src)]
+        """`-h`: vanilla headers, SKSE's, this plugin's, then its masters'."""
+        args = ["-h", str(self.headers)]
+        if self.skse_headers:
+            args += ["-h", str(self.skse_headers)]
+        args += ["-h", str(self.script_src)]
         for d in self.master_src_dirs:
             args += ["-h", str(d)]
         return args
@@ -340,7 +366,8 @@ def _prepare(file_name: str, config: dict, output_dir):
 
     script_out.mkdir(parents=True, exist_ok=True)
     return _Compiler(file_name, compiler, headers, script_src, script_out,
-                     _master_source_dirs(file_name, out_root)), None
+                     _master_source_dirs(file_name, out_root),
+                     find_skse_source_scripts(config)), None
 
 
 def phase_compile(file_name: str, config: dict, output_dir: str = None):

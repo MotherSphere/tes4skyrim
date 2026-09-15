@@ -367,8 +367,11 @@ COMMAND_ROWS = {
     'isactordetected': Cmd(note='IsActorDetected (no Skyrim equivalent)', flags='cmp_bool'),
     'isbuttonpressed': Cmd(note='{f} has no Papyrus equivalent (read as 0)'),
     'iscontrolpressed': Cmd(note='{f} has no Papyrus equivalent (read as 0)'),
-    'iscurrentfurnitureobj': Cmd(note='{f}'),
-    'iscurrentfurnitureref': Cmd(note='{f}'),
+    'iscurrentfurnitureobj': Cmd('TES4Polyfill.IsCurrentFurnitureObj({ref}, {p0})',
+                                 ACTOR, types={0: 'Form'}, flags='actor_only'),
+    'iscurrentfurnitureref': Cmd('TES4Polyfill.IsCurrentFurnitureRef({ref}, {p0})',
+                                 ACTOR, types={0: 'ObjectReference'},
+                                 flags='actor_only'),
     'isidleplaying': Cmd(note='{f}', flags='zero_arg'),
     'isindangerouswater': Cmd(note='{f}', flags='zero_arg'),
     #: Bare 0, operand position. See: docs/commentary/script_convert.md#neutralised-command-inert-in-position

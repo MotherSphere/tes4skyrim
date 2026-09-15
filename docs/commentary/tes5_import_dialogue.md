@@ -1187,6 +1187,11 @@ script pipeline runs, so the Message properties in the emitted `.psc` bind to
 exactly these records and the page/button order matches the converter's
 `Show()` chain arithmetic.
 
+**Authored FO3/FNV menus** (`ShowMessage <MESG>`) enter the same plan under
+the MESG's own EDID with text None; `create_message_menu_records` writes
+nothing for them, since `convert_MESG` converts the record itself
+([script_convert.md](script_convert.md#fnv-showmessage-menus)).
+
 **Choice-persistence globals** sit at fixed slots ABOVE the page window
 (`base+0x40`, `+0x41`) so a changed page count can never move them. Menu
 emission writes (picked index + 1) there; the dialogue-condition conversion

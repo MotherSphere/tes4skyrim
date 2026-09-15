@@ -1173,6 +1173,10 @@ class TestAddTopicUnlocks:
                 {'FormID': '000C0004', 'ParentDIAL': '000B0003',
                  'QSTI.Quest': '000A0001', 'ResponseCount': '0',
                  'ChoiceCount': '0', 'ConditionCount': '0', 'DATA.Flags': '0'},
+                {'FormID': '000C0006', 'ParentDIAL': '000B0003',
+                 'ResultScriptEnd': 'AddTopic ratsTOPIC',
+                 'QSTI.Quest': '000A0001', 'ResponseCount': '0',
+                 'ChoiceCount': '0', 'ConditionCount': '0', 'DATA.Flags': '0'},
             ],
         }
 
@@ -1187,6 +1191,7 @@ class TestAddTopicUnlocks:
         # data-list revealer + mention revealer
         assert plan['info_reveals'][0x0C0001] == ['TES4Unlock_ratsTOPIC']
         assert plan['info_reveals'][0x0C0002] == ['TES4Unlock_ratsTOPIC']
+        assert plan['info_reveals'][0x0C0006] == ['TES4Unlock_ratsTOPIC']
         # stage script revealer
         assert plan['stage_reveals'] == {('fgquest', 10): ['TES4Unlock_stageTopic']}
 

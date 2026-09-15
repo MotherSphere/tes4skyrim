@@ -35,9 +35,19 @@ of its own (a handful poll a box some OTHER script showed — cross-script
 GetButtonPressed was global state in TES4) keeps the old `-1` conversion:
 those readers were dead before this plan existed and stay explicitly dead
 rather than silently miswired.
+
+FO3/FNV spell the same idiom as `ShowMessage <MESG>` against an AUTHORED MESG
+record, polled by the same GetButtonPressed. Such a site enters the plan under
+the MESG's own EDID with text None: the importer converts that record itself
+and writes nothing for it, and the converter matches the site by name.
+See: docs/commentary/script_convert.md#fnv-showmessage-menus
 """
 
 import re
+
+# ---------------------------------------------------------------------------
+# Button MessageBox sites (TES4) and authored button MESGs (FO3/FNV)
+# ---------------------------------------------------------------------------
 
 MESG_PREFIX = 'TES4Msg_'
 # Both engines cap a message box at 10 buttons.
@@ -48,6 +58,7 @@ _QUOTED = re.compile(r'"([^"]*)"')
 # line, and a leading `;` comment never matches). Oblivion tolerates a comma
 # straight after the command name.
 _MSGBOX_LINE = re.compile(r'(?im)^[ \t]*messagebox\b(,?[^\n]*)')
+_SHOWMESSAGE_LINE = re.compile(r'(?im)^[ \t]*showmessage\b[ \t,]+([A-Za-z0-9_]+)')
 
 
 def parse_button_box(args_str):
@@ -72,23 +83,50 @@ def mesg_edid(script_edid: str, index: int) -> str:
     return f'{MESG_PREFIX}{base}_{index:02d}'
 
 
-def sites_for_source(script_edid: str, source: str) -> list:
+def button_messages(mesg_records: list) -> dict:
+    """{edid_lower: (edid, [buttons])} for the authored MESGs that have buttons."""
+    out = {}
+    for rec in mesg_records:
+        edid = rec.get('EditorID', '')
+        buttons = []
+        while (text := rec.get(f'Button[{len(buttons)}].Text')) is not None:
+            buttons.append(text)
+        if edid and buttons:
+            out[edid.lower()] = (edid, buttons[:MAX_BUTTONS])
+    return out
+
+
+def sites_for_source(script_edid: str, source: str, authored: dict = None) -> list:
     """Ordered [(mesg_edid, text, buttons)] for one script source (real
-    newlines, i.e. the SCTX value parse_export_file produces)."""
+    newlines, i.e. the SCTX value parse_export_file produces); `authored` is
+    `button_messages`, whose MESGs the source shows enter with text None."""
     sites = []
     for m in _MSGBOX_LINE.finditer(source or ''):
         parsed = parse_button_box(m.group(1))
         if parsed:
             sites.append((mesg_edid(script_edid, len(sites) + 1),) + parsed)
+    for m in _SHOWMESSAGE_LINE.finditer(source or ''):
+        hit = (authored or {}).get(m.group(1).lower())
+        if hit and all(s[0] != hit[0] for s in sites):
+            sites.append((hit[0], None, hit[1]))
     return sites
 
 
-def build_message_plan(scpt_records: list) -> dict:
+def authored_site(plan: dict, script_edid: str, mesg_edid: str) -> str:
+    """The planned authored MESG EDID `script_edid` shows via ShowMessage, or ''."""
+    for name, text, _buttons in plan.get((script_edid or '').lower(), ()):
+        if text is None and name.lower() == mesg_edid.lower():
+            return name
+    return ''
+
+
+def build_message_plan(scpt_records: list, mesg_records: list = ()) -> dict:
     """{script_edid_lower: [(mesg_edid, text, buttons)]} over SCPT records."""
+    authored = button_messages(mesg_records)
     plan = {}
     for rec in scpt_records:
         edid = rec.get('EditorID', '')
-        sites = sites_for_source(edid, rec.get('SCTX', ''))
+        sites = sites_for_source(edid, rec.get('SCTX', ''), authored)
         if sites and edid:
             plan[edid.lower()] = sites
     return plan

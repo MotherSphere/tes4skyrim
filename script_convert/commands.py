@@ -28,6 +28,7 @@ from script_convert.command_rows import (
     ACTOR_VALUE_READ_FUNCTIONS, param_types
 )
 from script_convert.commands_falloutnv import FALLOUT_HANDLERS
+from script_convert.message_menus import PAGE_OPTIONS
 from script_convert.constants import typed_already
 from script_convert.constants_falloutnv import FALLOUT_COMMAND_ALIASES
 
@@ -1056,42 +1057,31 @@ def dispel(ctx, call) -> str:
 def chargen_menu(ctx, call) -> str:
     """ShowClassMenu / ShowBirthsignMenu -- the modal chargen pickers.
 
-    TES4's menu was modal to the WHOLE GameMode pass: it blocked, and the
-    `setstage` written on the next source line did not run until the player had
-    chosen.  Papyrus only parks the thread that called Show(), so the poll's
-    NEXT tick re-enters this body while the menu is still open.  The busy latch
-    catches that, and in a POLLED body a latched-out pass must RETURN rather
-    than fall through: falling through fired `setstage 44` mid-menu, whose
-    fragment force-greets the Emperor against a player still locked in the
-    menu, so the greet was consumed with nobody able to receive it and the
-    scene died (verified live through the game bridge,).
-
-    A ONE-SHOT site (a quest-stage fragment, an OnActivate handler) has no
-    repeating caller, so its latch can only trip on a genuine race -- and there
-    a Return would DROP the authored tail rather than defer it.  CharacterGen
-    stage 87 is exactly that shape: the class menu is followed by
-    `MQ02.SetStage(20)`, the end-of-chargen topic unlocks and the autosave.
+    Show() parks only its own thread, so the busy latch stops a queued poll
+    tick re-entering the menu: a POLLED body Returns on a latched-out pass
+    (falling through fired `setstage 44` mid-menu), a ONE-SHOT site falls
+    through so a race never drops the authored tail.  Show() returns -1 while
+    a menu transition is in flight, so the box is retried briefly.  The modal
+    closes the dialogue it opened from, so the dialogue partner is captured
+    first and re-evaluates his packages once the menu closes.
+    See: docs/commentary/script_convert.md#chargen-menu-reopens-the-dialogue
     """
-    from script_convert.message_menus import PAGE_OPTIONS
-
     key = 'birthsign' if call.name == 'showbirthsignmenu' else 'class'
     plan = (ctx.chargen_menus or {}).get(key)
     if not plan:
         return ctx.note(call.raw_name)
 
-    pages, actions = plan['pages'], plan['actions']
     ctx.sc.uses_chargen_menus = True
     ctx.sc.chargen_menu_seq += 1
-    var = f'TES4_menuPick{ctx.sc.chargen_menu_seq}'
-    retry = f'TES4_menuRetry{ctx.sc.chargen_menu_seq}'
-    first = safe_property_name(pages[0][0])
+    seq = ctx.sc.chargen_menu_seq
+    var, retry, partner = (f'TES4_menuPick{seq}', f'TES4_menuRetry{seq}',
+                           f'TES4_menuPartner{seq}')
+    first = safe_property_name(plan['pages'][0][0])
     ctx.sc.property_refs[first] = 'Message'
 
-    # Show() returns -1 when the box could not display (a menu/dialogue
-    # transition still in flight -- this menu opens 0.1s after an authored
-    # Goodbye closes the conversation).  Retry briefly rather than swallow the
-    # choice.
-    lines = ['TES4_ChargenMenuBusy = True',
+    lines = [f'Actor {partner} = TES4Polyfill.DialogueSpeaker()'
+             '  ; the modal closes the dialogue TES4 kept open',
+             'TES4_ChargenMenuBusy = True',
              f'Int {var} = {first}.Show()'
              '  ; TES4 modal chargen menu - pauses the game like the original',
              f'Int {retry} = 0',
@@ -1100,54 +1090,59 @@ def chargen_menu(ctx, call) -> str:
              f'  {var} = {first}.Show()',
              f'  {retry} += 1',
              'EndWhile']
+    lines += _chargen_pages(ctx, plan['pages'], var)
+    lines += _chargen_spells(ctx, plan['actions'], var)
+    gname = plan.get('choice_global')
+    if gname:
+        safe = safe_property_name(gname)
+        ctx.sc.property_refs[safe] = 'GlobalVariable'
+        lines += [f'If {var} >= 0', f'  {safe}.SetValue({var} + 1)', 'EndIf']
+    lines += ['TES4_ChargenMenuBusy = False',
+              f'If {partner} != None',
+              f'  {partner}.EvaluatePackage()'
+              '  ; re-greet now: TES4 kept the dialogue open under its menu',
+              'EndIf']
+    return '\n  '.join(_chargen_site_wrap(ctx, lines))
 
-    # Slot PAGE_OPTIONS on a non-final page is "More ...": the global choice
-    # index is 9*page + button (see message_menus._paged).
+
+def _chargen_pages(ctx, pages: list, var: str) -> list:
+    """Chain the follow-on pages: slot PAGE_OPTIONS on a non-final page is
+    "More ...", and the global choice index is PAGE_OPTIONS*page + button
+    (message_menus._paged)."""
+    lines = []
     for page, (medid, _title, _btns) in enumerate(pages[1:], start=1):
         safe = safe_property_name(medid)
         ctx.sc.property_refs[safe] = 'Message'
         lines += [f'If {var} == {PAGE_OPTIONS * page}',
                   f'  {var} = {PAGE_OPTIONS * page} + {safe}.Show()',
                   'EndIf']
+    return lines
 
-    keyword, acted = 'If', False
+
+def _chargen_spells(ctx, actions: list, var: str) -> list:
+    """Grant the chosen entry's spells: one arm per choice that has any."""
+    lines = []
+    keyword = 'If'
     for idx, spells in enumerate(actions):
         if not spells:
             continue
         lines.append(f'{keyword} {var} == {idx}')
-        keyword, acted = 'ElseIf', True
+        keyword = 'ElseIf'
         for spell in spells:
             safe = safe_property_name(spell)
             ctx.sc.property_refs[safe] = 'Spell'
             lines.append(f'  Game.GetPlayer().AddSpell({safe}, false)')
-    if acted:
-        lines.append('EndIf')
+    return lines + ['EndIf'] if lines else lines
 
-    # Persist the pick (index+1; 0 = unchosen) so the dialogue conditions the
-    # import rewrote to GetGlobalValue can match it -- this is what makes the
-    # Emperor's post-menu line agree with the sign the player actually chose.
-    # Never persist a FAILED pick: 0 means "unchosen" and the dialogue side has
-    # an ungated fallback for that case.
-    gname = plan.get('choice_global')
-    if gname:
-        safe = safe_property_name(gname)
-        ctx.sc.property_refs[safe] = 'GlobalVariable'
-        lines += [f'If {var} >= 0', f'  {safe}.SetValue({var} + 1)', 'EndIf']
-    lines.append('TES4_ChargenMenuBusy = False')
 
+def _chargen_site_wrap(ctx, lines: list) -> list:
+    """A polled body Returns while the menu is open; a one-shot site skips the
+    menu on a race and keeps running so the authored tail is never dropped."""
     if ctx._current_event == 'Event OnUpdate()':
-        # The queued tick defers to the pass that owns the menu, which runs the
-        # authored tail itself once Show() returns.
-        lines = ['If TES4_ChargenMenuBusy',
-                 '  Return  ; menu already open - TES4 blocked the whole pass',
-                 'EndIf'] + lines
-    else:
-        # One-shot site: skip the menu on a race but keep running, so the
-        # authored tail after it is never dropped.
-        lines = (['If !TES4_ChargenMenuBusy']
-                 + [f'  {line}' for line in lines] + ['EndIf'])
-    return '\n  '.join(lines)
-
+        return ['If TES4_ChargenMenuBusy',
+                '  Return  ; menu already open - TES4 blocked the whole pass',
+                'EndIf'] + lines
+    return ['If !TES4_ChargenMenuBusy'] + [f'  {line}' for line in lines] + ['EndIf']
 
 # ---------------------------------------------------------------------------
 # Identity tests

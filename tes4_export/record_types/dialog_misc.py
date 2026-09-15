@@ -20,23 +20,49 @@ from .common import (
     emit_u8,
     escape_value,
 )
+from .falloutnv import info_result_scripts
+
+
+def _emit_formid_list(lines: list, rec: Record, sig: str, name: str):
+    """`<name>Count=N` and `<name>[i]=<formid>` for every `sig` subrecord."""
+    subs = get_all_subrecords(rec, sig)
+    if not subs:
+        return
+    lines.append(f"{name}Count={len(subs)}")
+    for i, sub in enumerate(subs):
+        if len(sub.data) >= 4:
+            lines.append(f"{name}[{i}]={get_formid_str(struct.unpack_from('<I', sub.data, 0)[0])}")
 
 
 def export_DIAL(rec: Record) -> list:
     lines = []
     emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
-    # QSTI - quest associations
-    qstis = get_all_subrecords(rec, "QSTI")
-    if qstis:
-        lines.append(f"QuestCount={len(qstis)}")
-        for i, q in enumerate(qstis):
-            if len(q.data) >= 4:
-                lines.append(f"Quest[{i}]={get_formid_str(struct.unpack_from('<I', q.data, 0)[0])}")
+    _emit_formid_list(lines, rec, "QSTI", "Quest")
     emit_string(lines, "FULL", get_subrecord(rec, "FULL"))
     data = get_subrecord(rec, "DATA")
     if data and len(data.data) >= 1:
         lines.append(f"DATA.Type={data.data[0]}")
     return lines
+
+
+def _emit_info_responses(lines: list, rec: Record):
+    """`Response[i].*` from the parallel TRDT / NAM1 / NAM2 lists."""
+    trdts = get_all_subrecords(rec, "TRDT")
+    nam1s = get_all_subrecords(rec, "NAM1")
+    nam2s = get_all_subrecords(rec, "NAM2")
+    if not trdts:
+        return
+    lines.append(f"ResponseCount={len(trdts)}")
+    for i, trdt in enumerate(trdts):
+        pfx = f"Response[{i}]"
+        if len(trdt.data) >= 16:
+            lines.append(f"{pfx}.EmotionType={struct.unpack_from('<I', trdt.data, 0)[0]}")
+            lines.append(f"{pfx}.EmotionValue={struct.unpack_from('<i', trdt.data, 4)[0]}")
+            lines.append(f"{pfx}.ResponseNumber={trdt.data[12]}")
+        if i < len(nam1s):
+            lines.append(f"{pfx}.ResponseText={escape_value(get_string(nam1s[i]))}")
+        if i < len(nam2s):
+            lines.append(f"{pfx}.ActorNotes={escape_value(get_string(nam2s[i]))}")
 
 
 def export_INFO(rec: Record) -> list:
@@ -52,55 +78,17 @@ def export_INFO(rec: Record) -> list:
     emit_formid(lines, "QSTI.Quest", get_subrecord(rec, "QSTI"))
     emit_formid(lines, "TPIC.Topic", get_subrecord(rec, "TPIC"))
     emit_formid(lines, "PNAM.PrevInfo", get_subrecord(rec, "PNAM"))
-
-    # NAME - added topics
-    names = get_all_subrecords(rec, "NAME")
-    if names:
-        lines.append(f"AddTopicCount={len(names)}")
-        for i, n in enumerate(names):
-            if len(n.data) >= 4:
-                lines.append(f"AddTopic[{i}]={get_formid_str(struct.unpack_from('<I', n.data, 0)[0])}")
-
-    # Responses (TRDT + NAM1 + NAM2)
-    trdts = get_all_subrecords(rec, "TRDT")
-    nam1s = get_all_subrecords(rec, "NAM1")
-    nam2s = get_all_subrecords(rec, "NAM2")
-    if trdts:
-        lines.append(f"ResponseCount={len(trdts)}")
-        for i, trdt in enumerate(trdts):
-            pfx = f"Response[{i}]"
-            if len(trdt.data) >= 16:
-                lines.append(f"{pfx}.EmotionType={struct.unpack_from('<I', trdt.data, 0)[0]}")
-                lines.append(f"{pfx}.EmotionValue={struct.unpack_from('<i', trdt.data, 4)[0]}")
-                lines.append(f"{pfx}.ResponseNumber={trdt.data[12]}")
-            if i < len(nam1s):
-                lines.append(f"{pfx}.ResponseText={escape_value(get_string(nam1s[i]))}")
-            if i < len(nam2s):
-                lines.append(f"{pfx}.ActorNotes={escape_value(get_string(nam2s[i]))}")
-
+    _emit_formid_list(lines, rec, "NAME", "AddTopic")
+    _emit_info_responses(lines, rec)
     emit_conditions(lines, rec)
+    _emit_formid_list(lines, rec, "TCLT", "Choice")
+    _emit_formid_list(lines, rec, "TCLF", "LinkFrom")
 
-    # TCLT - choices (multiple, as indexed array)
-    tclts = get_all_subrecords(rec, "TCLT")
-    if tclts:
-        lines.append(f"ChoiceCount={len(tclts)}")
-        for i, tclt in enumerate(tclts):
-            if len(tclt.data) >= 4:
-                lines.append(f"Choice[{i}]={get_formid_str(struct.unpack_from('<I', tclt.data, 0)[0])}")
-
-    # TCLF - link-from topics (multiple, as indexed array)
-    tclfs = get_all_subrecords(rec, "TCLF")
-    if tclfs:
-        lines.append(f"LinkFromCount={len(tclfs)}")
-        for i, tclf in enumerate(tclfs):
-            if len(tclf.data) >= 4:
-                lines.append(f"LinkFrom[{i}]={get_formid_str(struct.unpack_from('<I', tclf.data, 0)[0])}")
-
-    # Result script (SCHR/SCDA/SCTX)
-    sctx = get_subrecord(rec, "SCTX")
-    if sctx:
-        lines.append(f"ResultScript={escape_value(get_string(sctx))}")
-
+    begin, end = info_result_scripts(rec)
+    if begin:
+        lines.append(f"ResultScript={escape_value(begin)}")
+    if end:
+        lines.append(f"ResultScriptEnd={escape_value(end)}")
     return lines
 
 

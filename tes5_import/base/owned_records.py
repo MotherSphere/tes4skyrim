@@ -82,13 +82,16 @@ def create_tes4_special_records(writer: PluginWriter):
 def create_message_menu_records(writer: PluginWriter, plan: dict) -> dict:
     """One MESG per button-MessageBox call site (message_menus.py plan).
 
-    Returns {mesg_edid: formid} for WELL_KNOWN_PROPERTIES.
+    Returns {mesg_edid: formid} for WELL_KNOWN_PROPERTIES.  A site with text
+    None is an authored FO3/FNV MESG, converted as a record of its own.
 
     See: docs/commentary/tes5_import_dialogue.md#synthesized-menus-factions-and-formlists
     """
     name_to_fid = {}
     for edid_low in sorted(plan):
         for name, text, buttons in plan[edid_low]:
+            if text is None:
+                continue
             fid = writer.derive_formid('SCRIPT_MESG', name)
             subs = pack_string_subrecord('EDID', name)
             subs += pack_string_subrecord('DESC', text)

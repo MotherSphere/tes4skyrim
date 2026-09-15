@@ -894,3 +894,42 @@ The FNV emitter writes `Objective[i].Index/.Text` and, under each,
 drops the shared `Target[]` lines for QUST. FNV `QSTA` is FormID + a u8 flag +
 3 unused bytes; the TES4 reader unpacked those four bytes as one u32 flag word.
 Target conditions: 1,229, Run On 2 (Reference) on 844 of them.
+
+## <a id="info-end-script"></a>INFO carries two result scripts; the exporter dumped one
+
+**Code:** `tes4_export/record_types/falloutnv.py:info_result_scripts`,
+`tes5_import/base/text_reader.py:info_result_script`.
+
+An FO3/FNV INFO embeds a *Begin* script and an *End* script, back to back and
+split by the `NEXT` marker (xEdit `wbDefinitionsFNV`: `Script (Begin)`, then
+`NEXT` + `Script (End)`). TES4 embeds one. The shared INFO exporter took the
+FIRST `SCTX` in the stream, so an INFO whose Begin was empty exported its End
+text as `ResultScript`, and an INFO with both lost its End text entirely.
+
+Measured on FalloutNV.esm: 23,247 INFO records, 4,499 with a non-empty End
+script. `VCG01` (Doc Mitchell's opening) parks at stage 80 on this: the psych
+test's closing lines (`VCG01DocMitchellTopic072`..`075`, "Well, that's all she
+wrote.") bump `VCG01Test` counters in Begin and carry `SetStage VCG01 85` in
+End, and nothing else in the plugin sets 85.
+
+The exporter now walks the subrecords positionally and emits `ResultScript`
+(Begin) and `ResultScriptEnd` (End). Every consumer reads the pair through
+`info_result_script`, which joins them Begin-then-End: the converter already
+runs a TES4 result script in the INFO's End fragment, so both halves land
+there in authored order.
+
+## <a id="trigger-primitives"></a>Trigger volumes are XPRM primitives, and the importer dropped them
+
+**Code:** `tes4_export/record_types/falloutnv.py:_emit_refr_deltas`,
+`tes5_import/record_types/world.py:_refr_head`.
+
+FO3/FNV place a trigger as a REFR of a model-less ACTI plus an `XPRM`
+primitive (bounds, RGBA, type) — 5,677 REFRs in FalloutNV.esm carry one. TES5's
+`XPRM` has the identical 32-byte layout (xEdit: bounds, `wbFloatRGBA`, type
+enum with Box = 1), and vanilla Skyrim triggers are the same shape
+(`DA09Trigger`'s REFR is NAME + XPRM alone). The exporter only dumped the
+bounds and the importer wrote no XPRM at all, so every converted trigger
+volume was a bare REFR with nothing to enter: `OnTriggerEnter` never fired.
+VCG01 hung on this — `VCG01VigorTesterTriggerSCRIPT` sets stage 60 from
+`onTriggerEnter`, and the tester's `OnActivate` only advances at stage 60.
+The raw subrecord now round-trips as `XPRM.Raw`.

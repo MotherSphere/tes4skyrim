@@ -388,6 +388,22 @@ Function SetFactionOwnership(ObjectReference akRef, Faction akFaction) Global
 EndFunction
 
 ; ==========================================================================
+; Furniture (TES4 IsCurrentFurnitureRef / IsCurrentFurnitureObj)
+; ==========================================================================
+
+; True while `a` is using exactly the furniture reference `akFurniture`.
+; (GetFurnitureReference is SKSE's; the vanilla GetSitState knows no ref.)
+Bool Function IsCurrentFurnitureRef(Actor a, ObjectReference akFurniture) Global
+  Return akFurniture != None && a.GetFurnitureReference() == akFurniture
+EndFunction
+
+; True while `a` is using any furniture whose base object is `akBase`.
+Bool Function IsCurrentFurnitureObj(Actor a, Form akBase) Global
+  ObjectReference f = a.GetFurnitureReference()
+  Return f != None && f.GetBaseObject() == akBase
+EndFunction
+
+; ==========================================================================
 ; AI Package Wrappers
 ; ==========================================================================
 
@@ -1137,6 +1153,18 @@ Bool Function PlayerIsInDialogue() Global
   p.SetActorValue("Variable05", 0.0)
   p.SetActorValue("Variable06", 0.0)
   Return False
+EndFunction
+
+; The actor whose line last played in the player's dialogue menu, while that
+; dialogue is still open or its last line still playing; None once it is over.
+; (Actor.GetDialogueTarget() always returns None on the player.)
+Actor Function DialogueSpeaker() Global
+  If !PlayerIsInDialogue()
+    Return None
+  EndIf
+  Actor p = Game.GetPlayer()
+  Int fid = (p.GetActorValue("Variable05") as Int) * 65536 + (p.GetActorValue("Variable06") as Int)
+  Return Game.GetForm(fid) as Actor
 EndFunction
 
 ; True while a re-Say on THIS actor would be dropped or would cut a live line.

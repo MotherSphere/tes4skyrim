@@ -52,8 +52,8 @@ def iter_script_bodies(export_dir: Path):
         for line in info.read_text(encoding='utf-8', errors='replace').splitlines():
             if line.startswith('FormID='):
                 edid = 'INFO:' + line[7:]
-            elif line.startswith('ResultScript=') and len(line) > 13:
-                yield ('INFO', edid, unescape(line[13:]))
+            elif line.startswith(('ResultScript=', 'ResultScriptEnd=')):
+                yield ('INFO', edid, unescape(line.split('=', 1)[1]))
 
 
 def tokenise(body: str):

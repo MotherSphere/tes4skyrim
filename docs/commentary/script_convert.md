@@ -924,7 +924,59 @@ it. `_has_gamemode` must account for it too, or a script whose only block is a
 bare MenuMode (`SE42Script`, `DAOghmaInfiniumScript`) gets no loop at all.
 
 Two exceptions keep their own routes: the `isPCSleeping` idiom becomes
-`OnSleepStart`/`OnSleepStop`, and menu-ID blocks stay commented.
+`OnSleepStart`/`OnSleepStop`, and menu-ID blocks take the route below.
+
+### <a id="menumode-with-a-menu-id"></a>`begin MenuMode <id>` → `OnMenuClose`
+
+The blanket "menu-ID blocks stay commented" rule above cost a real quest. FNV's
+`VCG01` — Doc Mitchell's opening — parks forever at stage 36:
+
+* INFO `00104BF8` ("How'd I do?") ends with `SetStage VCG01 36`.
+* Stage 36's entire body is `ShowRaceMenu` (the reflectron).
+* Stage 37 is an empty placeholder: *"set when the player leaves menu mode"*.
+* Stage 40 is `DocMitchellREF.SayTo player VCG01Intro` — Doc resuming.
+
+Nothing in the quest data advances 36 → 40. The only writer is `VCG01SCRIPT`:
+
+```
+BEGIN menumode 1036
+	if getstage VCG01 == 36
+		setstage VCG01 40
+	endif
+END
+```
+
+Commented out, the race menu opens and Doc never speaks again.
+
+SKSE is a required install, so `RegisterForMenu` / `OnMenuClose` are available
+and a mapped id gets a **real listener**. TES4 ran the body every frame the menu
+was up; the observable Skyrim moment is the close, so the body runs once there.
+That is the right beat for both known 1036 users — FNV advances a stage *after*
+the player is done, and Nehrim's `CharGenQuest` accumulates a "long in the
+character designer" achievement timer.
+
+**Menu-ID mapping**, `MENU_ID_NAMES` in `constants.py`. The menu-name string is
+copied verbatim from `SkyrimSE.exe` (note the space in `RaceSex Menu`):
+
+| TES4/FNV id | Skyrim menu | Evidence |
+|---|---|---|
+| 1036 | `RaceSex Menu` | FNV stage 36 calls `ShowRaceMenu`; Nehrim's block feeds `LongInCharacterDesigner` |
+
+**The map holds only ids whose body is safe to run on a close**, which is why it
+has one entry rather than the six the menu-name table would allow. 1014
+(lockpicking) is the counter-example: MQ01Script's `begin MenuMode 1014` is
+`setstage MQ01 70`, and firing that the first time the player closes *any*
+lockpick still blows the tutorial through its stage machine — the same defect as
+merging it into the GameMode poll, just later. An id earns a row only when its
+bodies across the corpus are genuinely "the player finished with this menu"
+logic. Everything unmapped keeps the comment treatment: converted so a hand-port
+only has to supply the hook, but never executed.
+
+Census of filtered blocks (`begin MenuMode <id>`) across the three plugins —
+Nehrim 1008×49, 1012×2, 1007×2, 1036, 1044, 1033, 1039; FalloutNV 1001×15,
+1012×3, 1056×2, 1008, 1009; Oblivion 1023×2, 1034×2, 1012, 1040, 1002, 1022,
+1014, 1030. Nehrim's 1008×49 is one script's per-menu bookkeeping, not 49
+triggers.
 
 Before merging, check the bodies are safe on an ordinary frame. All 20 are
 idempotent state machines gated by their own doonce/stage variables; a merged
@@ -1001,12 +1053,52 @@ So the emission is **context-dependent**:
 * **One-shot site** (quest-stage fragment, `OnActivate`) — keeps the
   fall-through `If !busy` form. Nothing repeating re-enters it, so the latch
   can only trip on a genuine race, and there a `Return` would **drop** the
-  authored tail rather than defer it. CharacterGen stage 87 is exactly that
-  shape: `MQ02.SetStage(20)`, the end-of-chargen topic unlocks and the
-  autosave all follow its class menu.
+  authored tail rather than defer it.
 
 The general rule: when a converted call blocks, ask whether its caller
 repeats. A `Return` is only correct where something will call again.
+
+### <a id="chargen-menu-reopens-the-dialogue"></a>A chargen menu closes the dialogue it opened from; the partner must re-greet at once
+
+**Code:** `commands.chargen_menu`, `TES4Polyfill.DialogueSpeaker`.
+
+CharacterGen stage 87: Baurus's class-guess line ends, its End fragment sets
+stage 87, the stage fragment opens the class menu, the player picks, and
+Baurus restarts the conversation only after a long delay. The quest reads 87
+meanwhile, and 88 (the completion stage, set only by the four `CGBaurusI`
+INFOs) is unreachable until he does.
+
+What the records say:
+
+* Stage 87's TES4 result script is **only** `showclassmenu`. Everything the
+  section above once credited to it (`MQ02.SetStage(10/20)`, the topic
+  unlocks, the autosave) is stage **88**.
+* Oblivion authored the re-greet itself: `CGBaurusToPlayerB` (`0001EC0F`) is a
+  player-targeted Ambush gated `GetStage CharacterGen == 87`, beside
+  `CGBaurusToPlayerA` gated `== 86`. TES4's modal menu sat over a dialogue that
+  stayed open; ToPlayerB is the fallback for a player who left it.
+* Skyrim's `Message.Show()` closes the dialogue menu. The CK wiki's ForceGreet
+  procedure "completes after the actor says the line and exits dialogue", and
+  the package stack is otherwise re-evaluated only **periodically** — so
+  Baurus sits on the finished ToPlayerA until the engine's next evaluation,
+  and only then runs ToPlayerB (`fAIForceGreetingTimer` = 3.0s after that).
+  The birthsign path never showed this because stage 44's authored
+  `UrielSeptimRef.evp` re-evaluates the Emperor the moment the menu closes.
+
+The conversion supplies the evp TES4 did not need. `chargen_menu` captures
+`TES4Polyfill.DialogueSpeaker()` before `Show()` — the actor whose line last
+played in the player's dialogue menu, from the Variable05/06 stamp
+`LineBegan` writes on the player (`Actor.GetDialogueTarget()` is documented to
+return None on the player) — and calls `EvaluatePackage()` on it after the
+menu. At a polled site (the birthsign menu) the poll only runs once
+`PlayerIsInDialogue()` is false, which has cleared the stamp, so the call is a
+no-op and that path is byte-identical to before.
+
+Reverted on the way here: a `ReleaseSpokenLine()` polyfill that cleared the
+speaking latch before `Show()`. Emitted at every chargen-menu site it fired
+inside polled bodies mid-line and stopped actors finishing their lines
+game-wide; its theory (the modal swallowing the End fragment) was also wrong —
+the End fragment is what opens the menu.
 
 ### A "no equivalent → 0" fallback can shadow a working handler (2026-07-31)
 <a id="no-equivalent-fallback-shadows-handler"></a>
@@ -4839,6 +4931,40 @@ any busy wait, and when fragments blocked the dispatch path; the VM was
 saturated by the Say path itself and extra poll passes queued behind it. All
 three are gone, so 0.15 s buys back most of the tick latency without returning
 to the 0.1 s measured as too aggressive.
+
+### <a id="fnv-showmessage-menus"></a>FNV `ShowMessage <MESG>` + `GetButtonPressed` is the button-menu idiom
+
+**Code:** `message_menus.button_messages`, `commands_falloutnv.show_message`,
+`converter._mesg_for_show`.
+
+Oblivion's choice menu is `MessageBox "text" "A" "B"` polled by
+`GetButtonPressed`; FO3/FNV write `ShowMessage <MESG>` against an authored
+MESG whose `Button[i].Text` rows are the choices, polled by the same
+`GetButtonPressed`. The plan only knew `messagebox` lines, so an FNV script
+that shows a buttoned MESG had no plan entry and its `GetButtonPressed` fell
+to the dead `-1` — `VCG01SCRIPT`'s `bChooseSex` block (stage 17,
+`VCG01ChooseSexMessage`: Mister / Ma'am) could never leave `nButton == -1`.
+(That block is dead in vanilla FNV too — nothing sets stage 17 — but the idiom
+is FNV's standard menu.)
+
+An authored MESG with buttons that a script names in `ShowMessage` now enters
+the plan under the MESG's own EDID with text None; `create_message_menu_records`
+skips those (the record is converted by `convert_MESG`), the converter emits
+`TES4_MsgButton = TES4_ShowMsg(<MESG>)` at the site, and `GetButtonPressed`
+becomes the consume-once `TES4_TakeMsgButton()` exactly as for Oblivion. A
+MESG without buttons keeps the row's plain `Show()`.
+
+### <a id="furniture-use"></a>`IsCurrentFurnitureRef` / `IsCurrentFurnitureObj` read SKSE's GetFurnitureReference
+
+Both were dead `0`s. Skyrim's vanilla `GetSitState()` knows no reference,
+but SKSE (a required install) adds `Actor.GetFurnitureReference()`, so the
+rows call `TES4Polyfill.IsCurrentFurnitureRef(actor, ref)` /
+`IsCurrentFurnitureObj(actor, base)`. FNV's `VCG01DocMitchellCouchTriggerSCRIPT`
+gates its `SetObjectiveCompleted VCG01 40` ("Sit down on the couch") on
+`player.IsCurrentFurnitureRef DocMitchellCouchREF`, so the objective could
+never complete. Its follow-up, `DocMitchellREF.StartConversation Player`,
+still converts to a `Say(GREETING)` bark; the psych test then needs the
+player to talk to Doc, since Skyrim has no scripted "open dialogue" call.
 
 ### <a id="fnv-objective-commands"></a>FO3/FNV objective commands
 

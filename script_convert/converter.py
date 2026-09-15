@@ -569,15 +569,11 @@ class ScriptConverter:
             tree = parse(source, Mode.FRAGMENT)
         except Exception:
             return []
-        result = []
         for var in tree.variables:
-            ptype = TYPE_MAP.get(var.vtype.lower(), 'Int')
             self.sc.local_vars.add(var.name.lower())
-            self.sc.var_types[var.name.lower()] = ptype
-            result.append('  %s %s = %s'
-                          % (ptype, var.name, '0.0' if ptype == 'Float' else '0'))
-        result += _script.emit_body(self, tree.body, extends, 1)
-        return result
+            self.sc.var_types[var.name.lower()] = TYPE_MAP.get(var.vtype.lower(), 'Int')
+        body = _script.emit_body(self, tree.body, extends, 1)
+        return [_script.fragment_local(self, v) for v in tree.variables] + body
 
 
     _CONTROLS_WRITE_RE = re.compile(
@@ -2076,9 +2072,10 @@ class ScriptConverter:
             # Upgrade property type to Actor when used with actor-only functions
             canon = self._convert_ref(ref_name, extends, as_receiver=True)
             if actor_func:
-                # akSpeakerRef is a fixed ObjectReference parameter; cast it rather than upgrading
-                if canon == 'akSpeakerRef':
-                    return '(akSpeakerRef as Actor)'
+                if canon == 'akSpeakerRef' or (
+                        self._current_event == 'Fragment'
+                        and canon.lower() in self.sc.local_vars):
+                    return f'({canon} as Actor)'
                 cur = self.sc.property_refs.get(canon, '')
                 # Upgrading an existing ObjectReference entry is always right;
                 # creating a NEW one is only right for a bare identifier (see

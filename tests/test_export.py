@@ -731,3 +731,64 @@ class TestFalloutQuestDeltas:
         rec = Record(type='QUST', data_size=0, flags=0, form_id=1)
         assert 'Target[' in superseded_keys(rec)
         assert 'TargetCount=' in superseded_keys(rec)
+
+
+class TestINFOResultScripts(unittest.TestCase):
+    """FO3/FNV INFOs embed a Begin and an End script split by NEXT; TES4 one.
+
+    See docs/commentary/tes4_export_falloutnv.md#info-end-script.
+    """
+
+    @staticmethod
+    def _rec(*subs):
+        """An INFO Record whose subrecords are the given (type, bytes) pairs."""
+        from tes4_export.tes4_reader import Record, Subrecord
+        return Record(type='INFO', data_size=0, flags=0, form_id=1,
+                      subrecords=[Subrecord(t, d) for t, d in subs])
+
+    def test_begin_and_end_are_split_at_next(self):
+        """The SCTX before NEXT is Begin, the one after it End."""
+        from tes4_export.record_types.falloutnv import info_result_scripts
+        rec = self._rec(('SCHR', b''), ('SCTX', b'set x to 1'), ('NEXT', b''),
+                        ('SCHR', b''), ('SCDA', b''), ('SCTX', b'SetStage VCG01 85'))
+        self.assertEqual(info_result_scripts(rec), ('set x to 1', 'SetStage VCG01 85'))
+
+    def test_empty_begin_keeps_end_text_as_end(self):
+        """The first SCTX in the stream is NOT the Begin script when Begin is empty."""
+        from tes4_export.record_types.falloutnv import info_result_scripts
+        rec = self._rec(('SCHR', b''), ('NEXT', b''), ('SCHR', b''),
+                        ('SCTX', b'SetStage VCG01 36'))
+        self.assertEqual(info_result_scripts(rec), ('', 'SetStage VCG01 36'))
+
+    def test_tes4_single_script_is_begin(self):
+        """No NEXT marker: the only script is the Begin script."""
+        from tes4_export.record_types.falloutnv import info_result_scripts
+        rec = self._rec(('SCHR', b''), ('SCTX', b'setstage q 5'))
+        self.assertEqual(info_result_scripts(rec), ('setstage q 5', ''))
+
+    def test_consumers_read_both_halves_in_order(self):
+        """info_result_script joins Begin then End; absent halves vanish."""
+        from tes5_import.base.text_reader import info_result_script
+        rec = {'ResultScript': 'set x to 1', 'ResultScriptEnd': 'SetStage VCG01 85'}
+        self.assertEqual(info_result_script(rec), 'set x to 1\nSetStage VCG01 85')
+        self.assertEqual(info_result_script({'ResultScriptEnd': 'a'}), 'a')
+        self.assertEqual(info_result_script({}), '')
+
+
+class TestFalloutTriggerPrimitive(unittest.TestCase):
+    """An FO3/FNV REFR's XPRM is dumped raw so the importer can copy it.
+
+    See docs/commentary/tes4_export_falloutnv.md#trigger-primitives.
+    """
+
+    def test_xprm_raw_is_the_whole_subrecord(self):
+        """Bounds stay for readers; XPRM.Raw carries all 32 bytes."""
+        from tes4_export.tes4_reader import Record, Subrecord
+        from tes4_export.record_types.falloutnv import _emit_refr_deltas
+        raw = bytes.fromhex('80A69A4288A5A4430000E0420000803F0000803F8180003F9A99193E01000000')
+        rec = Record(type='REFR', data_size=0, flags=0, form_id=1,
+                     subrecords=[Subrecord('XPRM', raw)])
+        lines = []
+        _emit_refr_deltas(lines, rec)
+        self.assertIn('XPRM.Raw=' + raw.hex().upper(), lines)
+        self.assertTrue(any(l.startswith('XPRM.BoundX=') for l in lines))

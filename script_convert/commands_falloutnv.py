@@ -11,6 +11,7 @@ See: docs/commentary/script_convert.md#getfactionrelation-has-two-receivers
 """
 
 from script_convert.constants import safe_property_name, typed_already
+from script_convert.message_menus import authored_site
 
 
 def faction_relation(ctx, call):
@@ -57,6 +58,25 @@ def quest_native(ctx, call):
     return f'{prop}.{_QUEST_NATIVES[call.name]}({args})'
 
 
+def show_message(ctx, call):
+    """`ShowMessage <MESG> ...` -- a buttoned MESG is a menu: Show() parks
+    this thread and the pick feeds the script's GetButtonPressed poll.
+
+    Declines (None) so the row renders a plain Show() unless the MESG is one
+    of this script's planned button sites (message_menus.button_messages).
+    See: docs/commentary/script_convert.md#fnv-showmessage-menus
+    """
+    name = authored_site(ctx.message_menus, ctx.sc.edid,
+                         call.source(0).strip() if len(call) else '')
+    if not name:
+        return None
+    mesg = safe_property_name(name)
+    ctx.sc.property_refs[mesg] = 'Message'
+    ctx.sc.uses_msg_buttons = True
+    return f'TES4_MsgButton = TES4_ShowMsg({mesg})'
+
+
 #: TES4 command name -> handler, merged into `commands.REGISTRY`.
 FALLOUT_HANDLERS = {'getfactionrelation': faction_relation,
+                    'showmessage': show_message,
                     **{name: quest_native for name in _QUEST_NATIVES}}

@@ -15,6 +15,7 @@ from script_convert.blocks_morrowind import (TES3_BLOCK_TYPE,
 from script_convert.blocks import (BLOCK_MAP, COMBAT_STATE_GUARDS,
                                    block_filter_guard)
 from script_convert.constants import (
+    MENU_ID_NAMES,
     POLL_BLOCKS, REF_SPECIFICITY, TYPE_MAP, is_generated_script_type,
     safe_property_name, papyrus_script_name
 )
@@ -643,16 +644,21 @@ def _elapsed_prologue(conv, interval: str) -> list:
 
 
 def lifecycle(conv, tree, extends: str) -> list:
-    """The events that START the poll loop.
+    """The events that START the poll loop, the sleep listener and the menu
+    listeners.
 
-    Four events arm it -- OnCellAttach, OnLoad and two OnInit shapes -- and
-    they arm it identically, so `_start` is one definition rather than four
-    copies that can drift apart.
+    Four events arm them -- OnCellAttach, OnLoad and two OnInit shapes -- and
+    they arm identically, so `start` is one definition rather than four copies
+    that can drift apart. `OnMenuClose` is inert until its menu is registered
+    for, so a script with only menu blocks still needs this.
     """
     sc = conv.sc
     sleeps = any(b.btype.lower() == 'menumode' and _menumode_kind(b) == 'sleep'
                  for b in (tree.blocks if tree else ()))
-    if not (sc.has_gamemode or sc.has_scripteffectupdate or sleeps):
+    menus = sorted({menu_name(b) for b in (tree.blocks if tree else ())
+                    if b.btype.lower() == 'menumode'
+                    and _menumode_kind(b) == 'menu' and menu_name(b)})
+    if not (sc.has_gamemode or sc.has_scripteffectupdate or sleeps or menus):
         return []
     interval = conv._get_update_interval()
     declared = {b.btype.lower() for b in (tree.blocks if tree else ())}
@@ -662,6 +668,7 @@ def lifecycle(conv, tree, extends: str) -> list:
              if (sc.has_gamemode or sc.has_scripteffectupdate) else [])
     if sleeps:
         start.append('  RegisterForSleep()')
+    start += ['  RegisterForMenu("%s")' % m for m in menus]
 
     if extends not in ('ObjectReference', 'Actor'):
         return [] if 'oninit' in declared else (
@@ -1003,24 +1010,43 @@ def sleep_listener(conv, tree, extends: str) -> list:
     return out
 
 
-def menu_blocks(conv, tree, extends: str) -> list:
-    """Menu-ID MenuMode bodies, preserved as COMMENTS.
+def menu_name(block) -> str:
+    """The Skyrim menu whose close runs this block, or '' when the id is
+    unmapped.
 
-    `begin MenuMode <id>` has no Skyrim trigger to convert to, so the body must
-    not execute -- but it is converted rather than dumped raw, so a hand-port
-    only has to supply the menu hook instead of redoing the translation.
+    See: docs/commentary/script_convert.md#menumode-with-a-menu-id
+    """
+    return MENU_ID_NAMES.get(str(block.filter or '').strip(), '')
+
+
+def menu_blocks(conv, tree, extends: str) -> list:
+    """Menu-ID MenuMode bodies.
+
+    A MAPPED id becomes a real OnMenuClose listener: TES4 ran the body every
+    frame that menu was up, and the observable Skyrim moment is the close, so
+    the body runs once there. An UNMAPPED id keeps the comment treatment --
+    converted so a hand-port only supplies the hook, but never executed.
     """
     out = []
     for block in (tree.blocks if tree else ()):
         if block.btype.lower() != 'menumode' or _menumode_kind(block) != 'menu':
             continue
         label = ('MenuMode %s' % (block.filter or '')).strip()
-        out.append('; --- TES4 `begin %s` - no Skyrim equivalent; '
-                   'body preserved but NOT executed ---' % label)
-        for line in _script.emit_body(conv, block.body, extends, 1):
-            if line.strip():
-                out.append(';  %s' % line.strip())
-        out.append('')
+        body = _script.emit_body(conv, block.body, extends, 1)
+        menu = menu_name(block)
+        if not menu:
+            out.append('; --- TES4 `begin %s` - no Skyrim equivalent; '
+                       'body preserved but NOT executed ---' % label)
+            out += [';  %s' % ln.strip() for ln in body if ln.strip()]
+            out.append('')
+            continue
+        out.append('; --- TES4 `begin %s` - runs when %s closes ---'
+                   % (label, menu))
+        out.append('Event OnMenuClose(String TES4_MenuName)')
+        if extends == 'Quest':
+            out += ['  If (!IsRunning())', '    Return', '  EndIf']
+        out += ['  If TES4_MenuName != "%s"' % menu, '    Return', '  EndIf']
+        out += body + ['EndEvent', '']
     return out
 
 

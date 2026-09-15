@@ -218,6 +218,21 @@ Guarded by `tests/test_dialog.py::TestForceGreetOncePerDay` — one test that th
 force greet keeps the latch, one that ordinary quest-gated packages still lose
 it (the Renault fix must survive).
 
+### <a id="force-greet-pkdt"></a>Force greet PKDT: vanilla's speed and interrupts, the source's flags
+
+A converted force greet takes vanilla's speed 2 (run) and interrupt flags
+`0xFEFF`, copied from `MS05InductionForcegreet`. The interrupts are the point:
+they AUTHORISE the actor to break off the package to speak. The global default
+is `0x0000` (every interrupt denied, right for ordinary packages), and with
+that a force greet never opens dialogue however close the actor gets. The
+converted TES4 flags are kept alongside: this used to write 0, and a force
+greet with no flags never retires; Once Per Day (0x400) and Must Complete
+(0x4) are what made Oblivion's one-shot greetings fire once and stop. Once Per
+Day is RESTORED here after `convert_flags` strips it from quest-gated
+packages (the Renault regression), because on a force greet whose only gate
+is unbounded (`CGBaurusGreetPlayer`, `GetStage >= 50`) the latch is the only
+retire mechanism — see the section above.
+
 ## Template data inputs
 
 The engine SKIPS inline ANAM data inputs when `PKCU.Template != 0`. See
