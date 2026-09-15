@@ -513,9 +513,9 @@ def build_wrld_cloud_modl(rec: dict, edid: str = None):
 def convert_CELL(rec: dict) -> bytes:
     """Convert CELL record.
 
-    `LTMP` is required by TES5. TES4 has no equivalent and its XCLL inherits
-    nothing, so it falls back to NULL; an FO3/FNV cell names a converted LGTM,
-    and likewise `XCIM`/`XEZN` in vanilla's own LTMP XCLW XCIM XLCN XEZN order.
+    `LTMP` is required by TES5 and always written NULL: the cell lights from
+    its own XCLL, which inherits nothing. Pointing it at a converted FO3/FNV
+    LGTM turned every interior pitch black. `XCIM`/`XEZN` are FO3/FNV-only.
 
     See: docs/commentary/tes4_export_falloutnv.md#reference-only-types
     """
@@ -545,8 +545,7 @@ def convert_CELL(rec: dict) -> bytes:
     if xcll_payload is not None:
         subs += pack_subrecord('XCLL', xcll_payload)
 
-    subs += pack_formid_subrecord('LTMP',
-                                  get_formid(rec, 'LTMP.LightingTemplate'))
+    subs += pack_formid_subrecord('LTMP', 0)
 
     # Ownership
     xown = get_formid(rec, 'XOWN.Owner')
@@ -1242,15 +1241,13 @@ def _cell_music(rec: dict) -> bytes:
 def _cell_pointers(rec: dict) -> bytes:
     """Every CELL subrecord naming another record, in xEdit order.
 
-    XCIM and XEZN exist only in FO3/FNV sources; XCWT overrides the
-    worldspace NAM2.
+    XEZN exists only in FO3/FNV sources; XCWT overrides the worldspace NAM2.
+    XCIM is deliberately NOT written: TES5 HNAM has no FNV source, so the
+    imagespace HDR block is approximated and darkened every interior.
 
     See: docs/commentary/tes5_import_landscape.md#cell-water-and-music
     """
     subs = _cell_regions(rec)
-    xcim = get_formid(rec, 'XCIM.Imagespace')
-    if xcim:
-        subs += pack_formid_subrecord('XCIM', xcim)
     subs += _cell_location(rec)
     xezn = get_formid(rec, 'XEZN.EncounterZone')
     if xezn:

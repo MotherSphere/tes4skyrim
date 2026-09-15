@@ -7038,12 +7038,11 @@ class TestFalloutCellPointers:
         rec.update(over)
         return rec
 
-    def test_an_authored_lighting_template_is_carried(self):
-        """TES4 has no LTMP source, but an FO3/FNV cell names a real LGTM."""
+    def test_an_authored_lighting_template_is_never_carried(self):
+        """Pointing LTMP at a converted FNV LGTM made interiors pitch black."""
         from tes5_import.record_types.world import convert_CELL
         out = convert_CELL(self._cell(**{'LTMP.LightingTemplate': '0000ABCD'}))
-        assert struct.unpack('<I', _find_subrecord(out, b'LTMP'))[0] \
-            & 0xFFFFFF == 0xABCD
+        assert struct.unpack('<I', _find_subrecord(out, b'LTMP'))[0] == 0
 
     def test_a_cell_with_no_template_still_writes_null_ltmp(self):
         """LTMP is required by TES5, so a TES4 cell writes it as NULL."""
@@ -7051,13 +7050,12 @@ class TestFalloutCellPointers:
         out = convert_CELL(self._cell())
         assert struct.unpack('<I', _find_subrecord(out, b'LTMP'))[0] == 0
 
-    def test_imagespace_and_encounter_zone_carry(self):
-        """XCIM and XEZN exist only in FO3/FNV sources."""
+    def test_encounter_zone_carries_but_imagespace_does_not(self):
+        """XCIM darkened every interior: its TES5 HDR block has no FNV source."""
         from tes5_import.record_types.world import convert_CELL
         out = convert_CELL(self._cell(**{'XCIM.Imagespace': '0000BEEF',
                                          'XEZN.EncounterZone': '0000CAFE'}))
-        assert struct.unpack('<I', _find_subrecord(out, b'XCIM'))[0] \
-            & 0xFFFFFF == 0xBEEF
+        assert _find_subrecord(out, b'XCIM') is None
         assert struct.unpack('<I', _find_subrecord(out, b'XEZN'))[0] \
             & 0xFFFFFF == 0xCAFE
 
