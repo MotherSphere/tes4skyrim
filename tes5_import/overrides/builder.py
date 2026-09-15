@@ -851,9 +851,8 @@ def _rebuild_qust_targets(plugin_rec, master_rec, old_subs):
     those ids point at are the master's, and this rebuild does not touch them —
     only which objective references which alias.
     """
-    from ..dialogue.quest import target_live_at_stage, pc_stage_texts
+    from ..dialogue.quest import target_live_at_stage, stage_objective_text
     from ..dialogue.objective_text import short_objective
-    from ..base.text_reader import get_str
 
     alias_by_fid = {}
     targets = []
@@ -903,13 +902,7 @@ def _rebuild_qust_targets(plugin_rec, master_rec, old_subs):
         if stage_idx in seen_stages:
             i += 1
             continue
-        log_count = get_int(plugin_rec, f'Stage[{i}].LogCount')
-        texts = (pc_stage_texts(
-            [get_str(plugin_rec, f'Stage[{i}].Log[{j}].Text')
-             for j in range(log_count)])
-            if log_count > 0
-            else [get_str(plugin_rec, f'Stage[{i}].LogEntry')])
-        txt = next((x for x in texts if x), None)
+        txt = stage_objective_text(plugin_rec, i)
         if not txt:
             i += 1
             continue

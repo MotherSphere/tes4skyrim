@@ -22,6 +22,7 @@ Usage:
     python tools/dialog/dialog_emulator.py output/oblivion.esm/Oblivion.esm --detect-collisions
 """
 import argparse
+import json
 import struct
 import sys
 import os
@@ -64,11 +65,10 @@ INFO_FLAG_SPENDS_FAVOR_POINTS = 1 << 14
 # The engine stores the DATA float as trunc(value * this) in a u16.
 INFO_RESET_SCALE = 65535.0
 
-_TABLES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'tes5_import', 'dialog_engine_tables.json')
+_TABLES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'tes5_import', 'generated', 'dialog_engine_tables.json')
 
 
 def _load_engine_tables():
-    import json
     with open(_TABLES_PATH, encoding='utf-8') as f:
         tables = json.load(f)
     by_tag = {}

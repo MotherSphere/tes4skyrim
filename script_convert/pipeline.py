@@ -28,6 +28,8 @@ from script_convert.context_setup import (
     load_records, prepare_output_dir, quest_edids_by_fid,
     service_menu_topics, topic_unlock_globals)
 from script_convert.message_menus import build_message_plan
+from script_convert.commands_falloutnv import (quest_objective_indices,
+                                               set_quest_objectives)
 from script_convert.poll_interval import quest_script_delays
 from script_convert.quest_fragments import (quest_fragment_psc,
                                             scripted_count, stage_fragments)
@@ -123,12 +125,16 @@ def _script_worker_init(xref, output_dir, info_reveals, service_topics,
                         message_menus=None, mesh_bounds_cache=None,
                         chargen_menus=None, say_topics=None,
                         music_cues=None, namespace=None,
-                        quest_delays=None):
+                        quest_delays=None, quest_objectives=None):
     """Seed one worker with the parent state that spawning does not carry.
 
     `namespace` is installed FIRST: the generated-script prefix derives from
     the active namespace, so any name built before it is wrong.
+
+    `quest_objectives` seeds the FO3/FNV authored-QOBJ index; spawning does not
+    carry the parent's module-level copy.
     See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
+    See: docs/commentary/script_convert.md#fnv-unknown-objective-index
     """
     if namespace:
         set_namespace(namespace)
@@ -145,6 +151,8 @@ def _script_worker_init(xref, output_dir, info_reveals, service_topics,
                        quest_script_vars=quest_script_vars or {},
                        quest_edid_by_fid=quest_edid_by_fid or {},
                        quest_delays=quest_delays or {})
+    if quest_objectives:
+        set_quest_objectives(quest_objectives)
     # Class-level, so every ScriptConverter a worker builds sees the measured
     # voice-line lengths (per INFO for the Begin fragments, per topic for the
     # SayLine fallback).
@@ -251,7 +259,8 @@ def build_script_context(export_dir: str, output_dir: str) -> dict:
                 topic_unlock_globals(by_type, unlock_plan), message_menus,
                 bounds_cache, chargen_menu_plan(export_dir), say_topics,
                 _load_music_cues(output_dir), current_namespace(),
-                quest_script_delays(by_type))
+                quest_script_delays(by_type),
+                quest_objective_indices(by_type))
     return {'initargs': initargs, 'scpt_work': scpt_work,
             'info_work': info_work, 'qust_work': qust_work, 'stats': stats}
 

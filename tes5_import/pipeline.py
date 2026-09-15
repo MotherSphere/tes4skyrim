@@ -728,12 +728,16 @@ def _prescan_package_plan(by_type: dict, ctx, writer, fid_to_edid: dict, _step_d
     """
     from .packages.aliases import (PackagePlan, build_script_var_map,
                                build_scriptvar_owner_map,
+                               build_assigned_var_names,
                                build_script_assigned_packages)
+    from .dialogue.quest import set_assigned_var_names
     from .packages.actor_wiring import load_package_types
     _master_export = ctx.master_export if ctx else None
     load_package_types(by_type, _master_export)
 
     _script_vars = build_script_var_map(by_type, _master_export)
+    set_assigned_var_names(
+        build_assigned_var_names(by_type, _master_export))
     _sv_owner = build_scriptvar_owner_map(by_type, fid_to_edid)
     pack_plan = PackagePlan()
     _script_assigned = build_script_assigned_packages(by_type, fid_to_edid,

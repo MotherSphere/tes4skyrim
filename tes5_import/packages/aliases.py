@@ -80,6 +80,36 @@ SCRIPTABLE_BASE_SIGS = (
 )
 
 
+#: `set [Quest.]name to` -- the only way TES4 script code writes a variable.
+_SET_TARGET_RE = re.compile(
+    r'(?:^|[^A-Za-z0-9_])set\s+(?:[A-Za-z0-9_]+\.)?([A-Za-z0-9_]+)\s+to'
+    r'(?:[^A-Za-z0-9_]|$)', re.IGNORECASE)
+
+#: The export escapes newlines and tabs as literal backslash sequences.
+_ESCAPED_WS_RE = re.compile(r'\\+[rnt]')
+
+
+def build_assigned_var_names(by_type: dict, master_export: dict = None) -> set:
+    """Lowercased name of every script variable the plugin ever ASSIGNS.
+
+    A variable declared and tested but never written holds its 0 default
+    forever, so a `== nonzero` test on it can never pass.
+
+    See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+    """
+    names = set()
+    sources = list(master_export.values()) if master_export else []
+    for sig in ('SCPT', 'QUST', 'INFO'):
+        sources.extend(by_type.get(sig, []))
+    for rec in sources:
+        for key, val in rec.items():
+            if not val or (key != 'SCTX' and 'Script' not in key):
+                continue
+            for m in _SET_TARGET_RE.finditer(_ESCAPED_WS_RE.sub(' ', val)):
+                names.add(m.group(1).lower())
+    return names
+
+
 def build_script_var_map(by_type: dict, master_export: dict = None) -> dict:
     """ref_fid -> {var_index: var_name} for every scripted actor/object.
 

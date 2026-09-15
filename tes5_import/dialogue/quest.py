@@ -18,6 +18,7 @@ import struct
 from ..base.constants import ENGINE_GLOBAL_FORMIDS
 from ..base.conditions import (CTDA_OR, CTDA_RUN_ON_TARGET,
                                 convert_ctda,
+                                convert_ctda_list_with_strings,
                                 convert_script_var_ctda)
 from .objective_text import short_objective
 from .quest_falloutnv import authored_objectives, has_authored_objectives
@@ -462,7 +463,7 @@ def pc_stage_texts(texts: list) -> list:
     return [_expand_control_tokens(t) if t else t for t in texts]
 
 
-def quest_objective_texts(rec: dict) -> list:
+def quest_objective_texts(rec: dict, script_vars: dict = None) -> list:
     """Objective (stage_index, short text) pairs, in written order.
 
     Must stay identical to what convert_QUST emits -- the override
@@ -476,17 +477,77 @@ def quest_objective_texts(rec: dict) -> list:
         stage_idx = get_int(rec, f'Stage[{i}].Index')
         if stage_idx in seen_stages:
             continue
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        texts = (pc_stage_texts([get_str(rec, f'Stage[{i}].Log[{j}].Text')
-                                  for j in range(log_count)])
-                 if log_count > 0
-                 else [get_str(rec, f'Stage[{i}].LogEntry')])
-        txt = next((x for x in texts if x), None)
+        txt = stage_objective_text(rec, i, script_vars)
         if not txt:
             continue
         seen_stages.add(stage_idx)
         out.append(short_objective(txt))
     return out
+
+
+#: Script variables the plugin assigns; None until set_assigned_var_names().
+_ASSIGNED_VAR_NAMES = None
+
+
+def set_assigned_var_names(names) -> None:
+    """Install the plugin's assigned-variable names for objective gating."""
+    global _ASSIGNED_VAR_NAMES
+    _ASSIGNED_VAR_NAMES = frozenset(names) if names is not None else None
+
+
+def stage_objective_text(rec: dict, i: int, script_vars: dict = None) -> str:
+    """The journal line stage `i` shows the player, or '' if it shows none.
+
+    An entry whose conditions cannot pass is not the stage's objective: a
+    quest's developer-only entries are gated on a script variable it never
+    sets, so they would otherwise become HUD objectives.
+
+    See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+    """
+    log_count = get_int(rec, f'Stage[{i}].LogCount')
+    if log_count <= 0:
+        return get_str(rec, f'Stage[{i}].LogEntry')
+    texts = pc_stage_texts([get_str(rec, f'Stage[{i}].Log[{j}].Text')
+                            for j in range(log_count)])
+    for j, text in enumerate(texts):
+        if text and not _gate_cannot_pass(rec, i, j, script_vars or {}):
+            return text
+    return ''
+
+
+def _gate_cannot_pass(rec: dict, i: int, j: int, script_vars: dict) -> bool:
+    """True when entry (i, j) tests a script variable nothing ever sets.
+
+    Such a variable holds its 0 default forever, so a `== nonzero` test on one
+    can never pass -- that is how Oblivion hides a developer entry. The journal
+    line itself is gated by the CTDA we now write; this stops the entry ALSO
+    minting a HUD objective, which carries no condition of its own.
+
+    See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+    """
+    k = 0
+    while True:
+        raw_hex = rec.get(f'Stage[{i}].Log[{j}].Condition[{k}].Raw')
+        if raw_hex is None:
+            return False
+        k += 1
+        try:
+            raw = bytes.fromhex(raw_hex)
+        except ValueError:
+            return False
+        if len(raw) < 20 or struct.unpack_from('<H', raw, 8)[0] not in \
+                _VAR_STATE_FUNCS:
+            continue
+        param1 = struct.unpack_from('<I', raw, 12)[0] & 0x00FFFFFF
+        param2 = struct.unpack_from('<I', raw, 16)[0]
+        if _ASSIGNED_VAR_NAMES is None:
+            return False
+        name = script_vars.get(param1, {}).get(param2)
+        if name and name.lower() in _ASSIGNED_VAR_NAMES:
+            continue
+        if (raw[0] & 0xE0) == 0x00 and struct.unpack_from('<f', raw, 4)[0]:
+            return True
+    return False
 
 
 def _quest_vmad_properties(rec, edid, fid_to_edid, well_known_props,
@@ -554,8 +615,32 @@ def _bind_placed_references(prop_vals: dict, declared: dict, xref) -> None:
         prop_vals[name] = fid
 
 
-def _quest_stages(rec: dict, stage_count: int) -> bytes:
-    """INDX/QSDT/CNAM for every stage, journal text included."""
+def _stage_log_entry(rec: dict, i: int, j: int, text: str,
+                     script_vars: dict) -> bytes:
+    """QSDT [CTDA/CIS2] [CNAM] for ONE stage log entry.
+
+    The entry's own conditions decide whether its text displays.
+
+    See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+    """
+    subs = pack_uint8_subrecord(
+        'QSDT', get_int(rec, f'Stage[{i}].Log[{j}].Flags') & 0x03)
+    for ctda, cis2 in convert_ctda_list_with_strings(
+            rec, script_vars, prefix=f'Stage[{i}].Log[{j}].'):
+        subs += pack_subrecord('CTDA', ctda)
+        if cis2:
+            subs += pack_string_subrecord('CIS2', cis2)
+    if text:
+        subs += pack_string_subrecord('CNAM', text)
+    return subs
+
+
+def _quest_stages(rec: dict, stage_count: int,
+                  script_vars: dict = None) -> bytes:
+    """INDX plus a log-entry run for every stage, journal text included.
+
+    See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+    """
     subs = b''
     for i in range(stage_count):
         subs += pack_subrecord('INDX', struct.pack(
@@ -566,10 +651,8 @@ def _quest_stages(rec: dict, stage_count: int) -> bytes:
                 [get_str(rec, f'Stage[{i}].Log[{j}].Text')
                  for j in range(log_count)])
             for j in range(log_count):
-                log_flags = get_int(rec, f'Stage[{i}].Log[{j}].Flags')
-                subs += pack_uint8_subrecord('QSDT', log_flags & 0x03)
-                if stage_texts[j]:
-                    subs += pack_string_subrecord('CNAM', stage_texts[j])
+                subs += _stage_log_entry(rec, i, j, stage_texts[j],
+                                         script_vars or {})
         else:
             complete = get_int(rec, f'Stage[{i}].CompleteQuest')
             subs += pack_uint8_subrecord('QSDT', 0x01 if complete else 0)
@@ -596,7 +679,8 @@ def _quest_targets(rec: dict) -> tuple:
     return alias_by_fid, targets
 
 
-def _quest_objectives(rec: dict, stage_count: int, targets: list) -> bytes:
+def _quest_objectives(rec: dict, stage_count: int, targets: list,
+                      script_vars: dict = None) -> bytes:
     """One QOBJ per journal-bearing stage, carrying only its live targets.
 
     See: docs/commentary/tes5_import_quest.md#quest-targets-become-per-objective-aliases
@@ -607,12 +691,7 @@ def _quest_objectives(rec: dict, stage_count: int, targets: list) -> bytes:
         stage_idx = get_int(rec, f'Stage[{i}].Index')
         if stage_idx in seen_stages:
             continue
-        log_count = get_int(rec, f'Stage[{i}].LogCount')
-        texts = (pc_stage_texts([get_str(rec, f'Stage[{i}].Log[{j}].Text')
-                                  for j in range(log_count)])
-                 if log_count > 0
-                 else [get_str(rec, f'Stage[{i}].LogEntry')])
-        txt = next((x for x in texts if x), None)
+        txt = stage_objective_text(rec, i, script_vars)
         if not txt:
             continue
         seen_stages.add(stage_idx)
@@ -708,12 +787,13 @@ def convert_QUST(rec: dict, fid_to_edid: dict = None,
     subs += pack_subrecord('NEXT', b'')
 
     stage_count = get_int(rec, 'StageCount')
-    subs += _quest_stages(rec, stage_count)
+    subs += _quest_stages(rec, stage_count, script_vars)
     alias_by_fid, targets = _quest_targets(rec)
     subs += (authored_objectives(rec, alias_by_fid, script_vars or {},
                                  get_formid_index_offset())
              if has_authored_objectives(rec)
-             else _quest_objectives(rec, stage_count, targets))
+             else _quest_objectives(rec, stage_count, targets,
+                                    script_vars))
 
     qfid = get_formid(rec, 'FormID')
     alias_packages = _quest_alias_packages(pack_plan, qfid, alias_by_fid)

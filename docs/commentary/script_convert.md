@@ -4988,6 +4988,25 @@ A quest with authored objectives gets no synthesized `SetObjectiveDisplayed(stag
 in its stage fragments: the objective indices are not stage indices, and the
 authored scripts already display them.
 
+### <a id="fnv-unknown-objective-index"></a>Indices the quest never authored
+
+FNV scripts call objective indices their own quest does not define.
+`nVPrimmDeputyConv` authors ten -- 10, 15, 20, 21, 22, 25, 30, 34, 36, 37 --
+and `PrimmDeputyQuestScript` polls `IsObjectiveDisplayed(31)`. The index is
+absent from FalloutNV.esm, so this is authored dead code, not a conversion
+dropout: Fallout ignored the call, while Skyrim logs `unknown quest objective
+N` for every one. In a 2026-09-15 session that single call site produced 1,671
+of 13,795 Papyrus errors, because it sits in a GameMode poll.
+
+`quest_objective_indices()` maps quest EditorID -> authored QOBJ indices and
+`quest_native` drops a call naming an index outside that set, emitting `;NE:`.
+
+Keyed on the quest the call NAMES, never the script's own: of 6,625 objective
+calls in FalloutNV.esm, 5,889 target a different quest. The guard needs a
+literal index (6,625 of 6,627 are; the 2 variables pass through) and stays
+silent for a quest that authors no objectives at all, so a quest whose
+objectives this pipeline has not converted is never second-guessed.
+
 ## <a id="script-output-dir"></a>The script output directory: wiped, static scripts by ownership
 
 **Code:** `script_convert/context_setup.py`, called from `pipeline.build_script_context`.

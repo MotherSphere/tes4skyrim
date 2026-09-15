@@ -33,7 +33,8 @@ from tes5_import.base.conditions import (
 )
 from tes5_import.dialogue.converter import DIAL_TYPE_COMBAT, DIAL_TYPE_CONVERSATION, DIAL_TYPE_DETECTION, DIAL_TYPE_MISC, DIAL_TYPE_PERSUASION, DIAL_TYPE_SERVICE, DIAL_TYPE_TOPIC, _EDID_SUBTYPE, classify_topic, convert_DIAL, convert_INFO, make_dlbr, make_dlvw, should_skip_dial
 from tes5_import.dialogue.groups import build_dialog_groups
-from tes5_import.dialogue.quest import convert_QUST
+from tes5_import.dialogue.quest import (convert_QUST,
+                                        set_assigned_var_names)
 from tes5_import.base.tes5_reader import records
 from tes5_import.base.text_reader import set_formid_index_offset
 
@@ -669,6 +670,66 @@ class TestQUST:
         assert not flags & 0x8000, "HasDialogueData must never be set"
         assert prio == 30
         assert formver == 0
+
+    #: Charactergen stage 17 log entry 1: GetQuestVariable(0002466E, 19) == 1.
+    DEBUG_CTDA = '000000000000803f4f0000006e4602001300000000000000'
+
+    def _chargen(self):
+        """A one-stage Charactergen export whose entry 1 is the debug note."""
+        return {
+            'FormID': '0002466E', 'RecordFlags': '0',
+            'EditorID': 'Charactergen', 'DATA.Flags': '0', 'StageCount': '1',
+            'Stage[0].Index': '17', 'Stage[0].LogCount': '2',
+            'Stage[0].Log[0].Flags': '0',
+            'Stage[0].Log[1].Flags': '0',
+            'Stage[0].Log[1].Text': 'DEBUG: Stage 17: Emperor approaches',
+            'Stage[0].Log[1].ConditionCount': '1',
+            'Stage[0].Log[1].Condition[0].Raw': self.DEBUG_CTDA,
+        }
+
+    def test_stage_log_entry_conditions_are_written(self):
+        """A log entry's own CTDAs decide whether its text displays, and the
+        importer used to drop them -- which is why 24 'DEBUG:'/'TEMP:' notes
+        reached the player's journal during Oblivion's chargen. The variable
+        name rides along as CIS2 so Skyrim can read it.
+
+        See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+        """
+        sv = {0x02466E: {19: 'debug'}}
+        out = convert_QUST(self._chargen(), script_vars=sv)
+        assert len(_find_all_subrecords(out, b'CTDA')) == 1
+        assert b'debug' in _find_subrecord(out, b'CIS2').lower()
+        assert b'DEBUG: Stage 17' in _find_subrecord(out, b'CNAM')
+
+    def test_never_assigned_gate_mints_no_objective(self):
+        """The journal line is gated by its CTDA, but a HUD objective carries
+        no condition of its own -- so an entry gated on a variable nothing
+        assigns must not become one.
+
+        See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+        """
+        sv = {0x02466E: {19: 'debug'}}
+        set_assigned_var_names({'convtimer'})
+        try:
+            out = convert_QUST(self._chargen(), script_vars=sv)
+        finally:
+            set_assigned_var_names(None)
+        assert _find_all_subrecords(out, b'QOBJ') == []
+
+    def test_assigned_gate_still_mints_its_objective(self):
+        """THE REGRESSION THAT MATTERS. Gating on a script variable is the
+        ORDINARY way Oblivion picks between journal variants (SE46's Mania vs
+        Dementia lines). Only a NEVER-ASSIGNED variable is a debug switch.
+
+        See: docs/commentary/tes5_import_quest.md#stage-log-entry-conditions
+        """
+        sv = {0x02466E: {19: 'debug'}}
+        set_assigned_var_names({'debug'})
+        try:
+            out = convert_QUST(self._chargen(), script_vars=sv)
+        finally:
+            set_assigned_var_names(None)
+        assert len(_find_all_subrecords(out, b'QOBJ')) == 1
 
     def test_journal_quests_get_side_quest_type(self):
         """Quests with journal stages must be Type 8 (Side Quest). Type 0

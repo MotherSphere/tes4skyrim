@@ -1962,6 +1962,44 @@ nothing after it is invalid and is cleared. Revealer gates build an OR-chain of
 one condition per revealer; mixed AND-groups across revealers use the first
 revealer's group.
 
+### <a id="stage-log-entry-conditions"></a>Stage log entry conditions
+
+An Oblivion stage log entry carries its own CTDAs, between QSDT and CNAM, that
+decide whether that text displays. The importer read `.Text`, `.Flags`,
+`.ResultScript` and `.SCRO` and never `.Condition[].Raw`, so every entry was
+written unconditionally.
+
+Mostly this did not show: 1,841 of Oblivion's 1,935 text-bearing stages carry
+exactly ONE entry, with nothing to choose between. The ~94 multi-variant stages
+silently showed the FIRST variant -- SE46 reporting the Demented residents dead
+when the player killed the Manic ones.
+
+`Charactergen` is where it became loud. 24 of its 30 entries are gated
+`GetQuestVariable(Charactergen, 19) == 1`, where SCPT `Variable[26].Index=19` is
+the `short debug` its script declares ("set to 1 to see debug messages in
+chargen") and never assigns. Dropping that gate turned "display never" into
+"display always", putting 24 developer notes -- "DEBUG: Stage 17: Emperor
+approaches player" -- in the player's journal during a sequence they are not
+meant to know is a quest.
+
+Skyrim supports this natively: vanilla `Skyrim.esm` carries 370 log-entry
+conditions across 37 quests (TutorialAlchemy, MQ103, HousePurchase), in exactly
+the QSDT -> CTDA -> CNAM position xEdit documents. So the fix is to convert the
+conditions the export already carries, via the same
+`convert_ctda_list_with_strings` every other condition site uses -- NOT to
+detect and delete debug entries, which needs a heuristic and cannot fix the
+SE46 class of bug.
+
+`script_vars` is required, not optional: `GetQuestVariable`/`GetScriptVariable`
+(236 + 11 of Oblivion's 537 gated entries) carry the variable as a script-local
+INDEX, and only that map turns it into the CIS2 name Skyrim needs. Without it
+those conditions convert to nothing and the gate silently disappears again.
+
+Measured over Oblivion.esm: 537 gated entries in 67 quests; 439 GetStageDone,
+236 GetQuestVariable, 148 GetStage, and 18 `IsXBox` (func 309, same index and
+meaning in both games -- the tutorial's gamepad/PC split, which `pc_stage_texts`
+already filters, so the surviving PC variant's `IsXBox == 0` still passes).
+
 ### <a id="stage-journal-text"></a>Stage journal text: gamepad variants and control tokens
 
 Oblivion shipped TWO journal texts for a control-tutorial stage -- a gamepad

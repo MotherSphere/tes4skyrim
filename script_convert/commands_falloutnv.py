@@ -41,6 +41,57 @@ _QUEST_NATIVES = {
 }
 
 
+#: Quest EditorID (lower) -> frozenset of authored QOBJ indices, per process.
+_QUEST_OBJECTIVES: dict = {}
+
+
+def set_quest_objectives(index: dict) -> None:
+    """Install the authored-objective index in this process."""
+    _QUEST_OBJECTIVES.clear()
+    _QUEST_OBJECTIVES.update(index)
+
+
+def quest_objective_indices(by_type: dict) -> dict:
+    """Quest EditorID (lower) -> frozenset of authored QOBJ indices.
+
+    Only quests that author an Objective[] block appear; a quest absent from
+    this map is never second-guessed.
+    See: docs/commentary/script_convert.md#fnv-unknown-objective-index
+    """
+    out = {}
+    for rec in by_type.get('QUST', []):
+        edid = (rec.get('EditorID') or '').lower()
+        count = rec.get('ObjectiveCount')
+        if not edid or count is None:
+            continue
+        idx = set()
+        for i in range(int(count or 0)):
+            raw = rec.get(f'Objective[{i}].Index')
+            if raw is not None:
+                try:
+                    idx.add(int(raw))
+                except (TypeError, ValueError):
+                    pass
+        if idx:
+            out[edid] = frozenset(idx)
+    return out
+
+
+def _unauthored_objective(quest_edid: str, index_src: str) -> bool:
+    """True when this quest authors objectives but not THIS index.
+
+    FO3/FNV scripts call objective indices their own quest never defines
+    (nVPrimmDeputyConv polls 31 of an authored 10).  Fallout ignored the call;
+    Skyrim logs "unknown quest objective N" on every one, and these sit in
+    GameMode polls.  Unknown quest or non-literal index -> never suppressed.
+    """
+    authored = _QUEST_OBJECTIVES.get(quest_edid.lower())
+    if not authored:
+        return False
+    src = (index_src or '').strip()
+    return src.isdigit() and int(src) not in authored
+
+
 def quest_native(ctx, call):
     """`<cmd> <quest> <args...>` -- Papyrus makes the quest the receiver.
 
@@ -51,11 +102,17 @@ def quest_native(ctx, call):
     parts = ctx.arg_srcs()
     if len(parts) < 2:
         return None
-    prop = safe_property_name(parts[0].strip())
+    quest_edid = parts[0].strip()
+    native = _QUEST_NATIVES[call.name]
+    if (native != 'RegisterForSingleUpdate'
+            and _unauthored_objective(quest_edid, parts[1])):
+        return ctx.note(f'{call.name} {quest_edid} {parts[1].strip()} - '
+                        f'{quest_edid} authors no such objective')
+    prop = safe_property_name(quest_edid)
     if not typed_already(ctx.sc.property_refs, prop):
         ctx.sc.property_refs[prop] = 'Quest'
     args = ', '.join(call.arg(i) for i in range(1, len(parts)))
-    return f'{prop}.{_QUEST_NATIVES[call.name]}({args})'
+    return f'{prop}.{native}({args})'
 
 
 def show_message(ctx, call):
