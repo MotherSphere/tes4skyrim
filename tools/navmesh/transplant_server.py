@@ -103,6 +103,8 @@ def mesh_bake(plugin, cell):
                    for (a, b, d) in ledges],
         'walkable': _flatten(walk),
         'blocking': _flatten(block),
+        'walk_src': _source_names(src, walk),
+        'block_src': _source_names(src, block),
         'nodes': [[round(float(c), 1) for c in p] for p in src.nodes],
         'edges': [list(e) for e in src.edges],
         'ops': (fix or {}).get('ops', []),
@@ -193,6 +195,33 @@ def cells():
     if not os.path.isdir(CORPUS):
         return []
     return sorted(f[:-5] for f in os.listdir(CORPUS) if f.endswith('.json'))
+
+
+def _source_names(src, tris):
+    """One model path per triangle of `tris`, looked up BY POSITION.
+
+    `_resplit_placed` moves triangles between the walkable and blocking sets,
+    so the per-REFR counts do not replay the gathered order; keying on the
+    rounded corner triple survives any reordering.  An unclaimed triangle
+    (LAND) answers '' and the renderer shows no name.
+    """
+    import numpy as np
+    if tris is None or not len(tris):
+        return []
+    owner = {}
+    for (model, w, b) in src.collision_sources():
+        for part in (w, b):
+            if part is None or not len(part):
+                continue
+            for tri in np.asarray(part).reshape(-1, 3, 3):
+                owner.setdefault(_tri_key(tri), model)
+    return [owner.get(_tri_key(t), '')
+            for t in np.asarray(tris).reshape(-1, 3, 3)]
+
+
+def _tri_key(tri):
+    """Rounded, winding-independent identity of one collision triangle."""
+    return tuple(sorted(tuple(round(float(c), 2) for c in p) for p in tri))
 
 
 def _flatten(tris):

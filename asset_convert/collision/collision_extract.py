@@ -240,48 +240,23 @@ def read_nif_data(nif_path: str):
 def collision_from_data(data) -> Optional[dict]:
     """Collision soup from an ALREADY-PARSED NIF (see extract_nif_collision).
 
-    Collision lives on the root node in converted meshes, so no node-transform
-    walk is needed.  Non-pathing layers (clutter, biped ragdolls, triggers) are
-    dropped wholesale.
+    A body is placed at its OWNING NODE's world transform: collision usually
+    sits on the root, but where it hangs off a moved child the engine still
+    honours that chain.  Non-pathing layers (clutter, biped ragdolls,
+    triggers) are dropped wholesale.
+    See: docs/commentary/asset_convert_collision.md#body-placement
     """
-    from asset_convert.collision.cms import decode_cms
-
     walk: List[float] = []
     block_: List[float] = []
+    placement = _body_placements(data)
 
     for body in data.blocks:
         if type(body).__name__ not in ('bhkRigidBody', 'bhkRigidBodyT'):
             continue
-
-        # Layer gate: only real world collision supports/obstructs an NPC.
-        try:
-            layer = int(body.havok_col_filter.layer)
-        except AttributeError:
-            layer = OL_STATIC
-        if layer not in _PATHING_LAYERS:
-            continue
-
-        # Unwrap bhkMoppBvTreeShape (and any nesting) to reach the real shape.
-        shape = getattr(body, 'shape', None)
-        for _ in range(4):
-            if shape is None or type(shape).__name__ != 'bhkMoppBvTreeShape':
-                break
-            shape = getattr(shape, 'shape', None)
-        if shape is None:
-            continue
-
-        tris = []
-        if type(shape).__name__ == 'bhkCompressedMeshShape':
-            cms_data = getattr(shape, 'data', None)
-            if cms_data is not None:
-                try:
-                    tris = [(tuple(v * CMS_TO_GAME for v in p) for p in tri)
-                            for (_key, tri) in decode_cms(cms_data)]
-                    tris = [tuple(t) for t in tris]
-                except Exception:
-                    tris = []
-        else:
-            tris = _primitive_tris(shape)
+        tris = _body_tris(body)
+        place = placement.get(id(body))
+        if place is not None:
+            tris = [tuple(place(pt) for pt in tri) for tri in tris]
 
         for (a, b, c) in tris:
             cls = _classify(a, b, c)
@@ -498,6 +473,100 @@ def _pal_name(sp, off):
         pal = pal.encode('latin1')
     end = pal.find(b'\x00', off)
     return pal[off:end if end >= 0 else None].decode('ascii', 'replace')
+
+
+def _body_tris(body):
+    """Game-unit triangles for one rigid body, or [] if it does not path.
+
+    Non-pathing layers (clutter, biped ragdolls, triggers) are dropped
+    wholesale, and bhkMoppBvTreeShape nesting is unwrapped to the real shape.
+    """
+    from asset_convert.collision.cms import decode_cms
+
+    try:
+        layer = int(body.havok_col_filter.layer)
+    except AttributeError:
+        layer = OL_STATIC
+    if layer not in _PATHING_LAYERS:
+        return []
+
+    shape = getattr(body, 'shape', None)
+    for _ in range(4):
+        if shape is None or type(shape).__name__ != 'bhkMoppBvTreeShape':
+            break
+        shape = getattr(shape, 'shape', None)
+    if shape is None:
+        return []
+
+    if type(shape).__name__ != 'bhkCompressedMeshShape':
+        return _primitive_tris(shape)
+    cms_data = getattr(shape, 'data', None)
+    if cms_data is None:
+        return []
+    try:
+        return [tuple(tuple(v * CMS_TO_GAME for v in p) for p in tri)
+                for (_key, tri) in decode_cms(cms_data)]
+    except Exception:
+        return []
+
+
+def _body_placements(data):
+    """{id(rigid body): f(point) -> world point} for bodies on a MOVED node.
+
+    An identity chain returns no entry, so the common root-mounted case pays
+    nothing.  Scale is uniform in a NIF node, and the shape's own transform is
+    already baked in by `_primitive_tris`/`decode_cms`.
+    See: docs/commentary/asset_convert_collision.md#body-placement
+    """
+    out = {}
+    ident = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+    def walk(node, R, T, sc, seen):
+        """Accumulate this node's transform and record any collision body."""
+        if node is None or id(node) in seen:
+            return
+        seen.add(id(node))
+        m = getattr(node, 'rotation', None)
+        lr = ([[m.m_11, m.m_12, m.m_13], [m.m_21, m.m_22, m.m_23],
+               [m.m_31, m.m_32, m.m_33]] if m is not None else ident)
+        tr = getattr(node, 'translation', None)
+        lt = [tr.x, tr.y, tr.z] if tr is not None else [0.0, 0.0, 0.0]
+        ls = getattr(node, 'scale', 1.0) or 1.0
+        Tw = [sum(R[i][k] * lt[k] * sc for k in range(3)) + T[i]
+              for i in range(3)]
+        Rw = _mat_mul(R, lr)
+        sw = sc * ls
+        co = getattr(node, 'collision_object', None)
+        body = getattr(co, 'body', None) if co is not None else None
+        if body is not None and not _is_identity(Rw, Tw, sw):
+            out[id(body)] = _placer(Rw, Tw, sw)
+        for ch in (getattr(node, 'children', None) or []):
+            walk(ch, Rw, Tw, sw, seen)
+
+    for root in data.roots:
+        try:
+            walk(root, ident, [0.0, 0.0, 0.0], 1.0, set())
+        except Exception:
+            continue
+    return out
+
+
+def _is_identity(R, T, s):
+    """True when this chain would move nothing (the root-mounted case)."""
+    if abs(s - 1.0) > 1e-6 or any(abs(v) > 1e-4 for v in T):
+        return False
+    return all(abs(R[i][j] - (1.0 if i == j else 0.0)) <= 1e-6
+               for i in range(3) for j in range(3))
+
+
+def _placer(R, T, s):
+    """f(point) applying this node chain's rotation, scale and translation."""
+    def place(p):
+        """One point through the chain."""
+        q = (p[0] * s, p[1] * s, p[2] * s)
+        return tuple(sum(R[i][k] * q[k] for k in range(3)) + T[i]
+                     for i in range(3))
+    return place
 
 
 def _mat_mul(A, B):
@@ -737,10 +806,10 @@ def _worker_both(args: tuple):
 # ---------------------------------------------------------------------------
 
 #: Bumped when extraction or mesh conversion changes walkable/blocking output.
-COLLISION_SCHEMA_VERSION = 2
+COLLISION_SCHEMA_VERSION = 3
 
 #: Cache format id; its trailing digits carry COLLISION_SCHEMA_VERSION.
-_MAGIC = b'TESCOL05'
+_MAGIC = b'TESCOL06'
 _COLLISION: Dict[str, dict] = {}
 # path_key -> short collision digest, memoised by collision_digest().  Cleared
 # with _COLLISION so a reload cannot serve digests for the previous cache.

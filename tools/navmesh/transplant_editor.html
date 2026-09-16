@@ -461,13 +461,29 @@ function pickNode(ev) {
   return -1;
 }
 
+/* The last collision triangle the pointer crossed, so the HUD can NAME the
+   mesh it came from -- an unexpected surface is otherwise a shape with no
+   identity, and the only way to find its source is to guess at bases. */
+let lastSurfaceHit = null;
+
 function pickSurface(ev) {
   toNdc(ev);
   const targets = [layers.authored, layers.walkable, layers.blocking,
                    layers.ob_walkable, layers.ob_blocking]
     .filter(o => o && o.visible);
   const hit = ray.intersectObjects(targets, false);
+  lastSurfaceHit = hit.length ? hit[0] : null;
   return hit.length ? hit[0].point : null;
+}
+
+function hoveredMeshName() {
+  const h = lastSurfaceHit;
+  if (!h || h.faceIndex === undefined) return '';
+  const bag = M || G;
+  const src = h.object === layers.walkable ? (bag && bag.walk_src)
+            : h.object === layers.blocking ? (bag && bag.block_src)
+            : null;
+  return (src && src[h.faceIndex]) || '';
 }
 
 /* Dragging: XY moves the node on a horizontal plane through its own Z; with
@@ -611,8 +627,12 @@ el.addEventListener('pointermove', ev => {
     return;
   }
   const pt = pickSurface(ev);
-  if (pt) $('hud').textContent =
-    'x ' + pt.x.toFixed(0) + '  y ' + pt.y.toFixed(0) + '  z ' + pt.z.toFixed(0);
+  if (pt) {
+    const name = hoveredMeshName();
+    $('hud').textContent =
+      'x ' + pt.x.toFixed(0) + '  y ' + pt.y.toFixed(0) +
+      '  z ' + pt.z.toFixed(0) + (name ? '  ·  ' + name : '');
+  }
 });
 
 el.addEventListener('pointerleave', () => setHover(-1));
