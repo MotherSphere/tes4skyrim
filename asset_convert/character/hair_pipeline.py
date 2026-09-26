@@ -1,316 +1,161 @@
-"""Oblivion hair -> Skyrim head-part (HDPT) meshes, with hair length baked in.
+"""Oblivion hair -> Skyrim head-part (HDPT) meshes: the bake.
 
-WHY THIS IS A SEPARATE STAGE
-    `meshes\\characters\\` is in nif_converter.SKIP_PATHS, so hair never enters
-    the batch mesh conversion.  It cannot simply be un-skipped: a converted
-    hair mesh is not a 1:1 file copy.  Oblivion's per-NPC hair LENGTH
-    (NPC_.LNAM, a float) selects a blend between the base mesh and the
-    ``HairMorph`` target in the sibling .tri, and Skyrim has no per-NPC
-    hair-length field to carry that with.  So one Oblivion hair record becomes
-    SEVERAL Skyrim meshes -- one per distinct length actually used by NPCs --
-    and each needs its own HDPT record to point at it.
+hair_plan decides WHICH variants a plugin needs (length step x gender x the
+wearer's head family); this module bakes each one: the .tri HairMorph blended
+in by the length's weight, the geometry fitted onto the Skyrim head of that
+gender and family, then converted and given the Hair Tint shader.  Hair is a
+separate stage because `meshes\\characters\\` is in nif_converter.SKIP_PATHS:
+one source mesh becomes several outputs.
 
-    See facegen_tri for the evidence that HairMorph is length (50 of 57 vanilla
-    hairs extend downward under it, 0 upward) and for both engines' custom
-    morph slots.
-
-WHAT GETS EMITTED
-    For each (HAIR record, quantized LNAM, gender) triple the plugin needs:
-
-        meshes\\tes4\\characters\\hair\\<stem>[__f][__l<NN>].nif   baked geometry
-        meshes\\tes4\\characters\\hair\\<stem>[__f][__l<NN>].tri   SkinnyMorph slot
-
-    The male length-0 variant keeps the bare stem (it IS the unmorphed base
-    mesh); female variants carry `__f`.
-
-WHY PER GENDER (2026-08-23)
-    Every mesh is FITTED to the Skyrim head through asset_convert.character.head_fit:
-    each vertex keeps its authored signed distance from the Oblivion skin, so
-    hair authored flush on the scalp stays flush on the Skyrim scalp.  The
-    Skyrim male and female skulls differ by up to 1.23 units over the scalp
-    (mean 0.46 -- measured malehead vs femalehead), far more than the fit's
-    own error, so one unisex mesh cannot be flush on both; vanilla Skyrim
-    genders every hairstyle for the same reason.  A TES4 hair restricted to
-    one gender (DATA.Flags NotMale/NotFemale) only emits that gender.
-
-FORMID CONTRACT
-    Male variant HDPTs are keyed `derive_formid('HDPT_HAIR', (hair_fid,
-    bucket))`, female ones `('HDPT_HAIR', (hair_fid, bucket, 'F'))`.  Every
-    component is authored TES4 data -- the source HAIR FormID, a quantization
-    of the authored LNAM float, and the authored gender restriction -- never
-    anything the conversion computes, so ids are stable across machines and
-    builds.  Changing LENGTH_BUCKETS renumbers every non-zero variant, which
-    is FormID drift.
+See: docs/commentary/asset_convert_armor.md#hair-variants-follow-the-wearer
 """
 
 from asset_convert.game_paths import current_namespace
+import io
 import os
-import sys
 from concurrent.futures import ProcessPoolExecutor
+from functools import lru_cache
 
+import numpy as np
+
+from asset_convert.character import head_fit
 from asset_convert.character.facegen_tri import TriFile, TriError, build_skyrim_hair_tri
-
+from asset_convert.character.hair_plan import (FIT_ARGS, build_plan, bucket_weight,
+                                               mesh_family, mesh_name_family,
+                                               norm_model, out_rel_dir, variant_stem)
+from asset_convert.nif.pyffi_monkey_patch import apply_patches
+apply_patches()
+from pyffi.formats.nif import NifFormat
 
 from core.worker_budget import worker_count
 from output_layout import assets_for
 
 _WORKERS = worker_count()
 
-# How finely the authored LNAM float is quantized.  The distribution in
-# Oblivion.esm is strongly bimodal -- 654 NPCs at exactly 0.0 and 371 at
-# exactly 1.0, then a long tail (0.58, 0.55, 0.47, 0.37 ...) -- so the two
-# endpoint buckets carry most actors and cost nothing extra: bucket 0 is the
-# base mesh and bucket N is the fully-applied morph.
-#
-# 🛑 CHANGING THIS RENUMBERS EVERY NON-ZERO HAIR VARIANT (FormID drift).
-LENGTH_BUCKETS = 8
-
-def quantize_length(value: float) -> int:
-    """Authored LNAM float -> bucket index in [0, LENGTH_BUCKETS].
-
-    Clamped rather than wrapped: a plugin is free to author a length outside
-    [0, 1] and the morph is only defined across that span.
-    """
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return 0
-    if v != v:            # NaN
-        return 0
-    if v <= 0.0:
-        return 0
-    if v >= 1.0:
-        return LENGTH_BUCKETS
-    return int(round(v * LENGTH_BUCKETS))
-
-
-def bucket_weight(bucket: int) -> float:
-    """Bucket index -> the morph blend weight it represents."""
-    if bucket <= 0:
-        return 0.0
-    if bucket >= LENGTH_BUCKETS:
-        return 1.0
-    return bucket / float(LENGTH_BUCKETS)
-
-
-# Race-group mesh suffixes.  The human-group mesh keeps the bare stem (it
-# IS the fit every file carried before groups existed); the elf and orc
-# groups get their own meshes because their in-game heads differ from the
-# base scalp by up to 2.6 / 1.5 units (see head_fit.GROUP_MORPHS).
-GROUP_SUFFIX = {'elves': '__ev', 'orc': '__or'}
-
-
-def variant_stem(stem: str, bucket: int, female: bool = False,
-                 group=None) -> str:
-    """Output filename stem for a hair mesh variant.
-
-    The male bucket-0 human-group variant keeps the bare stem -- the file a
-    conversion without any length handling would already have written.
-    Female meshes (fitted to femalehead) carry `__f`; elf/orc group meshes
-    carry `__ev` / `__or`.
-    """
-    if female:
-        stem = stem + '__f'
-    stem += GROUP_SUFFIX.get(group, '')
-    if bucket <= 0:
-        return stem
-    return '%s__l%02d' % (stem, bucket)
-
-
-def variant_edid(edid: str, bucket: int, female: bool = False,
-                 group=None) -> str:
-    """EditorID for the HDPT of a hair variant."""
-    base = edid or 'Hair'
-    out = 'TES4Hair%s' % base
-    if female:
-        out += 'F'
-    out += {'elves': 'Elf', 'orc': 'Orc', 'dremora': 'Dre'}.get(group, '')
-    if bucket > 0:
-        out += '_L%02d' % bucket
-    return out
-
 
 # ---------------------------------------------------------------------------
 # Geometry baking
 # ---------------------------------------------------------------------------
 
-def out_rel_dir() -> str:
-    """Hair output folder, under the ACTIVE game namespace."""
-    return os.path.join(current_namespace(), 'characters', 'hair')
-
-
 def bake_hair_variant(nif_bytes: bytes, tri_bytes, weight: float,
-                      female: bool = False, race=None, group=None):
-    """Bake one hair variant: length morph + Skyrim head fit.
+                      female: bool = False, race=None, group=None,
+                      source_head=None):
+    """Bake one hair variant; returns (nif bytes, emitted .tri bytes or None).
 
-    Applies `weight` of the .tri HairMorph to the hair NIF's vertices, then
-    fits the result to the Skyrim head of the given gender through
-    asset_convert.character.head_fit (each vertex keeps its authored signed distance
-    from the Oblivion skin, so scalp-flush hair stays flush).
+    Blends `weight` of the .tri HairMorph into the shape whose VERTEX COUNT
+    matches it (extra shapes such as jewellery are left unmorphed), fits every
+    shape as one system onto the Skyrim head `race`/`group` select -- from
+    `source_head` when the hair was authored on another game's head -- and
+    builds the emitted .tri from the largest shape.
 
-    Returns (new_nif_bytes, baked_tri_bytes).  `tri_bytes` may be None (a
-    few Oblivion hairs ship no .tri at all) in which case the geometry
-    passes through untouched and the emitted .tri is built from the NIF's
-    own mesh.  `group` selects the race-group target head ('elves'/'orc');
-    None fits the base (human) head.
-
-    The morph is matched to geometry by VERTEX COUNT, not by name or order:
-    an Oblivion hair NIF is a single NiTriShape whose vertex count equals the
-    .tri's, and pairing on that is what makes the bake safe when a mesh
-    carries extra non-morphed shapes (jewellery on khajiitjeweled, etc.).
-    The head fit runs on EVERY shape as one system, so those extra shapes
-    follow the hair they decorate.
+    See: docs/commentary/asset_convert_armor.md#hair-source-head
     """
-    from asset_convert.nif.pyffi_monkey_patch import apply_patches
-    apply_patches()
-    from pyffi.formats.nif import NifFormat
-    import io
-
-    tri = None
-    deltas = None
-    if tri_bytes:
-        try:
-            tri = TriFile.from_bytes(tri_bytes)
-            deltas = tri.hair_morph()
-        except TriError:
-            tri = None
-            deltas = None
-
+    tri, deltas = _hair_morph(tri_bytes)
     data = NifFormat.Data()
     data.read(io.BytesIO(nif_bytes))
+    blocks = _morphed_blocks(data, deltas, weight)
+    _fit_blocks_to_head(blocks, female, race, group, source_head)
+    baked = _largest_shape(blocks)
+    out = io.BytesIO()
+    data.write(out)
+    if baked is None:
+        return out.getvalue(), None
+    return out.getvalue(), _baked_tri(tri, *baked)
 
-    # ---- pass 1: length morph -------------------------------------------
+
+def _hair_morph(tri_bytes):
+    """(TriFile, HairMorph deltas) of a source .tri; (None, None) if absent or unreadable."""
+    if not tri_bytes:
+        return None, None
+    try:
+        tri = TriFile.from_bytes(tri_bytes)
+        return tri, tri.hair_morph()
+    except TriError:
+        return None, None
+
+
+def _morphed_blocks(data, deltas, weight: float) -> list:
+    """Every geometry block, `weight` of the morph added where the vertex count matches."""
     blocks = []
-    for root in data.roots:
-        if root is None:
-            continue
+    for root in (r for r in data.roots if r is not None):
         for block in root.tree():
-            if not isinstance(block, (NifFormat.NiTriShape,
-                                      NifFormat.NiTriStrips)):
+            gd = getattr(block, 'data', None)
+            if (not isinstance(block, (NifFormat.NiTriShape, NifFormat.NiTriStrips))
+                    or gd is None or gd.num_vertices == 0):
                 continue
-            gd = block.data
-            if gd is None or gd.num_vertices == 0:
-                continue
-            if (deltas is not None and weight != 0.0
-                    and gd.num_vertices == len(deltas)):
-                for i, v in enumerate(gd.vertices):
-                    dx, dy, dz = deltas[i]
-                    v.x += dx * weight
-                    v.y += dy * weight
-                    v.z += dz * weight
+            if deltas is not None and weight and gd.num_vertices == len(deltas):
+                for v, (dx, dy, dz) in zip(gd.vertices, deltas):
+                    v.x, v.y, v.z = v.x + dx * weight, v.y + dy * weight, v.z + dz * weight
             blocks.append(block)
+    return blocks
 
-    # ---- pass 2: fit onto the Skyrim head -------------------------------
-    _fit_blocks_to_head(blocks, female, race, group)
 
-    # ---- pass 3: the largest shape defines the .tri we emit -------------
-    baked_verts = None
-    baked_faces = None
-    baked_uvs = None
+def _largest_shape(blocks):
+    """(verts, faces, uvs) of the largest block, refreshing every block's bounds."""
+    best = None
     for block in blocks:
         gd = block.data
         try:
             gd.update_center_radius()
         except Exception:
             pass
-        if baked_verts is None or gd.num_vertices > len(baked_verts):
-            baked_verts = [(v.x, v.y, v.z) for v in gd.vertices]
-            baked_faces = _shape_triangles(block, gd)
-            baked_uvs = _shape_uvs(gd)
-
-    out = io.BytesIO()
-    data.write(out)
-
-    if baked_verts is None:
-        return out.getvalue(), None
-
-    # Prefer the source .tri's topology when the counts agree -- it is the
-    # authored mesh the morph was built against.
-    if tri is not None and len(tri.vertices) == len(baked_verts):
-        faces = tri.faces
-        uvs = tri.uvs
-        uv_faces = tri.uv_faces
-    else:
-        faces = baked_faces
-        uvs = baked_uvs
-        uv_faces = None
-
-    tri_out = build_skyrim_hair_tri(baked_verts, faces, uvs, uv_faces)
-    return out.getvalue(), tri_out
+        if best is None or gd.num_vertices > len(best[0]):
+            best = ([(v.x, v.y, v.z) for v in gd.vertices],
+                    _shape_triangles(block, gd), _shape_uvs(gd))
+    return best
 
 
-def fit_group_lock(edid: str):
-    """The single race group a race-NAMED hair belongs to, or None (generic).
+def _baked_tri(tri, verts, faces, uvs) -> bytes:
+    """The emitted .tri: the source .tri's topology when its count matches the bake."""
+    if tri is not None and len(tri.vertices) == len(verts):
+        return build_skyrim_hair_tri(verts, tri.faces, tri.uvs, tri.uv_faces)
+    return build_skyrim_hair_tri(verts, faces, uvs, None)
 
-    Oblivion names race hair for its race; an elf-named hair is only ever
-    worn by elves so it bakes ONE mesh fitted to the elf head; likewise orc.
-    Generic hair bakes all three group meshes.
+
+def _block_arrays(blocks) -> list:
+    """(verts, tris) numpy arrays of each geometry block."""
+    return [(np.array([[v.x, v.y, v.z] for v in b.data.vertices], dtype=np.float64),
+             np.array(_shape_triangles(b, b.data), dtype=np.int64).reshape(-1, 3))
+            for b in blocks]
+
+
+@lru_cache(maxsize=None)
+def _source_head(path: str):
+    """(verts, tris) of a source head mesh in its own face space, read once per process."""
+    data = NifFormat.Data()
+    with open(path, 'rb') as fh:
+        data.read(fh)
+    parts = _block_arrays(_morphed_blocks(data, None, 0.0))
+    offs = np.cumsum([0] + [len(v) for v, _t in parts])
+    return (np.vstack([v for v, _t in parts]),
+            np.vstack([t + offs[i] for i, (_v, t) in enumerate(parts)]))
+
+
+def _fit_blocks_to_head(blocks, female: bool, race=None, group=None,
+                        source_head=None) -> bool:
+    """Fit hair blocks onto the Skyrim head as one system; whether the fit ran.
+
+    Hair is authored in face space and glued rigidly to Skyrim's head bone,
+    so unfitted the SOURCE skull's shape survives around the Skyrim one.
+    `source_head` is another game's head mesh the hair was authored on
+    (head_fit.register_source_pack); without fit data the geometry passes
+    through untouched.
     """
-    low = (edid or '').lower()
-    if 'elf' in low:
-        return 'elves'
-    if 'orc' in low:
-        return 'orc'
-    if any(t in low for t in ('nord', 'imperial', 'breton', 'redguard',
-                              'dremora')):
-        return 'humans'
-    return None
-
-
-def _fit_race(edid: str):
-    """Race pack for a hair record (khajiit/argonian/orc), or None (human).
-
-    Oblivion authors race-specific hair against that race's own head mesh,
-    and names the record for the race — the same EDID token match the HDPT
-    RNAM routing uses.
-    """
-    try:
-        from asset_convert.character.head_fit import fit_race_for_hair
-    except ImportError:
-        return None
-    return fit_race_for_hair(edid)
-
-
-def _fit_blocks_to_head(blocks, female: bool, race=None, group=None) -> bool:
-    """Fit hair geometry blocks onto the Skyrim head (asset_convert.character.head_fit).
-
-    Oblivion hair is authored in face space (origin = head attach point) and
-    the conversion glues it rigidly to Skyrim's head bone, so without this the
-    OBLIVION skull's shape survives around a SKYRIM skull.  All blocks are
-    solved as one system (cross-shape welds stay together).  Returns
-    whether the fit ran; when the fit data is unavailable the geometry
-    passes through untouched, the old unfitted behavior.
-    """
-    if not blocks:
+    if not blocks or not head_fit.fit_available(female):
         return False
-    try:
-        import numpy as np
-        from asset_convert.character import head_fit
-    except ImportError:
-        return False
-    if not head_fit.fit_available(female):
-        return False
-
-    shapes = []
-    for block in blocks:
-        gd = block.data
-        verts = np.array([[v.x, v.y, v.z] for v in gd.vertices],
-                         dtype=np.float64)
-        tris = np.array(_shape_triangles(block, gd), dtype=np.int64)
-        if tris.size == 0:
-            tris = np.zeros((0, 3), dtype=np.int64)
-        shapes.append((verts, tris))
-
-    fitted = head_fit.fit_head_gear(shapes, female, race=race, group=group,
-                                    cover_ears=True, hug=True)
+    if source_head:
+        sv, st = _source_head(source_head)
+        race = head_fit.register_source_pack(
+            female, '%s|%s|%s' % (source_head, race, group), sv, st,
+            race=race, group=group)
+        group = None
+    fitted = head_fit.fit_head_gear(_block_arrays(blocks), female, race=race,
+                                    group=group, cover_ears=True, hug=True)
     if fitted is None:
         return False
     for block, new_v in zip(blocks, fitted):
-        gd = block.data
-        for i, v in enumerate(gd.vertices):
-            v.x = float(new_v[i, 0])
-            v.y = float(new_v[i, 1])
-            v.z = float(new_v[i, 2])
+        for v, p in zip(block.data.vertices, new_v):
+            v.x, v.y, v.z = float(p[0]), float(p[1]), float(p[2])
     return True
 
 
@@ -492,134 +337,8 @@ def _shape_uvs(gd):
 
 
 # ---------------------------------------------------------------------------
-# Which (hair, length) pairs the plugin actually uses
+# Planning the bakes
 # ---------------------------------------------------------------------------
-
-def collect_hair_usage(npc_records) -> dict:
-    """Map HAIR FormID -> set of length buckets its wearers ask for.
-
-    `npc_records` is any iterable of parsed NPC_ record dicts.  Callers MUST
-    include master-owned NPCs (ctx.master_export) as well as the current
-    plugin's: an ESP whose actors are defined in Oblivion.esm would otherwise
-    register no lengths at all and every one of its NPCs would get the
-    bucket-0 mesh regardless of its authored LNAM.
-    """
-    usage: dict = {}
-    for rec in npc_records:
-        hair_fid = _rec_formid(rec, 'HNAM.Hair')
-        if not hair_fid:
-            continue
-        bucket = quantize_length(_rec_float(rec, 'LNAM.HairLength'))
-        usage.setdefault(hair_fid, set()).add(bucket)
-    return usage
-
-
-# ---------------------------------------------------------------------------
-# Export-text helpers (this module runs in the ASSET stage, which has no
-# ---------------------------------------------------------------------------
-
-def iter_records(txt):
-    if not os.path.isfile(txt):
-        return
-    with open(txt, 'r', encoding='utf-8', errors='replace') as fh:
-        body = fh.read()
-    for chunk in body.split('---RECORD_BEGIN---')[1:]:
-        rec = {}
-        for line in chunk.split('---RECORD_END---')[0].splitlines():
-            line = line.strip()
-            if not line or line.startswith('#') or '=' not in line:
-                continue
-            k, v = line.split('=', 1)
-            rec[k] = v
-        if rec:
-            yield rec
-
-
-def _rec_formid(rec, key) -> int:
-    raw = (rec.get(key) or '').strip()
-    if not raw:
-        return 0
-    raw = raw.split()[0]
-    try:
-        return int(raw, 16)
-    except ValueError:
-        return 0
-
-
-def _rec_float(rec, key) -> float:
-    raw = (rec.get(key) or '').strip()
-    if not raw:
-        return 0.0
-    try:
-        return float(raw.split()[0])
-    except ValueError:
-        return 0.0
-
-
-def _norm_model(path: str) -> str:
-    """MODL path -> lowercase mesh-relative path with OS separators."""
-    p = (path or '').strip().replace('\\\\', '\\').replace('\\', '/')
-    return p.lstrip('/').lower()
-
-
-# TES4 HAIR DATA flags: bit 0 Playable, bit 1 NotMale, bit 2 NotFemale.
-TES4_HAIR_NOT_MALE = 0x02
-TES4_HAIR_NOT_FEMALE = 0x04
-
-
-def hair_genders(data_flags: int) -> tuple:
-    """Which genders a TES4 HAIR record allows, as a tuple of female-bools.
-
-    A record excluding BOTH genders is authored nonsense; treat it as unisex
-    rather than emitting nothing (a missing HDPT is a dangling PNAM).
-    """
-    out = []
-    if not data_flags & TES4_HAIR_NOT_MALE:
-        out.append(False)
-    if not data_flags & TES4_HAIR_NOT_FEMALE:
-        out.append(True)
-    return tuple(out) or (False, True)
-
-
-def build_hair_plan(export_dir) -> dict:
-    """Which (HAIR record, length bucket, gender) variants this plugin needs.
-
-    Returns {hair_fid: {'edid', 'model', 'buckets': set(), 'genders': tuple}}.
-
-    Every HAIR record gets at least bucket 0 so a hair no NPC currently wears
-    still converts -- leveled actors and other plugins reference hair we can
-    not see from NPC_ alone, and a missing HDPT is a dangling PNAM.
-    """
-    export_dir = str(export_dir)
-    plan: dict = {}
-
-    for rec in iter_records(os.path.join(export_dir, 'HAIR.txt')):
-        fid = _rec_formid(rec, 'FormID')
-        if not fid:
-            continue
-        try:
-            flags = int((rec.get('DATA.Flags') or '0').strip() or '0')
-        except ValueError:
-            flags = 0
-        plan[fid] = {
-            'edid': (rec.get('EditorID') or '').strip(),
-            'model': (rec.get('Model.MODL') or '').strip(),
-            'buckets': {0},
-            'genders': hair_genders(flags),
-        }
-
-    usage = collect_hair_usage(
-        iter_records(os.path.join(export_dir, 'NPC_.txt')))
-    for fid, buckets in usage.items():
-        entry = plan.get(fid)
-        if entry is None:
-            # An NPC naming a hair this plugin does not define (master-owned).
-            # Nothing to convert here -- the master's own run emits it.
-            continue
-        entry['buckets'] |= buckets
-
-    return plan
-
 
 def morph_applies(src_nif_path, src_tri_path) -> bool:
     """Whether the sibling .tri's HairMorph can reach this mesh's geometry.
@@ -672,11 +391,8 @@ def _bake_one(job):
     Returns (out_stem, written, tinted, error) -- errors come back as data
     so one bad mesh cannot kill the pool.
     """
-    import tempfile
-    from asset_convert.nif.nif_converter import convert_nif
-
-    (rel, src_nif_path, src_tri_path, weight, female, race, group, out_stems,
-     out_dir, src_root, src_tex_root) = job
+    (rel, src_nif_path, src_tri_path, weight, female, race, group, source_head,
+     out_stems, out_dir, src_root, src_tex_root) = job
     out_stem = out_stems[0]
 
     # THE JOB CARRIES PATHS, NOT BYTES.  One HAIR record becomes many
@@ -697,7 +413,8 @@ def _bake_one(job):
 
     try:
         baked_nif, baked_tri = bake_hair_variant(
-            nif_bytes, tri_bytes, weight, female, race=race, group=group)
+            nif_bytes, tri_bytes, weight, female, race=race, group=group,
+            source_head=source_head)
     except Exception as exc:
         return out_stem, 0, 0, 'bake failed: %s' % exc
 
@@ -765,53 +482,43 @@ def _job_cost(src_nif) -> int:
         return 0
 
 
-def _group_plan(edid: str) -> list:
-    """The (fit group, name suffix) pairs one hair record bakes for.
+def _entry_sources(entry: dict) -> tuple:
+    """(source nif, source tri or None, meshes root, textures root) of a hair.
 
-    A beast-race pack fits its own head; a race-NAMED hair bakes one mesh
-    for its group, keeping the bare stem because its RNAM already restricts
-    the races; generic hair bakes one mesh per race group.
+    The files come from the asset folder of the export that OWNS the hair (a
+    master's, for a master's hair), not from the record folder.
     """
-    if _fit_race(edid) is not None:
-        return [(None, None)]
-    lock = fit_group_lock(edid)
-    if lock is not None:
-        return [(None if lock == 'humans' else lock, None)]
-    return [(None, None), ('elves', 'elves'), ('orc', 'orc')]
+    root = str(assets_for(entry['owner']))
+    src_nif = os.path.join(root, 'meshes', *norm_model(entry['model']).split('/'))
+    src_tri = os.path.splitext(src_nif)[0] + '.tri' if entry['has_tri'] else None
+    return (src_nif, src_tri, os.path.join(root, 'meshes'),
+            os.path.join(root, 'textures'))
 
 
-def _record_variants(entry, rel, src_nif, src_tri, out_dir, shared, order,
-                     morphed):
-    """Fold one record's variants into `shared`/`order`; returns their count.
+def _variant_jobs(entry, src, out_dir, heads, shared, order, morphed) -> int:
+    """Fold one hair's planned variants into `shared`/`order`; returns how many.
 
-    A variant whose bake inputs match an earlier one only adds its NAME to
-    that bake.  `morphed` says whether the .tri morph can reach this mesh;
-    `weight` enters the bake identity only when it can, so a plugin whose
-    hair ships no usable .tri bakes once for all its length buckets.
+    A variant whose bake inputs match an earlier one only adds its NAME to that
+    bake; `weight` enters the identity only when the .tri morph reaches the
+    mesh (`morphed`), so a hair with no usable .tri bakes once for every length.
     """
+    rel = norm_model(entry['model'])
     stem = os.path.splitext(os.path.basename(rel))[0]
-    race = _fit_race(entry['edid'])
-    n = 0
-    for bucket, female, (group, name_grp) in [
-            (b, f, g) for b in sorted(entry['buckets'])
-            for f in entry.get('genders', (False, True))
-            for g in _group_plan(entry['edid'])]:
-        n += 1
-        weight = bucket_weight(bucket) if morphed else 0.0
-        key = (rel, weight, female, race, group)
-        out_stem = variant_stem(stem, bucket, female, name_grp)
-        if key in shared:
-            shared[key].append(out_stem)
-            continue
-        shared[key] = [out_stem]
-        order.append((key, rel, src_nif, src_tri, weight, female, race,
-                      group, out_dir))
-    return n
+    for v in sorted(entry['variants']):
+        fam = mesh_family(v.family)
+        weight = bucket_weight(v.bucket) if morphed else 0.0
+        key = (src[0], weight, v.female, fam, heads[v.female])
+        if key not in shared:
+            shared[key] = []
+            order.append((rel, src[0], src[1], weight, v.female) + FIT_ARGS[fam]
+                         + (heads[v.female], shared[key], out_dir, src[2], src[3]))
+        shared[key].append(variant_stem(stem, v.bucket, v.female,
+                                        mesh_name_family(v, entry)))
+    return len(entry['variants'])
 
 
-def _plan_jobs(plan, src_root, src_tex_root, out_root, stats,
-               verbose: bool) -> list:
-    """The bakes this plugin needs, each carrying every name that shares it.
+def _plan_jobs(plan, out_dir, stats, verbose: bool) -> list:
+    """The bakes this plugin's plan needs, each carrying every name that shares it.
 
     One bake per distinct set of bake inputs rather than one per output
     name, ordered LONGEST FIRST so a slow mesh never starts with nothing
@@ -819,67 +526,61 @@ def _plan_jobs(plan, src_root, src_tex_root, out_root, stats,
 
     See: docs/commentary/asset_convert_armor.md#hair-bake-sharing
     """
-    shared: dict = {}
-    order: list = []
-    morphed_by_mesh: dict = {}
-    out_dir = os.path.join(out_root, *out_rel_dir().split(os.sep))
-    for fid in sorted(plan):
-        entry = plan[fid]
-        if not entry['model']:
+    shared, order, morphed = {}, [], {}
+    for fid in sorted(plan.hairs):
+        entry = plan.hairs[fid]
+        if not entry['variants'] or not entry['model']:
             continue
-        rel = _norm_model(entry['model'])
-        src_nif = os.path.join(src_root, *rel.split('/'))
-        if not os.path.isfile(src_nif):
+        src = _entry_sources(entry)
+        if not os.path.isfile(src[0]):
             stats['missing'] += 1
             if verbose:
-                print('    hair: missing source mesh %s' % rel)
+                print('    hair: missing source mesh %s' % src[0])
             continue
         stats['hairs'] += 1
-        os.makedirs(out_dir, exist_ok=True)
-        src_tri = os.path.splitext(src_nif)[0] + '.tri'
-        if not os.path.isfile(src_tri):
-            src_tri = None
-        if rel not in morphed_by_mesh:
-            morphed_by_mesh[rel] = morph_applies(src_nif, src_tri)
-        stats['variants'] += _record_variants(
-            entry, rel, src_nif, src_tri, out_dir, shared, order,
-            morphed_by_mesh[rel])
+        if src[0] not in morphed:
+            morphed[src[0]] = morph_applies(src[0], src[1])
+        stats['variants'] += _variant_jobs(entry, src, out_dir, plan.heads,
+                                           shared, order, morphed[src[0]])
+    order.sort(key=lambda job: _job_cost(job[1]), reverse=True)
+    return order
 
-    order.sort(key=lambda item: _job_cost(item[2]), reverse=True)
-    return [(rel, src_nif, src_tri, weight, female, race, group,
-             shared[key], out_dir, src_root, src_tex_root)
-            for (key, rel, src_nif, src_tri, weight, female, race, group,
-                 out_dir) in order]
+
+def _prune_stale(out_dir: str, plan, names: set) -> int:
+    """Delete this plan's hairs' .nif/.tri files no planned variant names; returns how many.
+
+    Only files named after one of the plan's hair meshes are touched, so a
+    sibling plugin sharing the output folder keeps its own.
+    """
+    stems = {os.path.splitext(os.path.basename(norm_model(e['model'])))[0]
+             for e in plan.hairs.values() if e['model']}
+    if not os.path.isdir(out_dir):
+        return 0
+    stale = [f for f in os.listdir(out_dir)
+             if os.path.splitext(f)[1].lower() in ('.nif', '.tri')
+             and os.path.splitext(f)[0].lower().split('__')[0] in stems
+             and os.path.splitext(f)[0].lower() not in names]
+    for f in stale:
+        os.remove(os.path.join(out_dir, f))
+    return len(stale)
 
 
 def run(export_dir, out_meshes_dir, *, verbose: bool = True) -> dict:
-    """Convert every hair variant this plugin needs.
+    """Bake every hair variant this plugin's plan asks for; returns stats.
 
-    Reads the extracted Oblivion hair NIF/.tri pairs, bakes each required
-    length, converts the result to Skyrim format through the normal NIF
-    converter, and writes the paired Skyrim .tri beside it.
+    See hair_plan for what is planned.  Files a previous build left in the
+    hair folder that the plan no longer names are deleted first.
     """
-
-    export_dir = str(export_dir)
-    # HAIR.txt/NPC_.txt are RECORDS (export_dir), but the NIF/.tri
-    # and textures are SHARED assets, which for an imported mod sit
-    # one level up. Joining them onto the record dir finds nothing
-    # and every hair silently converts to 'missing'.
-    asset_root = str(assets_for(export_dir))
-    src_root = os.path.join(asset_root, 'meshes')
-    src_tex_root = os.path.join(asset_root, 'textures')
-    out_root = str(out_meshes_dir)
-
     stats = {'hairs': 0, 'variants': 0, 'written': 0, 'missing': 0,
              'errors': 0, 'tinted': 0}
-
-    plan = build_hair_plan(export_dir)
-    if not plan:
-        return stats
-
-    jobs = _plan_jobs(plan, src_root, src_tex_root, out_root, stats, verbose)
+    out_dir = os.path.join(str(out_meshes_dir), *out_rel_dir().split(os.sep))
+    plan = build_plan(export_dir)
+    jobs = _plan_jobs(plan, out_dir, stats, verbose)
+    stats['pruned'] = _prune_stale(out_dir, plan,
+                                   {n for job in jobs for n in job[8]})
     if not jobs:
         return stats
+    os.makedirs(out_dir, exist_ok=True)
 
     # ProcessPoolExecutor, not threads: the per-variant work is CPU-bound
     # pure Python (pyffi parse/write plus the numpy head fit), which the GIL
@@ -1081,39 +782,3 @@ def _rmtree_quiet(path):
         shutil.rmtree(path)
     except OSError:
         pass
-
-
-def output_model_path(model: str, bucket: int, female: bool = False,
-                      group=None) -> str:
-    """The MODL path an HDPT variant should carry (mesh-relative, TES4 style).
-
-    Mirrors what `run` writes, so the record and the asset stages cannot
-    disagree about where a variant lives.
-    """
-    stem = os.path.splitext(os.path.basename(_norm_model(model)))[0]
-    rel = out_rel_dir().replace(os.sep, '\\')
-    rel = rel.split('\\', 1)[1]
-    return '%s\\%s.nif' % (rel, variant_stem(stem, bucket, female, group))
-
-
-def output_tri_path(model: str, bucket: int, female: bool = False,
-                    group=None) -> str:
-    """The NAM1 (.tri) path an HDPT variant should carry."""
-    return os.path.splitext(
-        output_model_path(model, bucket, female, group))[0] + '.tri'
-
-
-def source_tri_exists(export_dir, model: str) -> bool:
-    """True when the Oblivion hair ships the .tri we build the Skyrim one from.
-
-    A handful of hairs have no sibling .tri (4 of Oblivion's 61 meshes).  Those
-    still convert -- the geometry is all the engine needs -- but the HDPT must
-    not name a NAM1 the asset stage never wrote, or the CK reports a missing
-    file for every one of them.
-    """
-    rel = _norm_model(model)
-    if not rel:
-        return False
-    src = os.path.join(str(assets_for(export_dir)), 'meshes',
-                       *rel.split('/'))
-    return os.path.isfile(os.path.splitext(src)[0] + '.tri')

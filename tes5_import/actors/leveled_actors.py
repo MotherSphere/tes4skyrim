@@ -32,6 +32,7 @@ import struct
 
 from .creature_races import get_creature_race
 from ..base.equivalents import resolve_creature_race
+from ..base.race_lookup import tes4_race_edid
 from ..base.text_reader import get_formid, get_int, get_str
 from ..base.writer import (pack_formid_subrecord, pack_obnd, pack_record,
                      pack_string_subrecord, pack_subrecord)
@@ -141,9 +142,7 @@ def _shell_race(lvlc_rec: dict, crea_by_fid: dict, npc_by_fid: dict,
         npc = npc_by_fid.get(fid)
         if npc is not None:
             from ..base.constants import DEFAULT_RACE, RACE_MAP
-            from ..base.equivalents import TES4_RACE_FID_TO_EDID
-            edid = TES4_RACE_FID_TO_EDID.get(
-                get_formid(npc, 'RNAM.Race') & 0x00FFFFFF, 'Imperial')
+            edid = tes4_race_edid(get_formid(npc, 'RNAM.Race'), 'Imperial')
             return RACE_MAP.get(edid, DEFAULT_RACE)
 
         child = lvlc_by_fid.get(fid)

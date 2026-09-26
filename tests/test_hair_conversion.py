@@ -14,10 +14,11 @@ import pytest
 
 from asset_convert.character.facegen_tri import (MAGIC, SKYRIM_HAIR_MORPH, TriError,
                                        TriFile, build_skyrim_hair_tri)
-from asset_convert.character.hair_pipeline import (LENGTH_BUCKETS, bucket_weight,
-                                         collect_hair_usage, output_model_path,
-                                         output_tri_path, quantize_length,
-                                         variant_edid, variant_stem)
+from asset_convert.character.hair_plan import (LENGTH_BUCKETS, bucket_weight,
+                                               hair_entry, output_model_path,
+                                               output_tri_path, quantize_length,
+                                               variant_edid, variant_stem,
+                                               wearer_variant)
 
 _HAIR_DIR = os.path.join('export', 'Oblivion.esm', 'meshes', 'characters', 'hair')
 _HAS_SOURCE = os.path.isdir(_HAIR_DIR)
@@ -163,43 +164,35 @@ def test_variant_edids_are_distinct_per_bucket():
     assert len(seen) == LENGTH_BUCKETS + 1
 
 
-def test_collect_usage_buckets_by_authored_length():
-    npcs = [
-        {'HNAM.Hair': '00027FF2', 'LNAM.HairLength': '0.0'},
-        {'HNAM.Hair': '00027FF2', 'LNAM.HairLength': '1.0'},
-        {'HNAM.Hair': '00027FF2', 'LNAM.HairLength': '1.0'},
-        {'HNAM.Hair': '00064213', 'LNAM.HairLength': '0.5'},
-        {'LNAM.HairLength': '0.5'},                      # no hair -> ignored
-    ]
-    usage = collect_hair_usage(npcs)
-    assert usage[0x00027FF2] == {0, LENGTH_BUCKETS}
-    assert usage[0x00064213] == {quantize_length(0.5)}
-    assert len(usage) == 2
+def test_wearer_variant_buckets_by_authored_length():
+    """An NPC wears its LNAM's step, gender and race family; no .tri means step 0."""
+    e = hair_entry({'EditorID': 'MediumLength', 'Model.MODL': 'x.nif'}, None)
+    e['has_tri'] = True
+    assert wearer_variant(e, '0.0', False, 'human') == (0, False, 'human')
+    assert wearer_variant(e, '1.0', True, 'elves') == (LENGTH_BUCKETS, True,
+                                                        'elves')
+    assert wearer_variant(e, '0.5', False, 'orc').bucket == quantize_length(0.5)
+    e['has_tri'] = False
+    assert wearer_variant(e, '1.0', False, 'human').bucket == 0
 
 
 def test_lookup_ignores_the_load_order_index_byte():
     """A FormID's index byte is assigned per run, so it is not identity.
 
     The export dumps HAIR 000C4821, but the record reaching convert_HAIR
-    carries 010C4821.  Keying the bucket index on the raw value made every
-    lookup miss SILENTLY — no error, every NPC just fell back to the
-    bucket-0 mesh and the whole length feature evaporated.
+    carries 010C4821.  Keying the plan on the raw value made every lookup
+    miss SILENTLY — every NPC fell back to the base mesh.
     """
     from tes5_import.actors import hair_variants as hair_variants
 
-    hair_variants._BUCKETS.clear()
-    hair_variants._HAS_TRI.clear()
-    hair_variants._BUCKETS[0x000C4821] = (0, 3, LENGTH_BUCKETS)
-    hair_variants._HAS_TRI[0x000C4821] = True
+    hair_variants._PLAN.clear()
+    hair_variants._PLAN[0x000C4821] = hair_entry({'EditorID': 'X'}, None)
     try:
-        raw = hair_variants.hair_buckets_for(0x000C4821)
-        for index_byte in (0x01, 0x05, 0xFF):
+        for index_byte in (0x00, 0x01, 0x05, 0xFF):
             indexed = (index_byte << 24) | 0x000C4821
-            assert hair_variants.hair_buckets_for(indexed) == raw
-            assert hair_variants.hair_has_tri(indexed)
+            assert hair_variants.entry(indexed) is hair_variants._PLAN[0x000C4821]
     finally:
-        hair_variants._BUCKETS.clear()
-        hair_variants._HAS_TRI.clear()
+        hair_variants._PLAN.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -338,17 +331,16 @@ def test_clfm_clamps_out_of_range_channels():
     assert tuple(subs['CNAM']) == (0, 255, 128, 0)
 
 
-def test_usage_is_keyed_on_authored_values_only():
-    """The FormID key must be (source hair FormID, authored-length bucket).
+def test_variant_is_keyed_on_authored_values_only():
+    """A variant is a function of authored LNAM, gender and race family only.
 
-    Both halves are authored TES4 data, which is what keeps generated HDPT
+    Those are what the FormID key is built from, which keeps generated HDPT
     ids stable across machines and builds.
     """
-    a = collect_hair_usage([{'HNAM.Hair': '00027FF2',
-                             'LNAM.HairLength': '0.58'}])
-    b = collect_hair_usage([{'HNAM.Hair': '00027FF2',
-                             'LNAM.HairLength': '0.58'}])
-    assert a == b
+    e = hair_entry({'EditorID': 'MediumLength'}, None)
+    e['has_tri'] = True
+    assert (wearer_variant(e, '0.58', True, 'elves')
+            == wearer_variant(e, '0.58', True, 'elves'))
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +611,7 @@ def test_gendered_naming_and_paths():
 
 
 def test_hair_genders_honour_the_authored_restriction():
-    from asset_convert.character.hair_pipeline import hair_genders
+    from asset_convert.character.hair_plan import hair_genders
     assert hair_genders(0x00) == (False, True)      # unisex
     assert hair_genders(0x01) == (False, True)      # playable-only bit
     assert hair_genders(0x02) == (True,)            # NotMale -> female only
@@ -869,34 +861,31 @@ def test_hanging_hair_keeps_its_authored_length():
     assert np.percentile(r, 95) < 0.05
 
 
-def test_master_owned_hair_resolves_to_the_base_id():
-    """A dependent plugin cannot mint a MASTER's variant ids.
+def test_master_owned_hair_never_mints_the_masters_ids():
+    """A dependent cannot derive a MASTER's variant ids in its own id space.
 
-    The master's baked variants live in the master's converted plugin under
-    the master's derived FormIDs; deriving the same key here lands in this
-    plugin's id space, where no such record exists — a dangling PNAM.  A
-    master-owned hair therefore resolves to its base FormID, which the
-    load-order remap rewrites like any other cross-plugin reference.
+    A variant the master baked is the master's record (found by EditorID in
+    the converted master); with no converted master to ask, it falls back to
+    the base FormID the load-order remap resolves.  A variant the plan puts
+    in THIS plugin derives here.
     """
     from tes5_import.actors import hair_variants as hair_variants
     from tes5_import.actors.npc_face_mapper import _resolve_hair_part
 
     w = _FakeWriter()
     fid = 0x010C4821
-    hair_variants._BUCKETS[0x000C4821] = (0, 3)
-    hair_variants._GENDERS[0x000C4821] = (False, True)
-    hair_variants._OWN.clear()                      # NOT ours -> base id
+    e = hair_entry({'EditorID': 'MediumLength'}, None)
+    e['has_tri'] = True
+    rec = {'LNAM.HairLength': '1.0'}
+    worn = wearer_variant(e, '1.0', True, 'human')
+    hair_variants._PLAN[0x000C4821] = e
     try:
-        rec = {'LNAM.HairLength': '0.4'}
+        e['master_variants'] = {worn}
         assert _resolve_hair_part(rec, fid, 'Nord', 'Female', w) == fid
-        # the same hair defined by THIS plugin derives normally
-        hair_variants._OWN.add(0x000C4821)
-        got = _resolve_hair_part(rec, fid, 'Nord', 'Female', w)
-        assert got != fid
+        e['master_variants'], e['variants'] = set(), {worn}
+        assert _resolve_hair_part(rec, fid, 'Nord', 'Female', w) != fid
     finally:
-        hair_variants._BUCKETS.clear()
-        hair_variants._GENDERS.clear()
-        hair_variants._OWN.clear()
+        hair_variants._PLAN.clear()
 
 
 def test_hair_alpha_tests_rather_than_blends():

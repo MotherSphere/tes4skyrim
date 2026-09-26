@@ -14,8 +14,8 @@ import struct
 
 from ..base.constants import (DEFAULT_RACE, RACE_MAP, TES4_SKILL_TO_TES5,
                          TES5_SKILL_ORDER)
-from ..base.equivalents import (ATTRIBUTE_SKILL_MAP, TES4_RACE_FID_TO_EDID,
-                                VOICE_TYPE_MAP)
+from ..base.equivalents import ATTRIBUTE_SKILL_MAP, VOICE_TYPE_MAP
+from ..base.race_lookup import tes4_race_edid
 from ..base.conditions import FUNC_GET_IN_FACTION, build_or_chain, needs_origin_gate
 from ..base.text_reader import get_formid_index_offset
 from ..dialogue.morrowind_sidecar import is_tes3_export
@@ -771,10 +771,9 @@ def npc_vtyp(actor_fid: int) -> int:
 
 
 def _actor_race_edid(rec: dict) -> str:
-    """Oblivion race EditorID for an actor, FNV races included."""
+    """Oblivion race EditorID for an actor, FNV and plugin-authored races included."""
     fid = get_formid(rec, 'RNAM.Race')
-    return (fallout_race_edid(fid)
-            or TES4_RACE_FID_TO_EDID.get(fid & 0x00FFFFFF, 'Imperial'))
+    return fallout_race_edid(fid) or tes4_race_edid(fid, 'Imperial')
 
 
 def resolve_npc_race(rec: dict):

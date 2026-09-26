@@ -31,6 +31,7 @@ them does.
 - [Hair color: a generated CLFM per authored RGB](#hair-color)
 - [NAM5/NAM6/NAM7/NAM8 are all required](#required-nam-subrecords)
 - [Head parts: RNAM decides who can see the hair](#hdpt-valid-races)
+- [A plugin's own race stands in by its shared face parts](#new-races-by-face-parts)
 - [A creature race is a caster only for a castable spell](#caster-race-needs-a-castable-spell)
 - [Attack reach is per creature: reach-variant races](#reach-variant-races)
 - [Voice type resolution](#voice-resolution)
@@ -684,6 +685,10 @@ Vanilla routes its own hair exactly this way — censused over Skyrim.esm's hair
 HDPTs: every Khajiit hair uses 000A8036 (x21), every Orc 000A8032 (x43), every
 Elf 000A8024 (x36), plus Argonian 000A8039 and Dremora 000A8027.
 
+A variant for a family other than the hair's home family carries that
+family's list (`FAMILY_RNAM` in `npc.py`); see
+[Hair variants follow the wearer](asset_convert_armor.md#hair-variants-follow-the-wearer).
+
 ### NAM0 races-tri does not apply to hair
 
 `HDPT.NAM0` Part Type is 0 Race Morph, 1 Tri, 2 Chargen Morph. All 123 vanilla
@@ -700,6 +705,31 @@ cleanly (`head_fit.GROUP_MORPHS`): all five human races plus Dremora wear the
 BASE scalp (morphs <= 0.15 there), the three elf races share one shape (2.6 off
 base), Orc its own (1.5). The human mesh serves two HDPTs — the humans+vampires
 list and the one-race Dremora list, which share that base scalp.
+
+## <a id="new-races-by-face-parts"></a>A plugin's own race stands in by its shared face parts
+
+**Code:** `tes5_import/base/race_lookup.py`
+
+An NPC's Skyrim race comes from its TES4 race FormID (`TES4_RACE_FID_TO_EDID`
+-> `RACE_MAP`). A race a plugin adds has an id no table knows, and used to fall
+back to Imperial whatever it looked like. Nehrim's playable Halb-Aeterna (215
+NPCs, plus three RenMysticElf variants) are authored with Wood Elf ears, so they
+became Imperials with a human head and human-fitted hair.
+
+The authored data answers it: the new race is matched to the KNOWN races by the
+face-part meshes they author, and takes the one sharing the most paths. The
+Halb-Aeterna share `EarsWoodElf.nif` (and the mouth/teeth/tongue) with Nehrim's
+Sternling, which carries Oblivion's WoodElf FormID, so they become Wood Elves.
+When the best matches name different races — every human-eared new race ties
+across all the human races — the race keeps the Imperial fallback, so
+Alemanne1 and the other Nehrim human variants are unchanged. In
+Morrowind_ob, Dagoth Ur and the Ash Ghoul/Zombie/Slave/Vampire races are
+authored with `EarsWoodElf.nif` and become Wood Elves the same way.
+
+Only the actor's race uses it (`_actor_race_edid`, leveled-actor shells);
+`GetIsRace` on a plugin's own race is already a marker-faction test
+(`race_factions.py`), and voice types resolve from the plugin's own race
+EditorIDs first, so neither moves.
 
 ## <a id="package-order"></a>AI packages keep TES4 order
 

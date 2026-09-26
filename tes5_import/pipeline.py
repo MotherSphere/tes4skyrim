@@ -70,6 +70,7 @@ from .base.owned_records import (
 )
 from .base.equivalents import VTYP_EDID_BY_FID
 from .base.race_factions import build_race_factions
+from .base.race_lookup import register_races
 from .record_types.world import (
     set_cloud_bank_output,
 )
@@ -248,7 +249,10 @@ def _reconcile_masters(masters: list, tes4_master_names: list) -> list:
 
 
 def _register_run_tables(by_type: dict, ctx, writer) -> None:
-    """Register the tables record conversion reads: cell families, adoptable master records."""
+    """Register the tables record conversion reads: races, cell families, adoptable master records."""
+    master_races = [r for r in ((ctx.master_export or {}).values() if ctx else ())
+                    if r.get('Signature') == 'RACE']
+    register_races(master_races + list(by_type.get('RACE', ())))
     if ctx:
         writer.adoption = MasterAdoption(ctx.master_index)
     set_cell_families(by_type, ctx.master_export if ctx else None, writer,
@@ -875,8 +879,8 @@ def _prescan_leveled_actors(by_type: dict, ctx, writer, _step_done):
     _step_done('leveled actor shells')
 
 
-def _prescan_outfits_hair_skin(by_type: dict, ctx, export_dir: str):
-    """Load the item/outfit index, faction reactions, hair lengths, skin tones.
+def _prescan_outfits_hair_skin(by_type: dict, ctx, export_dir: str, writer):
+    """Load the item/outfit index, faction reactions, the hair plan, skin tones.
 
     Master exports are indexed throughout: a dependent plugin's actors
     wear their MASTER's hair and use their MASTER's races, so a
@@ -892,13 +896,15 @@ def _prescan_outfits_hair_skin(by_type: dict, ctx, export_dir: str):
 
     try:
         from .actors import hair_variants
-        hair_variants.load(getattr(ctx, 'export_dir', None) or export_dir,
-                           master_export_dirs(ctx) if ctx else ())
-        print(f"  Hair length variants: "
-              f"{sum(len(v) for v in hair_variants._BUCKETS.values())} baked "
-              f"lengths across {len(hair_variants._BUCKETS)} hair records")
+        from .record_types.npc import emit_master_hair_variants
+        plan = hair_variants.load(getattr(ctx, 'export_dir', None) or export_dir)
+        n_extra = emit_master_hair_variants(
+            writer, ctx.master_export if ctx else None)
+        print(f"  Hair variants: {sum(len(e['variants']) for e in plan.values())} "
+              f"planned across {len(plan)} hair records, {n_extra} added to "
+              f"masters' hairs")
     except Exception as _hair_exc:
-        print(f"  WARNING: hair length index unavailable: {_hair_exc}")
+        print(f"  WARNING: hair variant plan unavailable: {_hair_exc}")
 
     try:
         from .actors.npc_face_mapper import load_race_skin_tones, RACE_SKIN_RGB
@@ -1158,7 +1164,7 @@ def _run_prescans(st: ImportState, all_records: list, num_new_masters: int,
     st.pack_plan, st.pack_ctx, st._script_vars = _prescan_package_plan(
         by_type, ctx, writer, st.fid_to_edid, _step_done)
     _prescan_leveled_actors(by_type, ctx, writer, _step_done)
-    _prescan_outfits_hair_skin(by_type, ctx, export_dir)
+    _prescan_outfits_hair_skin(by_type, ctx, export_dir, writer)
 
 
 def import_plugin(export_dir: str, output_path: str, masters: list = None,

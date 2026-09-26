@@ -76,7 +76,7 @@ _OB_BODY_DIR = paths.EXPORT / 'Oblivion.esm' / 'meshes' / 'characters' / '_male'
 _OB_CHAR_DIR = _OB_BODY_DIR.parent
 
 #: Oblivion's head group: the head and its separate ears mesh.
-_OB_HEAD_PARTS = (Path('imperial') / 'headhuman.nif', Path('imperial') / 'earshuman.nif')
+_OB_HEAD_PARTS = (head_fit.OB_HEAD_MESH, Path('imperial') / 'earshuman.nif')
 
 #: gender -> {wrap group: Oblivion body part NIFs}, grouped by Skyrim target surface.
 _OB_BODY_SETS = {

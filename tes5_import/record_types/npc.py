@@ -7,6 +7,10 @@ See: docs/commentary/tes5_import_actors.md
 
 import struct
 
+from asset_convert.character.hair_plan import (mesh_name_family, output_model_path,
+                                               output_tri_path, variant_edid,
+                                               variant_tag)
+from ..actors import hair_variants
 from ..base.constants import TES5_SKILL_ORDER
 from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
 from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
@@ -420,13 +424,10 @@ def _hdpt_valid_races(edid: str) -> int:
 #: Human-named styles Oblivion did not tag with a race token.
 _HUMAN_HAIR_TOKENS = ('nord', 'imperial', 'breton')
 
-#: Generic hair, once per scalp group: (formid key, mesh group, RNAM FLST).
-HDPT_GROUPS = (
-    ('',  None,     HDPT_RNAM_HUMANS),
-    ('D', None,     HDPT_RNAM_DREMORA),
-    ('E', 'elves',  HDPT_RNAM_ELVES),
-    ('O', 'orc',    HDPT_RNAM_ORC),
-)
+#: Hair head family -> the Valid Races FLST its variants carry (see hair_plan).
+FAMILY_RNAM = {'human': HDPT_RNAM_HUMANS, 'dremora': HDPT_RNAM_DREMORA,
+               'elves': HDPT_RNAM_ELVES, 'orc': HDPT_RNAM_ORC,
+               'khajiit': HDPT_RNAM_KHAJIIT, 'argonian': HDPT_RNAM_ARGONIAN}
 
 #: CLFM.FNAM 'Playable' -- vanilla hair colors are all playable.
 _CLFM_PLAYABLE = 1
@@ -465,13 +466,13 @@ def hair_color_formid(writer, r: int, g: int, b: int) -> int:
 def hair_variant_formid(writer, source_fid: int, bucket: int,
                         female: bool, base_female: bool,
                         group: str = '') -> int:
-    """The HDPT FormID for one (hair, bucket, gender, race group) variant.
+    """The HDPT FormID for one (hair, length step, gender, family) variant.
 
-    The BASE variant -- bucket 0 of the hair's base gender in the human
-    group -- keeps the SOURCE FormID, so an NPC whose LNAM is 0 resolves
+    The BASE variant -- step 0 of the hair's base gender in its home family
+    (tag '') -- keeps the SOURCE FormID, so an NPC whose LNAM is 0 resolves
     straight through its HNAM.  Every other variant derives from authored
-    data only: the masked source id, the LNAM bucket, the gender ('F') and
-    the race group tag ('D'/'E'/'O') -- see HDPT_GROUPS.
+    data only: the masked source id, the step, the gender ('F') and the
+    family tag (hair_plan.FAMILY_TAG).
     """
     if bucket <= 0 and female == base_female and not group:
         return source_fid
@@ -484,62 +485,50 @@ def hair_variant_formid(writer, source_fid: int, bucket: int,
 
 
 def convert_HAIR(rec: dict, *, writer=None) -> bytes:
-    """HAIR -> HDPT (Type 3 / Hair), one per (length, gender) variant.
+    """HAIR -> HDPT (Type 3 / Hair): the base record, side-emitting every planned variant.
 
-    Returns the base record (unmorphed mesh, base gender, source FormID) and
-    side-emits an HDPT for every other variant the plugin's NPCs ask for:
-
-    LENGTH is baked into the mesh per quantized bucket, and each allowed
-    GENDER gets its own fitted mesh and HDPT, as vanilla genders every
-    hairstyle. Generic hair is emitted once per race GROUP (HDPT_GROUPS).
-
-    See: docs/commentary/tes5_import_actors.md#hdpt-valid-races
+    See: docs/commentary/asset_convert_armor.md#hair-variants-follow-the-wearer
     """
-    from asset_convert.character.hair_pipeline import (fit_group_lock, hair_genders,
-                                             output_model_path,
-                                             output_tri_path, variant_edid)
-    from asset_convert.character.head_fit import fit_race_for_hair
-    from ..actors.hair_variants import hair_buckets_for, hair_has_tri
+    e = hair_variants.entry_for(rec)
+    if writer is not None:
+        emit_hair_variants(rec, e, writer)
+    return _hair_hdpt(rec, e, e['base'], 0)
 
-    model = get_str(rec, 'Model.MODL')
-    source_fid = get_formid(rec, 'FormID')
-    edid = get_str(rec, 'EditorID')
-    want_tri = bool(model) and hair_has_tri(source_fid)
-    generic = (fit_race_for_hair(edid) is None
-               and fit_group_lock(edid) is None)
-    groups = HDPT_GROUPS if generic else (('', None, 0),)
 
-    genders = hair_genders(get_int(rec, 'DATA.Flags'))
-    base_female = genders[0]
+def emit_hair_variants(rec: dict, e: dict, writer) -> int:
+    """Add an HDPT for each planned variant of a hair but its base; returns how many."""
+    fid = get_formid(rec, 'FormID')
+    extra = sorted(v for v in e['variants'] if v != e['base'])
+    for v in extra:
+        vid = hair_variant_formid(writer, fid, v.bucket, v.female,
+                                  e['base'].female, variant_tag(v, e))
+        writer.add_record('HDPT', _hair_hdpt(rec, e, v, vid))
+    return len(extra)
 
-    def build(bucket, female, tag, name_grp, rnam, fid_override=0):
-        """Pack one variant's HDPT for this hair."""
-        edid_grp = {'E': 'elves', 'O': 'orc', 'D': 'dremora'}.get(tag)
-        return _build_hdpt(
-            rec,
-            model_override=output_model_path(model, bucket, female, name_grp)
-            if model else '',
-            tri_path=output_tri_path(model, bucket, female, name_grp)
-            if want_tri else '',
-            edid_override=variant_edid(edid, bucket, female, edid_grp),
-            fid_override=fid_override,
-            female=female,
-            rnam_override=rnam)
 
-    base = build(0, base_female, '', None, groups[0][2])
-    if writer is None:
-        return base
+def emit_master_hair_variants(writer, master_export) -> int:
+    """Emit the HDPTs this plugin adds to its masters' hairs; returns how many."""
+    recs = {get_formid(r, 'FormID') & 0x00FFFFFF: r
+            for r in (master_export or {}).values() if r.get('Signature') == 'HAIR'}
+    return sum(emit_hair_variants(recs[fid], e, writer)
+               for fid, e in hair_variants.master_extras().items() if fid in recs)
 
-    for female in genders:
-        for bucket in hair_buckets_for(source_fid):
-            for tag, name_grp, rnam in groups:
-                if bucket <= 0 and female == base_female and not tag:
-                    continue
-                vid = hair_variant_formid(writer, source_fid, bucket,
-                                          female, base_female, tag)
-                writer.add_record('HDPT', build(bucket, female, tag,
-                                                name_grp, rnam, vid))
-    return base
+
+def _hair_hdpt(rec: dict, e: dict, v, fid: int) -> bytes:
+    """Pack the HDPT of one planned hair variant (fid 0 keeps the source FormID)."""
+    mesh = mesh_name_family(v, e)
+    home = v.family == e['home']
+    model = e['model']
+    return _build_hdpt(
+        rec,
+        model_override=(output_model_path(model, v.bucket, v.female, mesh)
+                        if model else ''),
+        tri_path=(output_tri_path(model, v.bucket, v.female, mesh)
+                  if model and e['has_tri'] else ''),
+        edid_override=variant_edid(e['edid'], v.bucket, v.female,
+                                   None if home else v.family),
+        fid_override=fid, female=v.female,
+        rnam_override=0 if home and not e['generic'] else FAMILY_RNAM[v.family])
 
 
 def _build_hdpt(rec: dict, *, model_override: str = '',

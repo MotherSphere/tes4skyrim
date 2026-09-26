@@ -89,6 +89,8 @@ from ..base.equivalents import (
     map_eye_formid,
     resolve_eye_by_fid,
 )
+from asset_convert.character.hair_plan import variant_edid, variant_tag
+from . import hair_variants
 from ..base.text_reader import get_formid, get_str
 from ..base.writer import pack_formid_subrecord, pack_subrecord
 
@@ -389,59 +391,36 @@ def _resolve_eyes_hdpt(rec: dict, race_edid: str, gender: str) -> int:
 
 def _resolve_hair_part(rec: dict, hair_fid: int, race_edid: str,
                        gender: str, writer=None) -> int:
-    """The HDPT FormID for this NPC's hair at its authored length + gender.
+    """The HDPT FormID for this NPC's hair: its length, gender and race's head family.
 
-    convert_HAIR emits one HDPT per (length bucket, gender) — each mesh is
-    fitted to that gender's Skyrim head — so the NPC must name the variant
-    matching its own gender and LNAM.  An NPC wearing a hair authored for the
-    OTHER gender only (Oblivion allowed that) gets the gender that exists.
-    The base variant (base gender, bucket 0) keeps the source FormID, which
-    the generic load-order remap rewrites like any other reference.
+    A variant this plugin emits derives here; one a master's plan baked is that
+    master's record, found by EditorID in the converted master; anything else
+    falls back to the base FormID the load-order remap resolves.
+    record_types.npc is imported here because it imports this module.
+
+    See: docs/commentary/asset_convert_armor.md#hair-variants-follow-the-wearer
     """
-    from . import hair_variants
     from ..record_types.npc import hair_variant_formid
-
-    bucket = hair_variants.bucket_for_npc(rec)
-    if writer is None:
+    e = hair_variants.entry(hair_fid)
+    if writer is None or e is None:
         return hair_fid
-    if not hair_variants.is_own_hair(hair_fid):
-        # A master-owned hair: its variants live in the MASTER's converted
-        # plugin under the MASTER's derived ids, which cannot be minted here.
-        # The base FormID is a real reference the load-order remap resolves.
-        return hair_fid
-
-    genders = hair_variants.genders_for(hair_fid)
-    female = (gender == 'Female')
-    if female not in genders:
-        female = genders[0]
-    if bucket > 0 and bucket not in hair_variants.hair_buckets_for(hair_fid):
-        bucket = 0
-
-    # RACE-GROUP variant: the in-game head is the base mesh PLUS the race's
-    # races-tri morph, so a GENERIC hair is baked per race group and the NPC
-    # must reference the group matching its (mapped) race — 'E' elves,
-    # 'O' orcs, 'D' dremora, '' the shared human scalp.  Race-NAMED hair has
-    # a single, already-correctly-fitted variant (no tag).
-    from asset_convert.character.hair_pipeline import fit_group_lock
-    from asset_convert.character.head_fit import fit_race_for_hair
-    edid = hair_variants.hair_edid(hair_fid)
-    group = ''
-    if fit_race_for_hair(edid) is None and fit_group_lock(edid) is None:
-        group = _HAIR_GROUP_BY_TES4_RACE.get(race_edid, '')
-    return hair_variant_formid(writer, hair_fid, bucket,
-                               female, base_female=genders[0], group=group)
+    v = hair_variants.npc_variant(e, rec, race_edid, gender)
+    if v in e['variants']:
+        return hair_variant_formid(writer, hair_fid, v.bucket, v.female,
+                                   e['base'].female, variant_tag(v, e))
+    if v in e['master_variants']:
+        return _master_hdpt(writer, e, v) or hair_fid
+    return hair_fid
 
 
-# TES4 race EditorID -> hair race-group tag, following RACE_MAP: GoldenSaint
-# maps to the HighElf race and DarkSeducer to DarkElf, so they wear the elf
-# scalp; Sheogorath is Imperial; everything unlisted (humans, vampires,
-# khajiit, argonian) wears the base scalp.
-_HAIR_GROUP_BY_TES4_RACE = {
-    'HighElf': 'E', 'WoodElf': 'E', 'DarkElf': 'E',
-    'GoldenSaint': 'E', 'DarkSeducer': 'E',
-    'Orc': 'O',
-    'Dremora': 'D', 'SEDremora': 'D',
-}
+def _master_hdpt(writer, e: dict, v) -> int:
+    """A converted master's HDPT for a variant its plan baked, by EditorID; 0 if none."""
+    adoption = getattr(writer, 'adoption', None)
+    if adoption is None:
+        return 0
+    family = None if v.family == e['home'] else v.family
+    return adoption.master_index.find_by_edid(
+        b'HDPT', variant_edid(e['edid'], v.bucket, v.female, family))
 
 
 def build_pnam_subs(rec: dict, race_edid: str, gender: str = 'Male',

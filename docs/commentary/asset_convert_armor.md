@@ -95,6 +95,78 @@ again, once the vertex positions are in Skyrim skeleton space — the section
 bounding boxes must localise the armour hole in post-retarget coordinates,
 including arm openings that shift ~20 z units.
 
+## Hair variants follow the wearer
+<a id="hair-variants-follow-the-wearer"></a>
+
+**Code:** `asset_convert/character/hair_plan.py` (the plan both stages read),
+`_plan_jobs` in `hair_pipeline.py`, `_resolve_hair_part` in
+`tes5_import/actors/npc_face_mapper.py`, `convert_HAIR` in
+`tes5_import/record_types/npc.py`
+
+A hair variant is **(length step, gender, head family)**, and the family is the
+**wearer's**, from the NPC's race (`RACE_FAMILY`). It used to come from the
+hair's EditorID: a race-named hair (`ElfPonytail`, `HighElfpony`) was baked once,
+fitted to its named race's head, and every wearer got that one mesh. Oblivion
+and Nehrim give those hairs to other races constantly — measured 268 of 1,448
+Oblivion NPCs and 621 of 1,584 Nehrim NPCs on race-named hair fitted for a
+different head. Rendered on the head he actually has, Nehrim's Celebro (human,
+`HighElfpony`) showed skin on **38%** of his hair's pixels against 0.24% on the
+elf head it was fitted to (`tools/nif/head_fit_metrics.py --views`).
+
+Only what is needed is baked:
+
+- every (step, gender, family) an NPC of this plugin wears;
+- each hair's base variant (step 0, base gender, home family), which keeps the
+  source FormID;
+- step 0 for every gender and family of the playable races whose authored RACE
+  hair list (`Hair[i]`) offers the hair, so the race menu never lists a hair
+  with no mesh for that head.
+
+A hair with no .tri has no length morph, so its NPCs all wear step 0. Lengths
+are quantized to **4 steps** (was 8). Measured mesh counts, before -> after:
+Oblivion 721 -> 410, Nehrim 1,547 -> 603, Fallout NV 1,074 -> 61.
+
+The **home family** (the race the EditorID names, else human) only decides
+naming: its variants keep the unsuffixed file name, the unsuffixed EditorID and
+the FormID key without a family tag, so a generic hair's human variants and a
+race-named hair's own-race variants keep the ids they always had. Other
+families add `__hu/__ev/__or/__kh/__ar` to the mesh, `Hum/Elf/Orc/Dre/Kha/Arg`
+to the EditorID and `H/E/O/D/K/A` to the FormID key. Dremora wear the human
+mesh under their own HDPT.
+
+**Dependents bake only what their master lacks.** A hair first defined by a
+master (or overridden here) takes the master's plan as given: an NPC wearing a
+variant the master baked points at the master's HDPT, found by EditorID in the
+converted master (`master_index.find_by_edid`); a variant the master never
+baked is baked and emitted by the dependent itself. Before, every master-owned
+hair resolved to its base mesh whatever the NPC's length or race.
+
+Old variant files a previous build wrote but the plan no longer asks for are
+deleted from the plugin's hair folder on the next hair bake.
+
+## Each game's hair is fitted from its own head
+<a id="hair-source-head"></a>
+
+**Code:** `source_heads` in `hair_plan.py`, `register_source_pack` and
+`relaxed_deltas` in `head_fit.py`, `_fit_blocks_to_head` in `hair_pipeline.py`
+
+The shipped fit maps **Oblivion's** head (`OB_HEAD_MESH`) onto Skyrim's. Fallout
+NV hair was pushed through it as if authored on that head, but Fallout's scalp
+sits 0.61 inside Oblivion's on average (p10 -2.01, p90 +1.67, max 3.03 units),
+so shipped `hairbase` had its front hairline sunk under the forehead (3.1% of
+hair pixels showing skin) while the crown and back floated 1.2-1.5 units off.
+
+The source head is the one the plugin's playable races author
+(`MalePart[0]`/`FemalePart[0]` on Fallout, `FacePart[0]` on Oblivion), most
+common first. When it is not the fit's own head, the bake builds a field from it
+onto the Skyrim target (`relaxed_deltas`, the same steps the shipped field and
+the beast race packs use) and fits through it exactly like a race pack; it
+builds in 0.25 s, once per worker. Nehrim's Halb-Aeterna heads (`Ren_Head001/2`)
+match Oblivion's within 0.07 over the scalp, so Nehrim keeps the shipped field.
+
+The generated field npz carries an `hf_v4` marker; the loader refuses a field
+without it, so a stale npz never feeds the runtime.
+
 ## One bake per distinct input, not one per output name
 <a id="hair-bake-sharing"></a>
 
