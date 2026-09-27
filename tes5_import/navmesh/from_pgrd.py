@@ -97,6 +97,7 @@ from ..base.navmesh_pins import (WELD_TOLERANCE, apply_cuts, cell_key,
                                  cuts_for, digest, pins_for, plugin_of,
                                  welds_for)
 from ..base.text_reader import get_int, get_float, get_str, get_formid
+from .lookup_grid import build_navmesh_grid
 from .world import base_fid
 from ..base.writer import pack_subrecord, pack_string_subrecord
 
@@ -219,21 +220,6 @@ def compute_adjacency(tris: list) -> list:
             adj[ti][si] = tj
             adj[tj][sj] = ti
     return [tuple(a) for a in adj]
-
-
-def build_navmesh_grid(verts, tris, min_x, min_y, max_x, max_y, divisor):
-    """Bucket triangle indices into a divisor×divisor grid by centroid."""
-    g = divisor
-    span_x = max_x - min_x if max_x > min_x else 1.0
-    span_y = max_y - min_y if max_y > min_y else 1.0
-    grid = [[] for _ in range(g * g)]
-    for ti, (v0, v1, v2) in enumerate(tris):
-        cx = (verts[v0][0] + verts[v1][0] + verts[v2][0]) / 3.0
-        cy = (verts[v0][1] + verts[v1][1] + verts[v2][1]) / 3.0
-        gx = min(max(int((cx - min_x) / span_x * g), 0), g - 1)
-        gy = min(max(int((cy - min_y) / span_y * g), 0), g - 1)
-        grid[gy * g + gx].append(ti)
-    return grid
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ What a format or contract IS. Stable; no dates, no status.
 | [havok_contact_hook.md](reference/havok_contact_hook.md) | The engine's contact callback: classes, slot 8, stable IDs |
 | [item_swap_table.md](reference/item_swap_table.md) | Oblivion → Skyrim Item Swap Table (MISC + Ingredients/Food) |
 | [morrowind_dialogue_format.md](reference/morrowind_dialogue_format.md) | TES3 DIAL/INFO export vocabulary the Morrowind runtime reads |
+| [navmesh_engine_contracts.md](reference/navmesh_engine_contracts.md) | How the pathfinder reads NVNM: neighbour slots, point lookup, lookup grid, clearance |
 | [package_ai_contracts.md](reference/package_ai_contracts.md) | PACK / AI Package & CTDA Engine Contracts |
 | [pipeline.md](reference/pipeline.md) | Pipeline Reference — orchestration, caching, layout, export format |
 | [prior_art_php_scriptconverter.md](reference/prior_art_php_scriptconverter.md) | PHP ScriptConverter (Skyblivion) — Comprehensive Analysis |

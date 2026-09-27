@@ -51,8 +51,8 @@ import struct
 
 from ..base.tes5_reader import REC_HDR, decompress, subrecords
 from ..base.writer import pack_subrecord, pack_string_subrecord
+from .lookup_grid import build_navmesh_grid
 from .from_pgrd import (
-    build_navmesh_grid,
     choose_divisor,
     pack_navm_record,
     PATHING_CELL_CRC,

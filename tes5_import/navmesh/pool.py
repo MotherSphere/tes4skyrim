@@ -521,7 +521,7 @@ def gather_navm_jobs(by_type: dict, door_fids: set = None,
 #: Cannot reach the cached payload; see #the-tag-hashes-geometry-only.
 _TAG_EXCLUDE = frozenset({
     'edge_links.py', 'navi.py', 'split.py', 'cache_audit.py', 'pool.py',
-    'worker.py', '__init__.py',
+    'worker.py', '__init__.py', 'lookup_grid.py',
 })
 
 #: Native SOURCES deciding cell geometry; hashed with the Python, never the .pyd.

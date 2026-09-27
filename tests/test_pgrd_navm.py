@@ -23,6 +23,7 @@ pytest.importorskip("numpy")
 pytest.importorskip("scipy")
 
 from tes5_import.navmesh import from_pgrd as p2n
+from tes5_import.navmesh.lookup_grid import build_navmesh_grid
 from tes5_import.navmesh.navi import build_navi_record
 
 
@@ -159,6 +160,17 @@ def test_all_triangles_carry_found_flag():
                           is_exterior=False)
     d = _decode_nvnm(nvnm)
     assert d['flags'][0] & p2n._TRI_FLAG_FOUND
+
+
+def test_lookup_grid_lists_a_triangle_in_every_cell_it_overlaps():
+    """A long triangle is in both cells it crosses; a cell it misses lacks it.
+
+    See: docs/reference/navmesh_engine_contracts.md#the-lookup-grid
+    """
+    verts = [(0.0, 0.0, 0.0), (190.0, 10.0, 0.0), (10.0, 20.0, 0.0),
+             (150.0, 150.0, 0.0), (160.0, 150.0, 0.0), (150.0, 160.0, 0.0)]
+    grid = build_navmesh_grid(verts, [(0, 1, 2), (3, 4, 5)], 0.0, 0.0, 200.0, 200.0, 2)
+    assert grid == [[0], [0], [], [1]]
 
 
 def test_water_flag_set_below_water_height():
