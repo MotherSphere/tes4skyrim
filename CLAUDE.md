@@ -292,6 +292,7 @@ comes from what actually solved 46 recent bugs
   | `tes5_import/` (records, navmesh, packages, dialogue) | `--import-only` |
   | `script_convert/` | `--scripts-only` (compiles .psc → .pex) |
   | `asset_convert/nif/nif_converter.py`, collision, skin | `--meshes-only` |
+  | `asset_convert/havok/` (creature skeleton, behavior, ragdoll, mesh) | `--creatures-only --only <folder>...` (folders under `meshes/creatures/`; drop `--only` for a change every creature or FNV gun needs) |
   | `spt_*` | `--speedtrees-only` |
   | sound conversion | `--sounds-only` |
   | LOD | `tools/release/create_lod.py --worldspaces <EDID>` |
@@ -304,7 +305,7 @@ comes from what actually solved 46 recent bugs
   Each ships the same-named `TES4Polyfill.pex`; installed together, one game's
   copy overrides the other's, so a stale copy breaks every game's newer calls.
 
-  Several areas means several stages. Other flags: `--creatures-only`,
+  Several areas means several stages. Other flags:
   `--extract-only`, `--prune-textures-only`, `--pack-zip-only`. Report what you
   built and any failures verbatim; if a stage can't be run, say which and why.
 - 🛑 **`-f` takes the plugin's filename, never the mod or folder name:**
