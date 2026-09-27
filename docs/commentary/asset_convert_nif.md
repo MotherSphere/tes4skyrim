@@ -563,6 +563,28 @@ is defensive, for plugins whose exporter did not follow the convention.
 `None` means no accum root, or one whose authored transform is identity, where
 the pose is a no-op either way.
 
+**At rest the root rotation moves to NonAccum** (`_bake_accum_root_pose`).
+When the accum root is the FILE root, its entry is dropped and its identity pose
+is baked onto the root node. NonAccum's rest transform is identity; the real
+pose exists only as its frame-0 key, which applies only while a sequence plays.
+A mesh with no load sequence (see `_start_state_id` in `hkx_animobject.py`)
+starts in the graph's Rest state, plays nothing, and showed the bare rest pose,
+so its authored rotation was lost. Nehrim's torch posts (`cplog01`, 168.6°) lay
+tipped over with their braziers floating; confirmed fixed in game.
+
+Census over the Oblivion and Nehrim exports: **127** meshes bake a root pose over
+a non-identity root rotation (59 Oblivion, 68 Nehrim). In **all 127**, NonAccum's
+rest is identity and `root · NonAccum rest` equals NonAccum's frame 0 exactly, so
+moving the rotation changes nothing during playback. 29 of them (non-menu) start
+in Rest and looked wrong in game: the cave logs, swing-blade traps (40°), the
+harrada plants, claw switch, mine and spike traps, root gate, blacksap tank, and
+the Open/Close doors (benirus, Leyawiin middle/upper interior, rootskin). The rest
+play Idle/SpecialIdle at load and never showed the rest pose.
+
+A pyffi `Matrix33` is the transpose of the column-vector quaternion matrix;
+`_apply_rotation` writes that layout. No mesh in either export has a
+non-identity dataless root pose, so the layout fix changed no output.
+
 ## Sequence controller retargeting
 <a id="sequence-controller-retargeting"></a>
 

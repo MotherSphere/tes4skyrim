@@ -3365,6 +3365,35 @@ class TestAmbientSequences:
                 f'{rel}: {name} plays at {got[name]:.2f} deg, '
                 f'TES4 plays it at {want[name]:.2f} deg')
 
+    @pytest.mark.parametrize('rel', [
+        'dungeons/caves/cplog01.nif',
+        'dungeons/ayleidruins/interior/traps/artrapswingblade01.nif',
+    ])
+    @pytest.mark.skipif(not EXPORT_MESHES.exists(), reason='Export meshes not available')
+    def test_rest_world_rotation_matches_tes4(self, tmp_path, rel):
+        """A mesh whose sequence never plays at load keeps the root's authored rotation at rest.
+
+        Oblivion honours the root rotation; Skyrim ignores it, so it must survive below the root.
+        See: docs/commentary/asset_convert_nif.md#accum-root-classification
+        """
+        src = EXPORT_MESHES / rel
+        if not src.exists():
+            pytest.skip(f'{src} not found')
+        dst = tmp_path / 'out.nif'
+        convert_nif(str(src), str(dst))
+        _, sd = read_nif(src)
+        _, dd = read_nif(dst)
+        sroot, droot = sd.roots[0], dd.roots[0]
+        want = {bytes(b.name): (b.get_transform(sroot) * sroot.get_transform()).get_matrix_33()
+                for b in sroot.tree() if isinstance(b, NifFormat.NiTriBasedGeom)}
+        got = {bytes(b.name): b.get_transform(droot).get_matrix_33()
+               for b in droot.tree() if isinstance(b, NifFormat.NiTriBasedGeom)}
+        assert set(want) & set(got), 'no comparable geometry'
+        for name in set(want) & set(got):
+            diff = max(abs(getattr(want[name], f'm_{i}{j}') - getattr(got[name], f'm_{i}{j}'))
+                       for i in (1, 2, 3) for j in (1, 2, 3))
+            assert diff < 1e-3, f'{rel}: {name!r} rests {diff:.3f} off its TES4 rotation'
+
 
 _PALACE_FONT = 'architecture/palace/interior/palacefont01.nif'
 
