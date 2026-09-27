@@ -716,6 +716,58 @@ End
         assert ('TES4Polyfill.SafeGameModeGate(Self) || '
                 'TES4Polyfill.SafeGameModeGate(TES4_Holder)') in result
 
+    def test_carried_menumode_runs_from_the_equip_event(self, converter):
+        """A carried item's bare MenuMode runs in-event while a menu is open.
+
+        See: docs/commentary/script_convert.md#carried-menumode-runs-in-event
+        """
+        source = """ScriptName DiaryScript
+short step
+Begin OnEquip player
+  set step to 1
+End
+Begin MenuMode
+  if step != 1
+    return
+  endif
+  set step to 2
+End
+"""
+        result = converter.convert_standalone('DiaryScript', source,
+                                              'ObjectReference', 'DiaryScript')
+        equipped = result.split('Event OnEquipped(', 1)[1].split('EndEvent', 1)[0]
+        assert equipped.rstrip().endswith('TES4_MenuPasses()')
+        update = result.split('Event OnUpdate()', 1)[1].split('EndEvent', 1)[0]
+        assert 'TES4_PollPass()' in update
+        passes = result.split('Function TES4_PollPass()', 1)[1].split('EndFunction', 1)[0]
+        assert 'RegisterForSingleUpdate' not in passes
+        loop = result.split('Function TES4_MenuPasses()', 1)[1].split('EndFunction', 1)[0]
+        assert 'Utility.WaitMenuMode(' in loop
+        assert 'RegisterForSingleUpdate' not in loop
+
+    def test_plain_poll_keeps_its_body_in_onupdate(self, converter):
+        """A GameMode-only item has no menu loop and no pass function."""
+        source = "ScriptName ItemScript\nBegin GameMode\n  set x to 1\nEnd\n"
+        result = converter.convert_standalone('ItemScript', source,
+                                              'ObjectReference', 'ItemScript')
+        assert 'TES4_PollPass' not in result
+        assert 'TES4_MenuPasses' not in result
+
+    def test_message_drops_a_repeat_still_on_screen(self, converter):
+        """A script's Message goes through TES4_Notify; a fragment's stays Debug.Notification.
+
+        See: docs/commentary/script_convert.md#message-rewrites-one-line
+        """
+        source = 'ScriptName NagScript\nBegin GameMode\n  Message "Level up!"\nEnd\n'
+        result = converter.convert_standalone('NagScript', source,
+                                              'ObjectReference', 'NagScript')
+        assert 'TES4_Notify("Level up!")' in result
+        helper = result.split('Function TES4_Notify(String asText)', 1)[1]
+        assert 'TES4_since >= 3.33' in helper
+        assert 'TES4_since < 0.0' in helper
+        fragment = '\n'.join(converter.convert_fragment('Message "Done"', 'Quest'))
+        assert 'Debug.Notification("Done")' in fragment
+
     def test_book_read_while_carried_runs_the_read_hook(self, converter):
         """A book's opening OnActivate also runs from OnRead for a carried
         read: the opening Activate is dropped, a flag skips the read the
