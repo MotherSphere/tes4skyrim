@@ -1815,12 +1815,13 @@ assignment to a field whose name says it selects the next talker.
 Nehrim 2620/2620 and Oblivion 15959/15959 now compile. The failures clustered
 into a few generic causes, all fixed in the converter rather than per-script:
 
-- **Comma-form RECEIVER on a zero-arg command.** `StopCombat, Player` /
-  `IsInCombat, Player == 1` name the *receiver*, not an argument — the comma
-  spelling of `Player.StopCombat`. Treating it as an argument gave `IsInCombat(Player)`
-  ("function takes 0 parameters not 1") or dropped the token and acted on the
-  WRONG ACTOR. `_ZERO_ARG_REF_FUNCTIONS` (derived from the empty-argument `ref.`
-  rows of `docs/reference/skyrim_commands.md`) drives the promotion. **When widening the
+- **Comma-form token on a zero-arg command.** Passing `StopCombat, Player`'s
+  `Player` as an argument gave "function takes 0 parameters not 1". The fix
+  here promoted it to the RECEIVER, which the bytecode later disproved: the
+  statement form now DISCARDS it
+  ([why](#comma-argument-is-discarded)). `_ZERO_ARG_REF_FUNCTIONS` (derived from
+  the empty-argument `ref.` rows of `docs/reference/skyrim_commands.md`) names
+  the commands. **When widening the
   bool-comparison regex, keep the `\b` and the mandatory separator** — without
   them `GetDead` matched the prefix of `GetDeadCount` and split off `Count` as an
   argument across 28 scripts.
@@ -3078,9 +3079,9 @@ correct axis, which made the old path's output the outlier.
 ## 10. `GetLOS` was listed as taking no arguments — FIXED (2026-08-28)
 <a id="10-getlos-was-listed-as"></a>
 
-`_ZERO_ARG_REF_FUNCTIONS` exists so that `StopCombat, Player` resolves to
-`Player.StopCombat()` — for a command that takes nothing, the token after a
-leading comma is the RECEIVER, not an argument.
+`_ZERO_ARG_REF_FUNCTIONS` names the commands that take nothing, so the token
+after a leading comma (`StopCombat, Player`) is not passed as an argument
+([what happens to it](#comma-argument-is-discarded)).
 
 `getlos` was in that set, and it takes a TARGET: `GetLOS, Player` asks
 whether **Self** can see the player. Promoting the argument inverted the
@@ -3099,6 +3100,87 @@ so the promotion never fired and the bad table entry was inert.
 
 **Fixed** by removing `getlos` from the set. Audited the other 61 entries
 against their argument counts; it was the only one wrong.
+
+---
+
+## A zero-argument command DISCARDS its comma-led token
+<a id="comma-argument-is-discarded"></a>
+
+**Code:** `script_convert/emit/dispatch.py` (`_promote_receiver`)
+
+`StopCombat, Player` used to become `Game.GetPlayer().StopCombat()`, on the
+theory that the comma names the receiver. Oblivion's compiled bytecode says
+otherwise. In `SchattenrufAlptraumTrollScript` (Nehrim.esm SCDA), both
+`StopCombat, Player` lines compile to `17 10 00 00`: opcode 0x1017 with no
+parameters and no `1C` reference prefix. The explicit
+`"SchattenrufAlptraumTroll01Ref".StopCombat` compiles to `1C 00 01 00 17 10
+00 00`. So the compiler throws `Player` away, and the command acts on the
+calling reference.
+
+The wrong receiver ended the PLAYER's combat and left the rope troll fighting
+forever, so its travel packages never ran.
+
+Conditions compile differently, and their rule is still the receiver
+promotion. `IsInCombat, Player == 1` (MQ06KreaturMelvinScript) and
+`GetDead KimFermaleRef == 1` (MQ23Trigger01Script) compile the command with
+no receiver prefix, then push the ref as a stray `Z` operand before `1 ==`.
+What Oblivion's evaluator returns for that stack is not settled, so
+`promote_subject` is unchanged.
+
+## StopCombat undoes what ForceCombat added
+<a id="stopcombat-undoes-forcecombat"></a>
+
+**Code:** `script_convert/commands.py` (`stop_combat`),
+`TES4Polyfill.EndCombat`
+
+`TES4Polyfill.ForceCombat` makes a TES4 StartCombat stick. It puts the
+attacker in `WIPlayerEnemyFaction` (for a player target) or the
+`TES4ForceCombatAttackers`/`Victims` pair, and raises its Aggression to 1. A
+plain Skyrim `StopCombat` left those memberships in place, so the actor
+re-engaged as soon as it saw its target again. Every StopCombat now goes
+through `EndCombat`, which removes the actor from its ATTACKER memberships
+(`TES4ForceCombatAttackers` and `WIPlayerEnemyFaction`) and then calls
+`StopCombat`. The raised Aggression stays; at tier 1 it attacks only enemies.
+
+Victims membership is left alone. In TES4, `B.StopCombat` stops B, while the
+actor attacking B fights on. Removing B from Victims would take away its
+attacker's hostility and end a fight Oblivion continues. The first version
+removed Victims too, and the blast-radius review caught it.
+
+## `SetAV Speed` becomes a SpeedMult ratio
+<a id="speed-write-becomes-speedmult"></a>
+
+**Code:** `script_convert/commands.py` (`_speed_write`),
+`script_convert/cross_ref.py` (`walk_speed_formula`),
+`TES4Polyfill.SetTES4Speed`
+
+TES4 walk speed is `Min + (Max - Min) * Speed / 100`. For creatures the
+GMSTs are `fMoveCreatureWalkMin/Max`, for NPCs `fMoveCharWalkMin/Max`. Nehrim
+overrides the creature pair to 60/160. The converted actor already moves at
+its authored Speed, so a write to Speed becomes
+`SpeedMult = 100 * walk(new) / walk(authored)`.
+
+Example: the rope troll is authored at Speed 10, and its script writes 19 on
+the rope, so it gets SpeedMult ≈ 113. A SpeedMult change only applies when
+carry weight changes (CK wiki, Actor Value List), so the polyfill nudges
+CarryWeight by +0.1 and then -0.1.
+
+Reads (`GetAV`/`GetBaseAV Speed`) go through `TES4Polyfill.GetTES4Speed`,
+the inverse of the write computed from the current SpeedMult, and they use
+the same baseline as the write. A regression proved this is necessary. With
+real writes but reads still returning `ATTRIBUTE_STUB_VALUE` (100), Oblivion's
+`RavenCamoranScript` saved `realSpeed = 100` instead of his authored 33. MQ05
+stage 85 then "restored" him to a SpeedMult of about 126 for good, and the
+Oghma Infinium's `player.GetBaseAV Speed + 10` did the same to the player.
+
+The player's baseline stays `ATTRIBUTE_STUB_VALUE`. A Skyrim character has no
+Speed attribute, so gates such as `pcSpeed >= 90` keep falling open as every
+other attribute read does, and the Oghma's +10 becomes 100 → 110, about 3%
+faster.
+
+The subject must resolve to a known actor: a named ref, or the actors whose
+SCRI is the script. Otherwise a write is still dropped and a read still
+returns `ATTRIBUTE_STUB_VALUE`.
 
 ---
 

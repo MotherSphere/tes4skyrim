@@ -21,6 +21,7 @@ from script_convert.constants import (
     TYPE_MAP,
     ACTOR_VALUE_MAP,
     TES4_ATTRIBUTES,
+    ATTRIBUTE_STUB_VALUE,
     PAPYRUS_MAX_SCRIPT_NAME,
     is_generated_script_type,
     papyrus_script_name,
@@ -2894,15 +2895,15 @@ class TestEnumActorValues:
 
 
 class TestZeroArgRefReceiver:
-    """Oblivion let the receiver of a zero-argument `ref.` command follow a
-    comma instead of a dot: `StopCombat, Player` means `Player.StopCombat`.
-    Treating it as an argument emitted `IsInCombat(Player)` ("function takes 0
-    parameters not 1") or dropped it and acted on the wrong actor.
+    """A zero-argument command's comma-led token (`StopCombat, Player`).
+
+    See: docs/commentary/script_convert.md#comma-argument-is-discarded
     """
 
-    def test_stopcombat_comma_receiver(self, converter):
+    def test_stopcombat_comma_argument_is_discarded(self, converter):
+        """Oblivion compiles `StopCombat, Player` as a bare StopCombat on Self."""
         out = conv_line(converter, 'StopCombat, Player', 'ObjectReference')
-        assert out == 'Game.GetPlayer().StopCombat()'
+        assert out == 'TES4Polyfill.EndCombat((Self as Actor), TES4ForceCombatAttackers)'
 
     def test_isincombat_comma_receiver_in_comparison(self, converter):
         out = conv_expr(converter, 'IsInCombat, Player == 1', 'ObjectReference')
@@ -2925,6 +2926,42 @@ class TestZeroArgRefReceiver:
         conv = ScriptConverter(xref)
         out = conv_expr(conv, 'GetInFaction, MyFaction == 1', 'ObjectReference')
         assert 'MyFaction' in out and 'IsInFaction(' in out
+
+
+class TestTES4SpeedAttribute:
+    """SetAV/GetAV Speed share one baseline so a saved Speed round-trips.
+
+    See: docs/commentary/script_convert.md#speed-write-becomes-speedmult
+    """
+
+    @staticmethod
+    def _converter(xref):
+        """A converter whose graph knows a Speed-33 NPC, the player, and the walk GMSTs."""
+        xref.edid_to_formid.update({'ravenref': '0001C001', 'player': '00000007'})
+        xref.record_base['0001C001'] = '0001C000'
+        xref.record_type.update({'0001C000': 'NPC_', '00000007': 'NPC_'})
+        xref.actor_speed.update({'0001C000': 33, '00000007': 40})
+        xref.move_gmsts.update({'fmovecharwalkmin': 90.0, 'fmovecharwalkmax': 130.0})
+        return ScriptConverter(xref)
+
+    def test_read_and_write_use_the_authored_baseline(self, xref):
+        """Raven's saved Speed is his own 33, never the attribute stub."""
+        conv = self._converter(xref)
+        read = conv_line(conv, 'set x to RavenRef.GetAV Speed', 'ObjectReference')
+        write = conv_line(conv, 'RavenRef.SetAV Speed x', 'ObjectReference')
+        assert 'GetTES4Speed(' in read and read.endswith(', 33, 90.0, 130.0)')
+        assert 'SetTES4Speed(' in write and write.endswith(', x, 33, 90.0, 130.0)')
+
+    def test_player_baseline_is_the_attribute_stub(self, xref):
+        """The player has no Speed attribute; its gates keep falling open."""
+        conv = self._converter(xref)
+        out = conv_line(conv, 'set x to player.GetBaseAV Speed', 'ObjectReference')
+        assert f'GetTES4Speed(Game.GetPlayer(), {ATTRIBUTE_STUB_VALUE}, 90.0, 130.0)' in out
+
+    def test_unknown_subject_keeps_the_stub(self, converter):
+        """With no actor record to read a baseline from, nothing changes."""
+        assert conv_line(converter, 'OtherRef.SetAV Speed 5', 'ObjectReference').startswith(
+            ';TES4 attribute Speed')
 
 
 class TestLocalVariableShadowsPlayer:

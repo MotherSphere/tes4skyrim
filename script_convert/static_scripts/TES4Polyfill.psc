@@ -439,6 +439,55 @@ Function ForceCombat(Actor akAttacker, Actor akTarget, Faction akAttackers, Fact
   akAttacker.StartCombat(akTarget)
 EndFunction
 
+; TES4 StopCombat.  Takes the actor back out of the memberships ForceCombat
+; gave it as an ATTACKER (TES4ForceCombatAttackers, WIPlayerEnemyFaction), then
+; stops the fight; left in them, the actor re-engaged the moment it saw its
+; target again and its AI packages never ran (Nehrim's rope troll).  Victims
+; membership stays: TES4 StopCombat on a victim does not stop its attacker.
+Function EndCombat(Actor akActor, Faction akAttackers) Global
+  If akActor == None
+    Return
+  EndIf
+  If akAttackers != None
+    akActor.RemoveFromFaction(akAttackers)
+  EndIf
+  Faction hatesPlayer = Game.GetFormFromFile(0x06E02D, "Skyrim.esm") as Faction
+  If hatesPlayer != None
+    akActor.RemoveFromFaction(hatesPlayer)
+  EndIf
+  akActor.StopCombat()
+EndFunction
+
+; TES4 SetAV Speed.  Skyrim has no Speed attribute, so the write becomes a
+; SpeedMult that scales the actor's movement by the ratio TES4's walk formula
+; (Min + (Max - Min) * Speed / 100) gives against its authored Speed.  A
+; SpeedMult change only applies once carry weight changes, hence the nudge.
+Function SetTES4Speed(Actor akActor, Float afSpeed, Float afBaseSpeed, Float afWalkMin, Float afWalkMax) Global
+  If akActor == None
+    Return
+  EndIf
+  Float span = afWalkMax - afWalkMin
+  Float baseWalk = afWalkMin + span * afBaseSpeed / 100.0
+  If baseWalk <= 0.0
+    Return
+  EndIf
+  akActor.SetActorValue("SpeedMult", 100.0 * (afWalkMin + span * afSpeed / 100.0) / baseWalk)
+  akActor.ModActorValue("CarryWeight", 0.1)
+  akActor.ModActorValue("CarryWeight", -0.1)
+EndFunction
+
+; TES4 GetAV/GetBaseAV Speed: the inverse of SetTES4Speed, read back from the
+; actor's SpeedMult, so a script that saves Speed and later restores it (or
+; adds to it) works from the same baseline the write uses.
+Int Function GetTES4Speed(Actor akActor, Float afBaseSpeed, Float afWalkMin, Float afWalkMax) Global
+  Float span = afWalkMax - afWalkMin
+  If akActor == None || span == 0.0
+    Return Math.Floor(afBaseSpeed + 0.5)
+  EndIf
+  Float walk = (afWalkMin + span * afBaseSpeed / 100.0) * akActor.GetActorValue("SpeedMult") / 100.0
+  Return Math.Floor((walk - afWalkMin) * 100.0 / span + 0.5)
+EndFunction
+
 ; TES4 "PlayerFaction" converts to a plugin faction the RUNTIME player was
 ; never a member of — membership lives on Skyrim's own Player NPC (0x7),
 ; which the conversion does not touch.  So a scripted relation flip against

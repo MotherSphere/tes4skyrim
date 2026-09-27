@@ -125,10 +125,7 @@ class ScriptConverter:
         # Parsed arguments of the call being emitted, for handlers that
         # have moved off `args_str` (see _emit_function).
         self._arg_nodes: tuple = ()
-        #: Did the current call's argument list open with a COMMA?  For a
-        #: zero-argument command the token after it is the RECEIVER
-        #: (`StopCombat, Player` is `Player.StopCombat`), which is the only
-        #: thing that says so.
+        #: Did the current call's argument list open with a COMMA (`StopCombat, Player`)?
         self._leading_comma = False
         #: Papyrus type of the value in the assignment being emitted, read off
         #: its parse tree by `emit_assignment`.  Empty outside an assignment.
@@ -1823,17 +1820,25 @@ class ScriptConverter:
         return f'{f1}.SetAlly({f2}, true, true)' + _mirror(2)
 
     def _force_combat_call(self, ref: str, target: str) -> str:
-        """Emit a TES4Polyfill.ForceCombat call with the conversion-owned
-        enemy-faction pair that makes the fight stick for ANY actors.
+        """Emit TES4Polyfill.ForceCombat with the conversion-owned faction pair."""
+        factions = self._combat_factions('TES4ForceCombatAttackers', 'TES4ForceCombatVictims')
+        return f'TES4Polyfill.ForceCombat({ref}, {target}, {factions})'
+
+    def _end_combat_call(self, ref: str) -> str:
+        """Emit TES4Polyfill.EndCombat: StopCombat, leaving ForceCombat's attacker side."""
+        return f'TES4Polyfill.EndCombat({ref}, {self._combat_factions("TES4ForceCombatAttackers")})'
+
+    def _combat_factions(self, *names: str) -> str:
+        """Register ForceCombat faction properties; return them as arguments.
 
         The two factions are records the import writes at fixed FormIDs
         (record-side mutual Enemy XNAM); the property names are registered
         in _WELL_KNOWN_PROPERTIES so the VMAD fill binds them.
         """
-        self.sc.property_refs['TES4ForceCombatAttackers'] = 'Faction'
-        self.sc.property_refs['TES4ForceCombatVictims'] = 'Faction'
-        return (f'TES4Polyfill.ForceCombat({ref}, {target}, '
-                'TES4ForceCombatAttackers, TES4ForceCombatVictims)')
+        for name in names:
+            if name:
+                self.sc.property_refs[name] = 'Faction'
+        return ', '.join(names)
 
     def _destroyed_formlist(self) -> str:
         """Register and name the conversion-owned destroyed-reference FormList.
@@ -1904,6 +1909,20 @@ class ScriptConverter:
         if not ref or not re.match(r'^[A-Za-z_]\w*$', ref):
             return False
         return ref.lower() not in self._NON_PROPERTY_REFS
+
+    def walk_speed_formula(self, ref_name: str):
+        """(authored Speed, walk min, walk max) of a Speed write's subject, or None.
+
+        A named receiver is that actor; a bare call is whatever actor attaches
+        the script being converted.
+        """
+        if not self.xref:
+            return None
+        if ref_name and ref_name.lower() not in SELF_NAMES:
+            fids = [self.xref.actor_formid(ref_name)]
+        else:
+            fids = self.xref.script_owner_actors(self.sc.edid) if self.sc.edid else []
+        return self.xref.walk_speed_formula(fids)
 
     def _packages_of_type(self, ref_name: str, pkg_type: int) -> list:
         """PACK EditorIDs backing a `GetCurrentAIPackage == <type>` test.

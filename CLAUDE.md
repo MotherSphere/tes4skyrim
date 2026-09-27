@@ -27,11 +27,14 @@ caching, skipped record types, the export text format, and the directory layout.
   the user thinking out loud about an approach is not permission to build. Build
   only on "do it" / "implement" / "fix". Bugs you notice along the way get
   reported, not fixed.
-- **A task gets finished: fixed, built, verified — then one full report.** Don't
-  end the turn to give a status update, offer options ("which do you want?" —
-  pick one), ask "want me to X?" (do X), or hand back a diagnosis without the
-  fix. A one-line note between tool calls is fine. If something asked for is
-  still unsolved, you are not done.
+- **A task gets finished: fixed, built, verified — without ending the turn.**
+  Don't end the turn to give a status update, offer options ("which do you
+  want?" — pick one), ask "want me to X?" (do X), or hand back a diagnosis
+  without the fix. If something asked for is still unsolved, you are not done.
+- **Keep the user informed while you work.** Post a one-line update before
+  each step (what you found, what you're editing, testing or building) —
+  these don't end the turn. Silence until the end is wrong; so is a wall of
+  text. Close with a short report.
 - **Low confidence is not a reason to stop.** The user would rather you finish
   and be wrong than stop and ask. Being wrong repeatedly means go back to
   [Verifying](#verifying-your-work) and find a different mechanism. Confessing
@@ -301,13 +304,18 @@ comes from what actually solved 46 recent bugs
   🛑 <a id="static-scripts-rebuild-all"></a>**A change to
   `script_convert/static_scripts/` rebuilds `--scripts-only` for EVERY
   masterless plugin with an `output/` folder (Oblivion.esm, Nehrim.esm,
-  FalloutNV.esm), then their dependents (Morrowind_ob.esm, Translation.esp).**
+  FalloutNV.esm)**
   Each ships the same-named `TES4Polyfill.pex`; installed together, one game's
   copy overrides the other's, so a stale copy breaks every game's newer calls.
 
   Several areas means several stages. Other flags:
   `--extract-only`, `--prune-textures-only`, `--pack-zip-only`. Report what you
   built and any failures verbatim; if a stage can't be run, say which and why.
+- <a id="blast-radius"></a>**After the build, measure the change's blast radius
+  and read it for regressions before reporting.** Count every site the change
+  touches in each plugin it ships to — Oblivion.esm at least, not only the
+  plugin the bug came from — and read each one that now behaves differently. A
+  fix that is right for the bug's script is often wrong elsewhere. Report the counts and any regression, and fix it.
 - 🛑 **`-f` takes the plugin's filename, never the mod or folder name:**
   `-f TR_Mainland.esm`, not `-f "Tamriel Rebuilt 25.08.12"`. A wrong name
   builds a phantom plugin whose sidecar breaks the real one in game

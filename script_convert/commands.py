@@ -590,6 +590,18 @@ def start_combat(ctx, call) -> str:
     return ctx._force_combat_call(ref, target)
 
 
+@command('stopcombat')
+def stop_combat(ctx, call) -> str:
+    """StopCombat -- also takes back the hostility ForceCombat added.
+
+    See: docs/commentary/script_convert.md#stopcombat-undoes-forcecombat
+    """
+    ref = ctx._resolve_self_ref(call.ref, call.extends, actor_func=True)
+    if ref == 'Self' and call.extends == 'ObjectReference':
+        ref = '(Self as Actor)'
+    return ctx._end_combat_call(ref)
+
+
 @command('moddisposition')
 def mod_disposition(ctx, call) -> str:
     """ModDisposition -- disposition was removed in Skyrim.
@@ -1406,10 +1418,12 @@ def actor_value(ctx, call) -> str:
         return None
     raw = call.source(0).rstrip(',').strip('"\'')
     if raw.lower() in TES4_ATTRIBUTES:
+        speed = _speed_access(ctx, call) if raw.lower() == 'speed' else None
+        if speed:
+            return speed
         if call.name in ACTOR_VALUE_READ_FUNCTIONS:
             return ATTRIBUTE_STUB_VALUE
-        return (f';TES4 attribute {raw} has no Skyrim equivalent '
-                f'-- write dropped')
+        return f';TES4 attribute {raw} has no Skyrim equivalent -- write dropped'
 
     av = ACTOR_VALUE_MAP.get(raw.lower(), raw)
     # Oblivion's single Encumbrance AV is TWO in Skyrim: the current carried
@@ -1442,6 +1456,28 @@ def actor_value(ctx, call) -> str:
         return (f'{papyrus}({", ".join(args)})' if call.extends == 'Actor'
                 else f'(Self as Actor).{papyrus}({", ".join(args)})')
     return f'{ref}.{papyrus}({", ".join(args)})'
+
+
+def _speed_access(ctx, call):
+    """A Speed read or write through the subject's TES4 walk formula, or None.
+
+    Reads and writes share one baseline, so a saved-and-restored Speed round-trips.
+    The player's baseline is ATTRIBUTE_STUB_VALUE, what its other attribute reads return.
+    See: docs/commentary/script_convert.md#speed-write-becomes-speedmult
+    """
+    formula = ctx.walk_speed_formula(call.ref)
+    reading = call.name in ACTOR_VALUE_READ_FUNCTIONS
+    if formula is None or not (reading or (call.name in _AV_SET and len(call) > 1)):
+        return None
+    base, low, high = formula
+    if (call.ref or '').lower() in PLAYER_TOKENS:
+        base = ATTRIBUTE_STUB_VALUE
+    ref = ctx._resolve_self_ref(call.ref, call.extends, actor_func=True)
+    if ref == 'Self' and call.extends == 'ObjectReference':
+        ref = '(Self as Actor)'
+    if reading:
+        return f'TES4Polyfill.GetTES4Speed({ref}, {base}, {low}, {high})'
+    return f'TES4Polyfill.SetTES4Speed({ref}, {call.arg(1)}, {base}, {low}, {high})'
 
 
 #: AV commands naming the PLAYER by definition, whatever script calls them.
