@@ -862,6 +862,20 @@ def message(ctx, call) -> str:
             else f'{papyrus}({ctx._quote_msg(first)})')
 
 
+def _message_function(ctx, name: str) -> str:
+    """The Papyrus call a text-only Message / MessageBox becomes.
+
+    A full script's `Message` goes through its TES4_Notify helper
+    (assemble.notify_helper); a fragment has no helpers and calls Debug directly.
+    """
+    if name == 'messagebox':
+        return 'Debug.MessageBox'
+    if not ctx.sc.edid:
+        return 'Debug.Notification'
+    ctx.sc.uses_notify = True
+    return 'TES4_Notify'
+
+
 def _button_box(ctx, call) -> str:
     """A MessageBox WITH buttons, as an authored MESG's Show().
 
@@ -886,20 +900,6 @@ def _button_box(ctx, call) -> str:
 @command('isactionref')
 def is_action_ref(ctx, call) -> str:
     """IsActionRef -- was the acting reference this one?
-
-def _message_function(ctx, name: str) -> str:
-    """The Papyrus call a text-only Message / MessageBox becomes.
-
-    A full script's `Message` goes through its TES4_Notify helper
-    (assemble.notify_helper); a fragment has no helpers and calls Debug directly.
-    """
-    if name == 'messagebox':
-        return 'Debug.MessageBox'
-    if not ctx.sc.edid:
-        return 'Debug.Notification'
-    ctx.sc.uses_notify = True
-    return 'TES4_Notify'
-
 
     The operand is always a REFERENCE, never a script variable, so the `player`
     keyword wins even in a script that also declares a local called Player

@@ -2168,6 +2168,61 @@ Known gap: when a player activation of a book is consumed without opening it
 (a "not yet readable" gate), the flag stays set and the next carried read is
 skipped once.
 
+### <a id="carried-menumode-runs-in-event"></a>A carried item's MenuMode runs from its own events (2026-09-27, confirmed in game)
+
+**Code:** `assemble._menu_passes`, `assemble._menu_pass_loop`, `assemble._track_holder`.
+
+Nehrim's diary is a MISC whose `OnEquip` sets `step 1` and whose bare
+`MenuMode` block shows the diary menu. Clicking it did nothing, although
+Skyrim does raise `OnEquipped` for a clicked MISC:
+
+- **The engine sends the equip event for a MISC** (disassembled on 1.6.1170).
+  The inventory's `ItemSelect` (`0x92d970`) calls `0x92f640`, which calls the
+  equip toggle `0x6ca610`. That runs the equip path `0x6c9820` → `0x6cbe30` →
+  actor equip `0x69f9c0`. Its form-type switch sends MISC (`0x20`) to the
+  default case (`0x6a018a`), which sends the equip event through
+  `0x6b0070` (source at `+0x478`). Papyrus's sink `0x9c4b50` turns that
+  into `OnEquipped`. The only early exit is an item carrying extra-data
+  type `0x3D` (`0x15f230`).
+- **The script cannot register for updates.** The Papyrus log showed
+  `OnEquipped` running on "Item 3 in container (00000014)" and then
+  `Unable to call RegisterForSingleUpdate - no native object bound`. An
+  item that never lay in the world has no native object while it sits in
+  an inventory, so the `OnUpdate` that held the merged MenuMode body never
+  ran. `GetParentCell` inside `SafeGameModeGate(Self)` fails the same way.
+
+For an `ObjectReference` script with a poll and a bare MenuMode block, the
+poll body is the function `TES4_PollPass()`. `OnUpdate` calls it between its
+two arms, and a converted `return` needs no arm of its own. `OnEquipped` and
+`OnContainerChanged` end by calling `TES4_MenuPasses()`, which runs a pass
+per update interval through `Utility.WaitMenuMode` while
+`Utility.IsInMenuMode()`, the frames TES4 ran MenuMode on. It calls no
+native on `Self`, and a newer run ends an older one through a counter, so
+no flag can stick. 30 Nehrim scripts and 25 of Translation.esp's carry it.
+
+Rejected: writing such a MISC as a BOOK. That changes the item's type and
+inventory category and opens an empty page on every click.
+
+The two log errors from the holder re-arm at the top of `OnEquipped` remain;
+they are harmless.
+
+### <a id="message-rewrites-one-line"></a>`Message` rewrites one HUD line (2026-09-27)
+
+**Code:** `commands._message_function`, `assemble.notify_helper`.
+
+Oblivion's `Message` (`QueueUIMessage` `0x57acc0` → `0x5a9980`, flag 1) does
+not queue: it overwrites the single HUD message line and resets its timer.
+Only flag 2 queues (`0x5a95c0`). Scripts rely on that and call `Message`
+every frame. Nehrim's `GlobalplayerScript` repeats its level-up nag
+("Tagebuch Level Nachricht Message Spam"). Skyrim queues every
+`Debug.Notification`, so those calls flooded the screen.
+
+A full script's `Message` calls `TES4_Notify`, which drops a repeat of the
+text still on screen. A Skyrim notification lives 3.33 s: `hudmenu.swf`'s
+`MessageText` clip is 80 frames at 24 fps. A negative gap, which happens
+after a load because the real-time clock restarts, also sends. Fragments
+keep a plain `Debug.Notification`, since they run once.
+
 ### A bare GameMode block also forces relocation (2026-08-02)
 
 The two triggers above still missed a whole class: an actor script that is
@@ -2240,61 +2295,6 @@ Two consequences worth remembering:
   script — so 242 Nehrim scripts declared
   `TES4_GlobalplayerScript Property Player` and then failed to convert it to
   `ObjectReference` at every `X.GetDistance(Player)` / `MoveTo(Player)`.
-### <a id="carried-menumode-runs-in-event"></a>A carried item's MenuMode runs from its own events (2026-09-27, confirmed in game)
-
-**Code:** `assemble._menu_passes`, `assemble._menu_pass_loop`, `assemble._track_holder`.
-
-Nehrim's diary is a MISC whose `OnEquip` sets `step 1` and whose bare
-`MenuMode` block shows the diary menu. Clicking it did nothing, although
-Skyrim does raise `OnEquipped` for a clicked MISC:
-
-- **The engine sends the equip event for a MISC** (disassembled on 1.6.1170).
-  The inventory's `ItemSelect` (`0x92d970`) calls `0x92f640`, which calls the
-  equip toggle `0x6ca610`. That runs the equip path `0x6c9820` → `0x6cbe30` →
-  actor equip `0x69f9c0`. Its form-type switch sends MISC (`0x20`) to the
-  default case (`0x6a018a`), which sends the equip event through
-  `0x6b0070` (source at `+0x478`). Papyrus's sink `0x9c4b50` turns that
-  into `OnEquipped`. The only early exit is an item carrying extra-data
-  type `0x3D` (`0x15f230`).
-- **The script cannot register for updates.** The Papyrus log showed
-  `OnEquipped` running on "Item 3 in container (00000014)" and then
-  `Unable to call RegisterForSingleUpdate - no native object bound`. An
-  item that never lay in the world has no native object while it sits in
-  an inventory, so the `OnUpdate` that held the merged MenuMode body never
-  ran. `GetParentCell` inside `SafeGameModeGate(Self)` fails the same way.
-
-For an `ObjectReference` script with a poll and a bare MenuMode block, the
-poll body is the function `TES4_PollPass()`. `OnUpdate` calls it between its
-two arms, and a converted `return` needs no arm of its own. `OnEquipped` and
-`OnContainerChanged` end by calling `TES4_MenuPasses()`, which runs a pass
-per update interval through `Utility.WaitMenuMode` while
-`Utility.IsInMenuMode()`, the frames TES4 ran MenuMode on. It calls no
-native on `Self`, and a newer run ends an older one through a counter, so
-no flag can stick. 30 Nehrim scripts and 25 of Translation.esp's carry it.
-
-Rejected: writing such a MISC as a BOOK. That changes the item's type and
-inventory category and opens an empty page on every click.
-
-The two log errors from the holder re-arm at the top of `OnEquipped` remain;
-they are harmless.
-
-### <a id="message-rewrites-one-line"></a>`Message` rewrites one HUD line (2026-09-27)
-
-**Code:** `commands._message_function`, `assemble.notify_helper`.
-
-Oblivion's `Message` (`QueueUIMessage` `0x57acc0` → `0x5a9980`, flag 1) does
-not queue: it overwrites the single HUD message line and resets its timer.
-Only flag 2 queues (`0x5a95c0`). Scripts rely on that and call `Message`
-every frame. Nehrim's `GlobalplayerScript` repeats its level-up nag
-("Tagebuch Level Nachricht Message Spam"). Skyrim queues every
-`Debug.Notification`, so those calls flooded the screen.
-
-A full script's `Message` calls `TES4_Notify`, which drops a repeat of the
-text still on screen. A Skyrim notification lives 3.33 s: `hudmenu.swf`'s
-`MessageText` clip is 80 frames at 24 fps. A negative gap, which happens
-after a load because the real-time clock restarts, also sends. Fragments
-keep a plain `Debug.Notification`, since they run once.
-
 - **A property typed as the attached script is not an Actor.** `_add_scro_ref`
   deliberately prefers the script type so cross-script variable reads work, so
   actor-only calls on such a property must be **cast at the call site**
