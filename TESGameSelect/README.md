@@ -1,41 +1,46 @@
 # Threads of Prophecy — Game Select
 
 A small, redistributable Skyrim SE plugin. When you start a **new game**, it
-detects which converted TES games are installed and asks which one you want to
-play. Picking one hands control to that game's own character generation; picking
-Skyrim runs the vanilla Helgen opening exactly as shipped.
+detects which converted games are installed and asks which one you want to
+play. Picking one hands control to that game's own opening; picking Skyrim runs
+the vanilla Helgen opening.
 
-Supported starts:
+Every character also carries an **Elder Scroll**. Reading it lets you travel
+between the installed games: *Begin* a game you have not started yet, or
+*Return to* one you have, arriving exactly where you left it.
+
+Supported games, in menu order:
 
 | Choice | Starts | Requires |
 |---|---|---|
-| Skyrim | the vanilla opening, unmodified | — |
+| Skyrim | the vanilla opening | — |
 | Cyrodiil | Oblivion's `Charactergen` stage 5 — the Imperial Prison cell | `Oblivion.esm` |
-| Nehrim | Nehrim's `Charactergen` stage 5 + `MQ00` | `Nehrim.esm` |
+| Vvardenfell | vanilla Morrowind's own opening — the Imperial Prison Ship | `Morrowind.esm` |
 | Vvardenfell | Morroblivion's `fbmwChargen` stage 1 — the prison ship | `Morrowind_ob.esm` |
+| Nehrim | Nehrim's `Charactergen` stage 5 + `MQ00` stage 1 | `Nehrim.esm` |
+| Arktwend | Arktwend's own opening — Melee monastery | `Arktwend_English.esm` |
 | Mojave | FalloutNV's `VCG00` stage 0 — the shallow grave | `FalloutNV.esm` |
-| Morrowind | vanilla Morrowind's own opening — the Imperial Prison Ship | `Morrowind.esm` |
 
-**Morrowind is the odd one out.** Every other game is started by setting a
-stage on its character-generation quest. Vanilla Morrowind has no such quest:
-its opening is object scripts on placed references, and the thing that sets
-them running is a TES3 global, `CharGenState`. The `Main` start script polls
-`CharGenState == 1` and launches `CharGen`, which moves the player into the
-Imperial Prison Ship itself — so there is no marker to move to and no stage to
-set. The TES3 engine set that global when NEW GAME was picked; Skyrim's engine
-never does, which is why `MorrowindRuntime.dll` does it instead. It reads this
-plugin's `TESGS_Chosen` global on a new game and writes `CharGenState` only
-when the player chose Morrowind. That needs `MorrowindRuntime.dll` (shipped in
-`TESRuntime.zip`, built by `tools/release/package_runtime_dll.py`); with the
-ESP alone, the button appears but the opening does not begin.
+Fallout 3 (vanilla or Tale of Two Wastelands) has its place reserved after
+Mojave, for when its conversion exists.
 
-A game whose plugin is not in your load order simply never appears in the menu.
+**The TES3 games are the odd ones out.** Every other game is started by
+setting a stage on its character-generation quest. Vanilla Morrowind and
+Arktwend have no such quest: their openings are object scripts on placed
+references, set running by a TES3 global, `CharGenState`. The `Main` start
+script polls `CharGenState == 1` and launches `CharGen`, which moves the player
+itself. The TES3 engine set that global when NEW GAME was picked; this plugin
+sets it instead, and `MorrowindRuntime.dll` (shipped in `TESRuntime.zip`)
+carries the value to the scripts. With the ESP alone the button appears but the
+opening does not begin.
+
+A game whose plugin is not in your load order simply never appears in a menu.
 
 ## Installing
 
 Nothing is prebuilt in this repo — the plugin is built on demand, because its
-`MQ101` override is spliced out of *your* installed `Skyrim.esm`. Press **Pack
-Start Mod** in the GUI, or run:
+`MQ101` override and its scroll are copied out of *your* installed
+`Skyrim.esm`. Press **Pack Start Mod** in the GUI, or run:
 
 ```bash
 python tools/release/package_start_mod.py
@@ -46,121 +51,121 @@ Either produces `output/Finished Mods/TESGameSelect.zip`, whose root IS the
 
 ```
 TESGameSelect.esp
-scripts\TESGameSelectQuest.pex
-scripts\TESGameSelectMQ101.pex
-scripts\source\*.psc                    (compiler input, harmless to keep)
-seq\TESGameSelect.seq                   (empty, see below)
+seq\TESGameSelect.seq                     (the travel quest)
+scripts\TESGameSelectQuest.pex            (the menu and each game's start)
+scripts\TESGameSelectMQ101.pex            (the takeover of Skyrim's opening)
+scripts\TESGameSelectTravel.pex           (the travel between games)
+scripts\TESGameSelectTravelPlayer.pex
+scripts\TESGameSelectScroll.pex
+scripts\source\*.psc                      (compiler input, harmless to keep)
 ```
 
 Enable `TESGameSelect.esp`. It declares only `Skyrim.esm` as a master and finds
-everything else at runtime, so any subset of the games works in any order.
+everything else at runtime, so any subset of the games works in any order. It
+can be added to an existing save: the scroll appears on the next load, and the
+game that save began with counts as started.
 
 **Load order:** this plugin overrides Skyrim's opening quest `MQ101`, so it is
 incompatible with other alternate-start mods (Live Another Life, Skyrim Unbound,
 Alternate Perspective) — they all edit the same record, and only the last one
 loaded wins. Use one at a time.
 
-The shipped `.seq` is intentionally **empty**: this plugin has no
-Start-Game-Enabled quests. It is included so that upgrading over an older build
-overwrites that build's non-empty `.seq`.
-
 No SKSE required.
 
 ## How it works
 
-Vanilla MQ101 stage 0 has five log entries, each conditioned on
-`GetGlobalValue(MQQuickstart) == 0..4`. Entry 0 (`== 0`) is the real new-game
-path, and its fragment — `QF_MQ101_0003372B.Fragment_2` — is the entire launch
-of the opening: `GameHour.SetValue(7); SetStage(10)`. Stage 10 then does
-everything else (equips the prisoner outfit, moves the player into the cart,
-plays the title sequence and the cart audio, starts the scene).
+The design notes, with the reasons behind each choice, are in
+[docs/commentary/tesgameselect.md](../docs/commentary/tesgameselect.md).
 
-This plugin **retargets that one fragment** at `TESGameSelectMQ101.RunTakeover`.
-Nothing else about the record changes — every other fragment, all 54 aliases
-and every log entry survive byte-identical, and the `MQQuickstart` condition
-still routes debug quickstarts around the takeover.
+**The new-game menu.** Vanilla `MQ101` stage 0 has five log entries; entry 0
+(`GetGlobalValue(MQQuickstart) == 0`) is the real new-game path, and its
+fragment launches the whole opening. This plugin retargets that one fragment,
+so nothing of Helgen runs until you have chosen:
 
-> Earlier builds *appended* an unconditional sixth entry instead. That entry
-> ran **alongside** Fragment_2, so stage 10 still fired: the title credits
-> played, the cart audio rolled on, and the opening scene fought the handoff
-> over the player — with the menu shown twice around the load screen for good
-> measure. Retargeting means nothing of the opening runs until you have chosen.
+1. Any converted game whose opening starts on its own is held first (Nehrim's
+   `Charactergen` is Start-Game-Enabled, so without this it pulls the player
+   into Nehrim's start cave whichever game is picked). Nehrim's main quest
+   `MQ00` is held only once another game is chosen.
+2. Controls off, saving off, and the player waits in Skyrim's own empty holding
+   cell until the load has finished.
+3. Installed games are detected with `Game.GetFormFromFile()`, which returns
+   `None` when a plugin is not loaded. Each game's button carries a
+   `GetGlobalValue(...) == 1` condition set from that pass; Skyrim's button is
+   unconditional, so the menu is never empty. A hidden button does not
+   renumber the others, so the button pressed is directly the game id.
+4. **Skyrim:** the vanilla fragment's two lines are replayed and stage 10 runs
+   the opening. **Another game:** its starting equipment is added and worn, the
+   player moves to its start marker, its opening is started, the race menu is
+   shown for the TES4 games (the TES4 engine popped it on a new game). `MQ101`
+   stays waiting at stage 0, so nothing of Helgen runs until the scroll begins
+   Skyrim. It is never stopped: `MQ101` is a Run Once quest, and a stopped one
+   can never be started again.
 
-The takeover, in order:
+**Your inventory is never cleared by travel.** On a new game the takeover
+removes Skyrim's player base-record items (the iron armor, potions and gold a
+main-menu `coc` hands out), exactly what vanilla stage 10 strips, once the
+load and the menu are done, so what the player already wears goes too. After that,
+the plugin retargets stage 10 too: it sets your items aside in a chest while
+the vanilla fragment runs, then gives them back (worn items come back
+unequipped), so beginning Skyrim from another game keeps everything you carry.
 
-1. Controls off, saving off, and the player is parked in Skyrim's own empty
-   holding cell (`WIDeadBodyCleanupCell`). The menu is deferred until the
-   player's 3D is loaded — a `Message.Show()` issued during the initial load
-   is drawn over the main menu, bashed by the load screen, and drawn again
-   after it (the "popup appears twice" bug).
-2. Installed games are detected with `Game.GetFormFromFile()`, which returns
-   `None` when a plugin is not loaded. That is why the plugin needs no masters.
-3. The menu is a single MESG with every button. Each converted game's
-   button carries a `GetGlobalValue(...) == 1` condition, set from the
-   detection pass, so absent games are not drawn. Skyrim's button is
-   unconditional, so the menu can never appear with nothing to click. A hidden
-   button does **not** renumber the others — `Message.Show()` returns the
-   button's own index (vanilla's `dunMiddenHandSculptureSCRIPT` relies on the
-   same behaviour), so the returned index is directly the game id.
-4. Controls and the chargen state are restored to engine defaults, then:
-   **Skyrim:** Fragment_2's two lines are replayed verbatim and stage 10 runs
-   the opening as if this plugin had never existed (stage 10 moves the player
-   into position itself).
-   **Converted game:** the player's inventory is cleared (vanilla's own
-   `RemoveAllItems` idiom from stage 10) and replaced with that game's real
-   starting equipment, the player is moved to the game's start marker, its
-   chargen quest is set to the stage its original author wrote as "the game
-   begins here", the race menu is shown (the TES4 engine popped it
-   automatically on a new game; Skyrim only shows it when a script asks — the
-   name prompt follows it on a fresh character), and **MQ101 is stopped**.
-   Stage 10 never ran, so there is nothing to undo — no cart, no Helgen, and
-   the Skyrim main quest can never advance (MQ102 is only started by MQ101's
-   own later stages).
+**The Elder Scroll** uses vanilla's Elder Scroll model. It is a quest item: it
+cannot be dropped or sold. Reading it plays vanilla's own Elder Scroll reading
+(first person, the scroll in hand, the blinding light), and the travel menu
+appears where vanilla's reading ends. It lists every installed game except the
+one you are in:
+
+- **Begin** a game you have not started: that game's own opening runs, as it
+  does on a new game, and its starting equipment is added. The race menu is
+  not shown by the scroll; a game whose opening shows its own (Morrowind's
+  census office, Doc Mitchell's reflectron) still will.
+- **Return to** a game you have started: you arrive where you last left it,
+  facing the same way — the same idea as Morrowind's Mark and Recall.
+
+Travel is refused in combat and while controls are disabled, which includes
+every game's opening sequence.
 
 ### Starting equipment
 
-The TES4 player base record's own inventory, worn:
+Each game's own player record, worn:
 
 | Game | Equipment |
 |---|---|
-| Oblivion | Sack Cloth Shirt / Pants / Sandals + Wrist Irons (`Oblivion.esm` NPC 00000007) |
+| Cyrodiil | Sack Cloth Shirt / Pants / Sandals + Wrist Irons (`Oblivion.esm` NPC 00000007) |
+| Vvardenfell (Morrowind) | Common Shirt, Pants and Shoes (`Morrowind.esm` `Player`) |
+| Vvardenfell (Morroblivion) | Oblivion's set — Morroblivion does not override the player record |
 | Nehrim | Flickweste, Geschnürte Lederhose, Jägermokassins, plus torch, Tagebuch and the anonymous MQ00 note (`Nehrim.esm` NPC 00000007) |
-| Vvardenfell | Oblivion's set — Morroblivion does not override the player record, so a TES4 Morroblivion prisoner inherited its master file's |
+| Arktwend | Common Robe, Shirt, Pants and Shoes (Arktwend's own `Player`) |
 | Mojave | nothing — `VCG00` stage 0 strips the Pip-Boy the player record carries |
-| Morrowind | nothing — Morrowind's player record carries no inventory; the gear comes from the census office stuff room |
-
-### Why not just stop MQ101 afterwards
-
-The obvious design — a Start-Game-Enabled quest that waits, then calls
-`MQ101.Stop()` — does not work, and was the first version of this plugin. By the
-time such a quest runs, Skyrim's opening has already executed: the player is
-bound in `PrisonerCuffsPlayer` (stopping the quest does not remove it), and
-MQ101's packages and scene keep repositioning the player, so `MoveTo` strands
-them. `OnInit` on such a quest also fires more than once, which showed the menu
-twice. Retargeting the stage-0 fragment avoids all of it by never letting the
-opening start.
 
 ## Configuring
 
-Every plugin name, FormID and stage is a script property, editable in xEdit or
-the Creation Kit without recompiling — useful if you ship renamed or translated
-plugins.
+Every plugin name, FormID and stage is a script property on the
+`TESGSGameSelect` quest, editable in xEdit or the Creation Kit without
+recompiling — useful if you ship renamed or translated plugins. FormIDs are
+the low 24 bits — the id *within that plugin's own file*, which is what
+`GetFormFromFile` takes, so the load-order byte is irrelevant.
 
 | Property | Default |
 |---|---|
-| `OblivionPlugin` / `NehrimPlugin` / `MorroblivionPlugin` | `Oblivion.esm` / `Nehrim.esm` / `Morrowind_ob.esm` |
-| `FalloutNVPlugin` / `MorrowindPlugin` | `FalloutNV.esm` / `Morrowind.esm` |
-| `FalloutNVChargenID` / `FalloutNVStartMarkerID` / `FalloutNVChargenStage` | `00102037` / `00103E6B` / `0` |
-| `MorrowindProbeID` (detection only — Morrowind starts itself) | `009D7E5D` |
+| `OblivionPlugin` / `MorrowindPlugin` / `MorroblivionPlugin` | `Oblivion.esm` / `Morrowind.esm` / `Morrowind_ob.esm` |
+| `NehrimPlugin` / `ArktwendPlugin` / `FalloutNVPlugin` | `Nehrim.esm` / `Arktwend_English.esm` / `FalloutNV.esm` |
 | `OblivionChargenID` / `OblivionStartMarkerID` / `OblivionChargenStage` | `0002466E` / `00032AB5` / `5` |
-| `NehrimChargenID` / `NehrimStartMarkerID` / `NehrimMainQuestID` / `NehrimChargenStage` | `0002466E` / `00000D33` / `00000811` / `5` |
+| `MorrowindProbeID` / `MorrowindChargenStateID` | `00192940` / `006472DD` |
 | `MorroChargenID` / `MorroStartMarkerID` / `MorroChargenStage` | `00F0A28C` / `00F0A278` / `1` |
+| `NehrimChargenID` / `NehrimStartMarkerID` / `NehrimChargenStage` | `0002466E` / `00000D33` / `5` |
+| `NehrimMainQuestID` / `NehrimMainQuestStage` | `00000811` / `1` |
+| `ArktwendChargenStateID` | `006472DD` |
+| `FalloutNVChargenID` / `FalloutNVStartMarkerID` / `FalloutNVChargenStage` | `00102037` / `00103E6B` / `0` |
 | `OblivionWristIronsID` / `OblivionShirtID` / `OblivionPantsID` / `OblivionShoesID` | `000BE335` / `00027319` / `00027318` / `0002731A` |
+| `MorrowindShirtID` / `MorrowindPantsID` / `MorrowindShoesID` | `007E3DE2` / `00A5FBF7` / `00C73369` |
 | `NehrimShirtID` / `NehrimPantsID` / `NehrimShoesID` | `0002ECAD` / `000229AB` / `0001C82B` |
 | `NehrimTorchID` / `NehrimDiaryID` / `NehrimNoteID` | `00000D49` / `00000B96` / `00000AED` |
+| `ArktwendShirtID` / `ArktwendPantsID` / `ArktwendShoesID` / `ArktwendRobeID` | `007E3DE2` / `00A5FBF7` / `00C73369` / `00B75B56` |
 
-FormIDs are the low 24 bits — the id *within that plugin's own file*, which is
-what `GetFormFromFile` takes, so the load-order byte is irrelevant.
+Arktwend must be converted in authored mode (`convert.py -f
+Arktwend_English.esm --morrowind-source vanilla`, or Settings > Morrowind
+source > Vanilla); the exporter refuses to build it in Morroblivion mode.
 
 ## Rebuilding
 
@@ -169,12 +174,10 @@ python tools/release/make_game_select_esp.py        # -> output/TESGameSelect/
 python -m pytest tests/test_game_select_esp.py -v
 ```
 
-The build reads `MQ101` out of your installed `Skyrim.esm` (pass `--skyrim-esm`
-to point at another copy), writes the `.esp` and the empty `.seq`, then compiles
-both scripts. `package_start_mod.py` calls exactly this before zipping, so the
-archive can never lag the sources.
+The build reads `MQ101` and the vanilla Elder Scroll out of your installed
+`Skyrim.esm` (pass `--skyrim-esm` to point at another copy), writes the `.esp`
+and the `.seq`, then compiles the scripts. `package_start_mod.py` calls exactly
+this before zipping, so the archive can never lag the sources.
 
-The script sources of record are
-`TESGameSelect/scripts/source/TESGameSelectQuest.psc` and
-`TESGameSelectMQ101.psc`. The build stages a copy of them into
-`<outdir>/scripts/source/` as compiler input.
+The script sources of record are in `TESGameSelect/scripts/source/`. The build
+stages a copy of them into `<outdir>/scripts/source/` as compiler input.

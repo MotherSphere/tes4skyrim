@@ -2,42 +2,37 @@ ScriptName TESGameSelectMQ101 extends Quest Hidden
 {Threads of Prophecy — the MQ101 takeover.
 
 Attached to the VANILLA MQ101 record (0003372B), which this plugin overrides.
-The build RETARGETS the stage-0 / log-entry-0 fragment — the one vanilla points
-at QF_MQ101_0003372B.Fragment_2 and gates on GetGlobalValue(MQQuickstart) == 0,
-i.e. the real new-game path — to this script's RunTakeover.
+The build RETARGETS two fragments; nothing else about the record changes:
 
-Why retargeting, not appending: an APPENDED unconditional entry runs IN
-ADDITION to Fragment_2, whose whole body is `GameHour.SetValue(7);
-SetStage(10)`. Stage 10 is the entire opening: it equips the prisoner outfit,
-moves the player into the cart, plays the title sequence
-(Game.ShowTitleSequenceMenu) and the cart-roll sound. That is exactly the
-"credits play, cart still audible, player not transferred" failure. Replacing
-the fragment means NOTHING of the opening runs until the player has chosen —
-and choosing Skyrim just replays Fragment_2's two lines, after which stage 10
-does everything itself (Fragment_4 even MoveTo's the player into position, so
-no cart-position capture/restore is needed).
+  stage 0 / entry 0  QF_MQ101_0003372B.Fragment_2 (gated MQQuickstart == 0, the
+                     real new-game path) -> RunTakeover
+  stage 10 / entry 0 QF_MQ101_0003372B.Fragment_4 (the opening itself)
+                     -> RunOpening, which runs Fragment_4 with the player's
+                     items set aside so its RemoveAllItems takes nothing
 
-The menu is shown exactly once, after the initial load: stage 0 fires while
-the main menu / load screen is still up, and a Message.Show() issued then is
-rendered over the main menu, bashed by the load screen, and drawn again after
-it — the "popup appears twice" failure. The Is3DLoaded/Wait gate below defers
-the menu until the player is actually standing in the holding cell.}
+See docs/commentary/tesgameselect.md#mq101-takeover}
 
-; The selector quest that owns the menu and the per-game handoff.
+; The selector quest that owns the prompt and the per-game handoff.
 TESGameSelectQuest Property Selector Auto
 
 ; Skyrim's own empty interior cell marker (WIDeadBodyCleanupCellMarker) — the
-; player waits here while the menu is up, somewhere genuinely blank.
+; player waits here while the prompt is up, somewhere genuinely blank.
 ObjectReference Property HoldingCellMarker Auto
 
 ; Skyrim.esm's GameHour global (0x38). Choosing Skyrim replays vanilla
 ; Fragment_2 verbatim, and its first line is GameHour.SetValue(7).
 GlobalVariable Property GameHour Auto
 
+; An empty, non-respawning vanilla chest base (TreasChestSmallEMPTYNoRespawn)
+; that holds the player's items while vanilla stage 10 strips the player.
+Container Property StashChest Auto
+
+; The travel quest, told which game the new game began with.
+TESGameSelectTravel Property Travel Auto
+
 ; ---------------------------------------------------------------------------
 ; Fired from MQ101 stage 0, log entry 0 — the retargeted vanilla fragment.
-; Runs exactly once per new game (the entry keeps its MQQuickstart == 0
-; condition, so debug quickstarts bypass the takeover entirely).
+; Runs once per new game; debug quickstarts bypass it on their own entries.
 ; ---------------------------------------------------------------------------
 Function RunTakeover()
   If Selector == None
@@ -49,6 +44,10 @@ Function RunTakeover()
     Return
   EndIf
 
+  ; Before anything else: another game's opening may already be pulling the
+  ; player into its own start.
+  Selector.HoldOpeningMovers()
+
   ; Freeze the (not yet started) opening: no controls, no saving.
   Game.DisablePlayerControls()
   Game.SetInChargen(true, true, false)
@@ -58,38 +57,43 @@ Function RunTakeover()
     player.MoveTo(HoldingCellMarker)
   EndIf
 
-  ; Wait out the initial load. Utility.Wait only elapses while the game is
-  ; unpaused, so the first tick already lands after the load screen; the
-  ; Is3DLoaded check covers the MoveTo settling. Capped so a pathological
-  ; load can never wedge the takeover.
+  ; Wait out the initial load: a Message.Show() issued during it is drawn
+  ; twice. Utility.Wait only elapses while the game is unpaused. Capped so a
+  ; pathological load can never wedge the takeover.
   Int guard = 0
   While !player.Is3DLoaded() && guard < 200
     Utility.Wait(0.1)
     guard += 1
   EndWhile
 
-  ; Ask the question. Only records the choice — no side effects yet.
   Selector.RunSelection()
+  Selector.HoldOpeningsFor(Selector.ChosenGame)
 
-  ; Hand the engine back its default state before either path starts: vanilla
-  ; Fragment_2 ran with controls enabled and chargen-state clear, and the
-  ; converted chargens disable/enable to suit their own intros AFTER this.
+  ; A new game's player carries Skyrim's player base record items (iron
+  ; armor, potions, gold...), which only a main-menu `coc` is meant to keep;
+  ; vanilla strips them at stage 10, long after the player has loaded and put
+  ; them on. Strip them here, after the load and the prompt, whichever game is
+  ; chosen, so the stage-10 wrapper has nothing of them to hand back. Quest
+  ; items (the Elder Scroll) are kept by RemoveAllItems.
+  Game.GetPlayer().RemoveAllItems()
+
+  ; Hand the engine back its default state before either path starts.
   Game.SetInChargen(false, false, false)
   Game.EnablePlayerControls()
 
+  If !Selector.ChoseSkyrim()
+    Selector.BeginChosenGame()
+  EndIf
+  ; Otherwise the other game owns the player now. MQ101 stays RUNNING at stage
+  ; 0 — no cart, no Helgen, nothing downstream — until the scroll begins
+  ; Skyrim. 🛑 Never Stop() it: MQ101 is Run Once (DNAM 0x0100), so a stopped
+  ; MQ101 can never be started again and Skyrim could never be begun.
   If Selector.ChoseSkyrim()
     VanillaStart()
-  Else
-    Selector.BeginChosenGame()
-    If Selector.ChoseSkyrim()
-      ; The handoff found the chosen game broken and fell back.
-      VanillaStart()
-    Else
-      ; The other game owns the player now. MQ101 stays at stage 0 forever:
-      ; no cart, no Helgen, and nothing downstream (MQ102 is only started by
-      ; MQ101's own later stages) — the Skyrim main quest never advances.
-      Stop()
-    EndIf
+  EndIf
+  Selector.Selecting = false
+  If Travel != None
+    Travel.Arrive(Selector.ChosenGame)
   EndIf
 EndFunction
 
@@ -100,4 +104,41 @@ Function VanillaStart()
     GameHour.SetValue(7)
   EndIf
   SetStage(10)
+EndFunction
+
+; The travel scroll beginning Skyrim after another game: MQ101 is still
+; waiting at stage 0, so replay the normal start. False when it is not
+; running and will not start — a save from a build that stopped it, which Run
+; Once makes permanent.
+Bool Function BeginSkyrim()
+  If !IsRunning() && !Start()
+    Debug.Trace("[TESGameSelect] MQ101 was stopped and is Run Once; Skyrim cannot begin")
+    Return false
+  EndIf
+  VanillaStart()
+  Return true
+EndFunction
+
+; ---------------------------------------------------------------------------
+; Fired from MQ101 stage 10, log entry 0, in place of vanilla Fragment_4.
+; Fragment_4 opens with RemoveAllItems on the player, meant only for the
+; player base record's starting items, which the takeover has already
+; stripped on a new game; a player arriving from another game must keep what
+; they carry. Items come back unequipped; quest items never leave
+; (RemoveAllItems keeps them by default).
+; ---------------------------------------------------------------------------
+Function RunOpening()
+  Actor player = Game.GetPlayer()
+  ObjectReference stash = None
+  If StashChest != None && HoldingCellMarker != None
+    stash = HoldingCellMarker.PlaceAtMe(StashChest, 1, true)
+    player.RemoveAllItems(stash, true)
+  EndIf
+
+  ((Self as Quest) as QF_MQ101_0003372B).Fragment_4()
+
+  If stash != None
+    stash.RemoveAllItems(player, true)
+    stash.Delete()
+  EndIf
 EndFunction

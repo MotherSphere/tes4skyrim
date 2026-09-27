@@ -532,6 +532,17 @@ before the gate existed: TR_Mainland, whose chain is four long, took byte
 where Bloodmoon's belong. The refusal names each missing master and the command
 that converts it.
 
+**Morroblivion mode builds dependent mods only** (`morroblivion_allowed`).
+Morrowind.esm, Tribunal.esm and Bloodmoon.esm, and any plugin with no masters
+(a standalone TES3 game such as Arktwend), REFUSE the export in that mode. A
+standalone game owns every object it names, so bolting Morroblivion on as its
+master swaps its authored records for Morroblivion's (Arktwend's starting
+`common_shirt_01` became Morroblivion's `0commonUshirtU01`). The three vanilla
+files were silently exported in authored mode before; they now fail loudly so
+the mode setting is never mistaken for what was built. `convert.py
+--morrowind-source vanilla` builds one run in authored mode without changing
+the saved setting.
+
 The master list is the plugin's own `MAST` chain, in its order (`record_dir`,
 so an imported mod's folder resolves). The own load-order byte is the length of
 that list, the TES4 convention the importer's `load_master_export` re-keys

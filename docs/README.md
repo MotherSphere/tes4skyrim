@@ -102,6 +102,7 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [tes5_import_sound.md](commentary/tes5_import_sound.md) | tes5_import/record_types/sound.py - SOUN, SNDR and SOPM |
 | [tes5_import_world.md](commentary/tes5_import_world.md) | tes5_import/record_types/world.py - CELL, WRLD and placed references |
 | [tes5_import_weather.md](commentary/tes5_import_weather.md) | tes5_import/record_types/world.py - weather and climate |
+| [tesgameselect.md](commentary/tesgameselect.md) | tools/release/make_game_select_esp.py, TESGameSelect/ - the new-game menu, held openings, starting gear and the Elder Scroll travel item |
 | [tes_runtime_alchemy.md](commentary/tes_runtime_alchemy.md) | tes_runtime/tes/alchemy*.cpp, tes_runtime/tes/crafting.cpp, tes5_import/record_types/apparatus.py - alchemy apparatus open Skyrim's menu and scale the potion; the shared crafting bench |
 | [tes_runtime_crime.md](commentary/tes_runtime_crime.md) | tes_runtime/tes/crime.cpp, tes5_import/record_types/crime.py - bounty realms, jails and the arrest |
 | [tes_runtime_guns.md](commentary/tes_runtime_guns.md) | tes_runtime/fallout/fire.cpp - the gun shot, reload key and ammo restriction in FalloutRuntime |

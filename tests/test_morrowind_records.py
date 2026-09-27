@@ -735,6 +735,25 @@ def test_morroblivion_mode_refuses_without_the_patch(tmp_path):
     assert any(n == PATCH_NAME for n, _d in found), 'the patch is borrowed from'
 
 
+def test_morroblivion_mode_refuses_vanilla_and_standalone_plugins(tmp_path):
+    """Vanilla masters and masterless games never build in Morroblivion mode.
+
+    See: docs/commentary/tes4_export_morrowind.md#masters
+    """
+    from tes4_export.export_morrowind import MORROWIND_SOURCE_KEY, SOURCE_MORROBLIVION
+
+    export = tmp_path / 'export'
+    export.mkdir()
+    config = {MORROWIND_SOURCE_KEY: SOURCE_MORROBLIVION}
+    cases = (('Arktwend_English.esm', ()), ('Morrowind.esm', ()),
+             ('Tribunal.esm', ['Morrowind.esm']))
+    for name, masters in cases:
+        source = _tes3_records(tmp_path / name, [_rec('STAT', 'rock')],
+                               masters=masters)
+        assert run_export(name, source, str(export), config) is False, name
+        assert not (export / name).exists(), name
+
+
 def test_actor_drops_the_reference_to_a_package_that_never_emitted():
     """An unresolvable AI package must not leave the actor naming a missing PACK.
 

@@ -8,7 +8,8 @@ from pathlib import Path
 
 from asset_convert.havok.animation_data import fragment_path
 from asset_convert.havok.creature_pipeline import _kept_appends
-from convert_cli import build_parser, selected_steps, unscoped_steps
+from convert_cli import (apply_config_overrides, build_parser, selected_steps,
+                         unscoped_steps)
 
 
 def _steps(*argv):
@@ -30,6 +31,17 @@ def test_only_is_refused_where_it_cannot_narrow():
     assert unscoped_steps(args, steps) == ['meshes']
     args, steps = _steps('--meshes-only')
     assert unscoped_steps(args, steps) == []
+
+
+def test_morrowind_source_flag_overrides_the_config_for_one_run():
+    """`--morrowind-source` wins over the saved mode; without it the saved mode stands."""
+    config = {'morrowindSource': 'morroblivion'}
+    apply_config_overrides(build_parser().parse_args(
+        ['--morrowind-source', 'vanilla']), config)
+    assert config['morrowindSource'] == 'vanilla'
+    config = {'morrowindSource': 'morroblivion'}
+    apply_config_overrides(build_parser().parse_args([]), config)
+    assert config['morrowindSource'] == 'morroblivion'
 
 
 def test_a_scoped_run_keeps_the_fragments_gun_appends(tmp_path):

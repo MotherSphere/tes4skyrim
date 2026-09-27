@@ -96,8 +96,8 @@ create_pool_job()
 from source_paths import (get_paths, is_asset_only,
                           load_config, resolve_plugin_path)
 from asset_convert.sources import source_registry
-from convert_cli import (SCOPED_STEPS, build_parser, selected_steps,
-                         unscoped_steps)
+from convert_cli import (SCOPED_STEPS, apply_config_overrides, build_parser,
+                         selected_steps, unscoped_steps)
 import preflight
 import version as _version
 
@@ -1023,8 +1023,7 @@ def _run_pipeline():
     """Parse the command line, then run each selected step over every plugin."""
     args = build_parser().parse_args()
     config = load_config(args.config)
-    if args.no_engine_branches:
-        config["speedtreeEngineBranches"] = False
+    apply_config_overrides(args, config)
     tes4_data, tes5_data = get_paths(config)
     tes4_data = args.data_dir or tes4_data
     source_registry.select_directory(tes4_data)

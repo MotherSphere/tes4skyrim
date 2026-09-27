@@ -224,6 +224,12 @@ absent file as `{}`, and each consumer falls back on its own constant
 An explicit `--config PATH` is the one exception: a named file that does not
 exist raises, because that is a typo rather than a fresh install.
 
+**Per-run overrides** change a setting for one run without saving it
+(`convert_cli.apply_config_overrides`): `--morrowind-source vanilla|morroblivion`
+picks the Morrowind export mode, so an agent can build Arktwend in authored mode
+and Tamriel Rebuilt in Morroblivion mode back to back without touching the
+saved setting; `--no-engine-branches` forces the Python SpeedTree generator.
+
 <a id="run-logs"></a>
 ### Run logs
 

@@ -6,6 +6,8 @@ Split out of convert.py.  Nothing here runs a phase.
 import argparse
 
 from core.collision_options import WINDING_FIX_DEFAULT_PLUGINS
+from tes4_export.export_morrowind import (MORROWIND_SOURCE_KEY,
+                                          SOURCE_MORROBLIVION, SOURCE_VANILLA)
 
 #: Pipeline steps in run order, with the `--*-only` flag that selects each alone.
 STEP_FLAGS = (
@@ -58,6 +60,14 @@ def unscoped_steps(args, steps: list) -> list:
     return [step for step in steps if step not in SCOPED_STEPS] if args.only else []
 
 
+def apply_config_overrides(args, config: dict) -> None:
+    """Let this run's flags override conversion_config.json, without saving it."""
+    if args.no_engine_branches:
+        config["speedtreeEngineBranches"] = False
+    if args.morrowind_source:
+        config[MORROWIND_SOURCE_KEY] = args.morrowind_source
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The full convert.py argument parser."""
     parser = argparse.ArgumentParser(
@@ -94,6 +104,12 @@ def _add_run_args(parser) -> None:
                              "the DEFAULT and already fall back to Python per "
                              "tree when no Oblivion.exe is configured or the "
                              "native harness is missing.")
+    parser.add_argument("--morrowind-source",
+                        choices=(SOURCE_VANILLA, SOURCE_MORROBLIVION),
+                        help="Export Morrowind-engine plugins in this mode for "
+                             "this run only, instead of the configured "
+                             "Settings > Morrowind source (which is left "
+                             "unchanged).")
     parser.add_argument("--only", nargs="+", metavar="NAME",
                         help="Scope the stage to these units instead of "
                              "rebuilding all of them. Honored by "

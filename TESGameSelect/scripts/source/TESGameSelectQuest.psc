@@ -1,26 +1,24 @@
 ScriptName TESGameSelectQuest extends Quest Conditional
-{Threads of Prophecy — new-game game selector.
-
-Driven from the MQ101 stage-0 takeover (see TESGameSelectMQ101.psc), which
-parks the player in a holding cell, calls RunSelection() to ask the question,
-and then either replays the vanilla opening or calls BeginChosenGame() to hand
-off to a converted game.
+{Threads of Prophecy — detects the installed games, asks which one a new game
+begins, and starts a game on request: from the MQ101 takeover on a new game,
+or from the Elder Scroll's travel menu later.
 
 Every foreign form is resolved at runtime with Game.GetFormFromFile(), so this
 plugin masters only Skyrim.esm and ships to users with any subset of the
 converted games installed, in any load order. A game whose plugin is absent
-never appears in the menu.}
+never appears in a menu.
+See docs/commentary/tesgameselect.md}
 
 ; ---------------------------------------------------------------------------
 ; Plugin file names. Properties rather than literals so a repack for a renamed
 ; or translated plugin needs no recompile — just an xEdit property edit.
 ; ---------------------------------------------------------------------------
-String Property OblivionPlugin     = "Oblivion.esm"     Auto
-String Property NehrimPlugin       = "Nehrim.esm"       Auto
-String Property MorroblivionPlugin = "Morrowind_ob.esm" Auto
-String Property FalloutNVPlugin     = "FalloutNV.esm"   Auto
-String Property MorrowindPlugin     = "Morrowind.esm"   Auto
-String Property ArktwendPlugin      = "Arktwend_English.esm" Auto
+String Property OblivionPlugin     = "Oblivion.esm"         Auto
+String Property MorrowindPlugin    = "Morrowind.esm"        Auto
+String Property MorroblivionPlugin = "Morrowind_ob.esm"     Auto
+String Property NehrimPlugin       = "Nehrim.esm"           Auto
+String Property ArktwendPlugin     = "Arktwend_English.esm" Auto
+String Property FalloutNVPlugin    = "FalloutNV.esm"        Auto
 
 ; ---------------------------------------------------------------------------
 ; Per-game entry points. GetFormFromFile takes a form's ID *within its own
@@ -44,6 +42,11 @@ Int Property NehrimChargenID       = 0x0002466E Auto
 Int Property NehrimStartMarkerID   = 0x00000D33 Auto
 Int Property NehrimMainQuestID     = 0x00000811 Auto
 Int Property NehrimChargenStage    = 5          Auto
+Int Property NehrimMainQuestStage  = 1          Auto
+; TES4PlayerScripts, the converter's quest hosting Nehrim's player scripts. Its
+; GlobalplayerScript polls every tenth of a second and starts MQ00 at stage 1
+; the first time it runs, so it waits with the opening.
+Int Property NehrimPlayerScriptsID = 0x0083563B Auto
 
 Int Property MorroChargenID        = 0x00F0A28C Auto
 Int Property MorroStartMarkerID    = 0x00F0A278 Auto
@@ -52,9 +55,7 @@ Int Property MorroChargenStage     = 1          Auto
 ; FalloutNV  VCG00 00102037 — stage 0 IS the whole opening: it moves the player
 ;            to VCG01PlayerStartMarkerREF 00103E6B, sets the hour, forces the
 ;            cemetery weather, plays the intro and advances itself to stage 90,
-;            which reaches Doc Mitchell's house. Nothing to dress the player in:
-;            FalloutNV's player record carries only the Pip-Boy and its glove,
-;            and that same stage opens by removing both.
+;            which reaches Doc Mitchell's house.
 Int Property FalloutNVChargenID     = 0x00102037 Auto
 Int Property FalloutNVStartMarkerID = 0x00103E6B Auto
 Int Property FalloutNVChargenStage  = 0          Auto
@@ -68,37 +69,33 @@ Int Property FalloutNVChargenStage  = 0          Auto
 ; 🛑 The probe must be a BASE record, like every other game's chargen quest —
 ; MWJ_A1_1_FindSpymaster, the main quest's opening journal. GetFormFromFile
 ; resolves a non-persistent REFR only while its cell is loaded, and the
-; selector runs from Skyrim's holding cell, so a placed reference (the first
-; version of this probe used CharGen_Bed) answers None however the load order
-; looks and the game is never offered.
-Int Property MorrowindProbeID       = 0x00192940 Auto
-
-; CharGenState, the GLOB `Main` polls to launch `CharGen`. Setting it to 1 IS
-; the start of vanilla Morrowind, which is what the TES3 engine did on a new
-; game and what Skyrim's never does.
+; selector runs from Skyrim's holding cell, so a placed reference answers None
+; however the load order looks and the game is never offered.
+Int Property MorrowindProbeID        = 0x00192940 Auto
 Int Property MorrowindChargenStateID = 0x006472DD Auto
 
 ; Arktwend is a TES3 total conversion and starts the same way: its own `Main`
 ; polls its own CharGenState, and its `CharGen` moves the player to
 ; "Melee, Monastery". The GLOB is a base record, so it is the probe as well.
-Int Property ArktwendChargenStateID = 0x006472DD Auto
+Int Property ArktwendChargenStateID  = 0x006472DD Auto
 
 ; ---------------------------------------------------------------------------
-; Starting equipment. On a new game the player carries Skyrim's base-record
-; inventory (16 debug items) — vanilla clears it with RemoveAllItems at MQ101
-; stage 10, which the takeover prevents, so the handoff clears it instead and
-; dresses the player in what the chosen game's author gave them: the TES4
-; player base record's own inventory.
+; Starting equipment: what each game's own player record carried, added and
+; worn. The inventory is never cleared.
+; See: docs/commentary/tesgameselect.md#starting-equipment
 ;
-;   Oblivion      WristIrons + the Sack Cloth shirt/pants/sandals, all worn
+;   Oblivion      WristIrons + the Sack Cloth shirt/pants/sandals
 ;                 (Oblivion.esm NPC_ 00000007).
 ;   Nehrim        Flickweste / Geschnürte Lederhose / Jägermokassins worn,
 ;                 plus torch, Tagebuch and the anonymous MQ00 note carried
 ;                 (Nehrim.esm NPC_ 00000007).
 ;   Morroblivion  Morrowind_ob.esm does not override the player record, so a
-;                 TES4 Morroblivion prisoner inherited Oblivion's set — its
-;                 master file, so it is always present. Resolved from
-;                 OblivionPlugin below.
+;                 TES4 Morroblivion prisoner inherited Oblivion's set.
+;   Morrowind     common shirt / pants / shoes (Morrowind.esm `Player`).
+;   Arktwend      the same three plus common_robe_02_rr (Arktwend's own
+;                 `Player`); the robe is put on last so it is the one worn.
+;   FalloutNV     nothing: VCG00 stage 0 removes the Pip-Boy, the only item
+;                 its player record carries.
 ; ---------------------------------------------------------------------------
 Int Property OblivionWristIronsID  = 0x000BE335 Auto
 Int Property OblivionShirtID       = 0x00027319 Auto
@@ -112,95 +109,90 @@ Int Property NehrimTorchID         = 0x00000D49 Auto
 Int Property NehrimDiaryID         = 0x00000B96 Auto
 Int Property NehrimNoteID          = 0x00000AED Auto
 
+Int Property MorrowindShirtID      = 0x007E3DE2 Auto
+Int Property MorrowindPantsID      = 0x00A5FBF7 Auto
+Int Property MorrowindShoesID      = 0x00C73369 Auto
+
+Int Property ArktwendShirtID       = 0x007E3DE2 Auto
+Int Property ArktwendPantsID       = 0x00A5FBF7 Auto
+Int Property ArktwendShoesID       = 0x00C73369 Auto
+Int Property ArktwendRobeID        = 0x00B75B56 Auto
+
 ; ---------------------------------------------------------------------------
-; The menu.
-;
-; Message.Show() renders a MESG record whose buttons are fixed at authoring
-; time, but the set of installed games is only known at runtime. The vanilla
-; mechanism for that is a CONDITION on each button (dunMiddenNamesMenuMSG does
-; exactly this): a button whose condition fails is simply not drawn.
-;
-; Crucially, hidden buttons do NOT renumber the rest — Show() returns the
-; button's ORIGINAL index, not its position among the visible ones. Vanilla's
-; dunMiddenHandSculptureSCRIPT relies on this, testing `i == 0`..`i == 4`
-; against fixed ring identities while its conditions hide arbitrary subsets.
-; So the returned index maps directly onto the GAME_* constants below.
+; The new-game prompt. A MESG's buttons are fixed at authoring time, so each
+; converted game's button carries a GetGlobalValue(<its Has global>) == 1
+; condition (vanilla dunMiddenNamesMenuMSG does exactly this). Hidden buttons
+; do NOT renumber the rest — Show() returns the button's own index — so the
+; returned index is the GAME_* id. The DESC prologue cannot be conditioned, so
+; there is one variant per installed set: entry [installedMask] of Menus.
 ; ---------------------------------------------------------------------------
-; The prompt, one variant per subset of the gated games. A MESG's DESC prologue
-; names each game in turn and carries no condition, so the variant whose text
-; names exactly the installed set is entry [installedMask] of this list. Bit 0
-; is Oblivion, bit 1 Morroblivion, bit 2 Nehrim, bit 3 FalloutNV, bit 4
-; Morrowind, bit 5 Arktwend — the gated BUTTONS order in
-; make_game_select_esp.py.
 FormList Property Menus Auto
 
 GlobalVariable Property HasSkyrim       Auto
 GlobalVariable Property HasOblivion     Auto
-GlobalVariable Property HasNehrim       Auto
-GlobalVariable Property HasMorroblivion Auto
-GlobalVariable Property HasFalloutNV    Auto
 GlobalVariable Property HasMorrowind    Auto
+GlobalVariable Property HasMorroblivion Auto
+GlobalVariable Property HasNehrim       Auto
 GlobalVariable Property HasArktwend     Auto
+GlobalVariable Property HasFalloutNV    Auto
 
-; Set true the moment the menu has been shown, so a second entry (quest
+; Set true the moment the prompt has been shown, so a second entry (quest
 ; restart, re-add on an existing save, a stray SetStage) can never re-ask.
-; Persisted in the save as quest state, unlike a script-local.
 Bool Property HasRun = false Auto Conditional
 
-; The game the player picked, as a GAME_* id. Read by the MQ101 takeover to
-; decide whether to release the vanilla opening or leave for another game.
+; The game the new game began with, as a GAME_* id.
 Int Property ChosenGame = 0 Auto Conditional
 
-; Game identifiers, in the button order the MESG declares.
+; True from the moment the prompt is shown until the takeover has started the
+; chosen game. ChosenGame reads Skyrim (0) meanwhile, so nothing may take it
+; as the answer yet.
+Bool Property Selecting = false Auto
+
+; Game identifiers, in the button order the MESGs declare.
 Int Property GAME_SKYRIM       = 0 AutoReadOnly
 Int Property GAME_OBLIVION     = 1 AutoReadOnly
-Int Property GAME_MORROBLIVION = 2 AutoReadOnly
-Int Property GAME_NEHRIM       = 3 AutoReadOnly
-Int Property GAME_FALLOUTNV    = 4 AutoReadOnly
-Int Property GAME_MORROWIND    = 5 AutoReadOnly
-Int Property GAME_ARKTWEND     = 6 AutoReadOnly
+Int Property GAME_MORROWIND    = 2 AutoReadOnly
+Int Property GAME_MORROBLIVION = 3 AutoReadOnly
+Int Property GAME_NEHRIM       = 4 AutoReadOnly
+Int Property GAME_ARKTWEND     = 5 AutoReadOnly
+Int Property GAME_FALLOUTNV    = 6 AutoReadOnly
+Int Property GAME_COUNT        = 7 AutoReadOnly
 
-; Number of games offered, counting Skyrim. 1 means "Skyrim only" — no menu.
+; The GAME_* numbering this save was written with. Saves from before the
+; reorder load with 0 and are renumbered once by MigrateIds().
+; See: docs/commentary/tesgameselect.md#id-migration
+Int Property IdVersion  = 0 Auto
+Int Property ID_VERSION = 1 AutoReadOnly
+
+; Number of games offered, counting Skyrim. 1 means "Skyrim only" — no prompt.
 Int gameCount
 
-; Bitmask of the installed gated games, picking the MESG variant whose prologue
-; names exactly them: bit 0 Oblivion, 1 Morroblivion, 2 Nehrim, 3 FalloutNV,
-; 4 Morrowind, 5 Arktwend.
+; Bitmask of the installed gated games: bit 0 Oblivion, 1 Morrowind,
+; 2 Morroblivion, 3 Nehrim, 4 Arktwend, 5 FalloutNV.
 Int installedMask
 
 ; ---------------------------------------------------------------------------
-; Selection: show the menu and record the choice. NO side effects — the
-; takeover restores engine-default control/chargen state between this and
-; BeginChosenGame(), so nothing done here would survive anyway.
-;
-; Called ONLY from the MQ101 stage-0 takeover, never from OnInit: OnInit on a
-; Start-Game-Enabled quest can fire more than once (it runs again when the
-; quest is restarted or re-added to a save), which is what made the menu pop
-; up twice in the very first build. The retargeted stage-0 fragment runs
-; exactly once per new game.
+; Selection: show the prompt and record the choice. Called ONLY from the MQ101
+; stage-0 takeover, which runs exactly once per new game.
 ; ---------------------------------------------------------------------------
 Function RunSelection()
   If HasRun
     Return
   EndIf
   HasRun = true
+  Selecting = true
+  IdVersion = ID_VERSION
 
   DetectInstalledGames()
-
-  ; Only Skyrim present — nothing worth asking. The takeover replays the
-  ; vanilla opening.
   If gameCount <= 1
     ChosenGame = GAME_SKYRIM
     Return
   EndIf
 
-  ; The returned index is the button's own index in the MESG, unaffected by
-  ; which buttons the conditions hid — so it IS the game id.
   Int game = (Menus.GetAt(installedMask) as Message).Show()
-
-  ; An unexpected index (a mod-added button, a cancelled menu) is treated as
-  ; Skyrim: the safe direction, since it leaves the vanilla start intact.
-  If game < GAME_OBLIVION || game > GAME_ARKTWEND
+  ; A mod-added button or a cancelled menu is treated as Skyrim, the safe
+  ; direction: it leaves the vanilla start intact.
+  If game < GAME_OBLIVION || game >= GAME_COUNT
     game = GAME_SKYRIM
   EndIf
   ChosenGame = game
@@ -210,82 +202,147 @@ Bool Function ChoseSkyrim()
   Return ChosenGame == GAME_SKYRIM
 EndFunction
 
+; Renumber a save written before the reorder (Oblivion 1, Morroblivion 2,
+; Nehrim 3, FalloutNV 4, Morrowind 5, Arktwend 6).
+Function MigrateIds()
+  If IdVersion == ID_VERSION
+    Return
+  EndIf
+  If HasRun
+    Int[] renumbered = new Int[7]
+    renumbered[0] = GAME_SKYRIM
+    renumbered[1] = GAME_OBLIVION
+    renumbered[2] = GAME_MORROBLIVION
+    renumbered[3] = GAME_NEHRIM
+    renumbered[4] = GAME_FALLOUTNV
+    renumbered[5] = GAME_MORROWIND
+    renumbered[6] = GAME_ARKTWEND
+    If ChosenGame >= 0 && ChosenGame < GAME_COUNT
+      ChosenGame = renumbered[ChosenGame]
+    EndIf
+  EndIf
+  IdVersion = ID_VERSION
+EndFunction
+
 ; ---------------------------------------------------------------------------
-; Handoff: dress the player and start the chosen game. Called by the takeover
-; after it has restored controls and cleared the chargen state; if the chosen
-; game turns out broken, this resets ChosenGame to Skyrim and the takeover
-; runs the vanilla opening instead.
+; Openings that start themselves. Skyrim starts every Start-Game-Enabled quest
+; of every loaded plugin on every new game, and Nehrim marks its opening that
+; way: Charactergen moves the player into Nehrim's start cave within about half
+; a second, and Nehrim's player script starts MQ00 at stage 1. The player
+; script quest is held first — stopping a quest cancels its aliases' polling —
+; so nothing restarts MQ00 once it is reset. BeginNehrim restarts all three.
+; See: docs/commentary/tesgameselect.md#opening-hold
+; ---------------------------------------------------------------------------
+
+; Before the choice: only what would move the player. MQ00 is left alone, as
+; stopping a quest already in the journal shows it failing, and Nehrim may
+; well be the choice.
+Function HoldOpeningMovers()
+  HoldQuest(NehrimPlayerScriptsID, NehrimPlugin, false)
+  HoldQuest(NehrimChargenID, NehrimPlugin, true)
+EndFunction
+
+; Nehrim is not being played: its whole opening waits, MQ00 included. Run once
+; another game is chosen, and on every load until Nehrim is begun.
+Function HoldSelfStartingOpenings()
+  HoldOpeningMovers()
+  HoldQuest(NehrimMainQuestID, NehrimPlugin, true)
+EndFunction
+
+; After the choice: the movers again (a quest started after MQ101 was not yet
+; running the first time), and MQ00 too unless Nehrim is the game begun.
+Function HoldOpeningsFor(Int game)
+  If game == GAME_NEHRIM
+    HoldOpeningMovers()
+  Else
+    HoldSelfStartingOpenings()
+  EndIf
+EndFunction
+
+; Reset() before Stop(): Reset does nothing on a quest that is already stopped.
+; Resetting undoes whatever stage already ran, journal entries included; the
+; player-script quest has no stages and is only stopped.
+Function HoldQuest(Int formID, String plugin, Bool reset)
+  Quest q = GetQuestFrom(formID, plugin)
+  If q != None && q.IsRunning()
+    If reset
+      q.Reset()
+    EndIf
+    q.Stop()
+    Debug.Trace("[TESGameSelect] held " + q + " from " + plugin + " until chosen")
+  EndIf
+EndFunction
+
+; ---------------------------------------------------------------------------
+; Starting a game. BeginChosenGame is the new-game path: if the chosen game
+; turns out broken it resets ChosenGame to Skyrim and the takeover runs the
+; vanilla opening instead. BeginGame is shared with the travel scroll, which
+; skips the race menu because the character already exists.
 ; ---------------------------------------------------------------------------
 Function BeginChosenGame()
-  If ChosenGame == GAME_OBLIVION
-    BeginOblivion()
-  ElseIf ChosenGame == GAME_NEHRIM
-    BeginNehrim()
-  ElseIf ChosenGame == GAME_MORROBLIVION
-    BeginMorroblivion()
-  ElseIf ChosenGame == GAME_FALLOUTNV
-    BeginFalloutNV()
-  ElseIf ChosenGame == GAME_MORROWIND
-    BeginTes3(MorrowindPlugin, MorrowindChargenStateID)
-  ElseIf ChosenGame == GAME_ARKTWEND
-    BeginTes3(ArktwendPlugin, ArktwendChargenStateID)
-  EndIf
-
-  ; FalloutNV and the TES3 games show their own menus — FalloutNV at VCG01
-  ; stage 36 (Doc Mitchell's reflectron), Morrowind from CharGenRaceNPC, the
-  ; dock guard, who calls EnableRaceMenu once he has asked where you are from,
-  ; and Arktwend from its own `CharGen`. Asking here too would put one up
-  ; before any of them had spoken.
-  If ChoseSkyrim() || ChosenGame == GAME_FALLOUTNV \
-     || ChosenGame == GAME_MORROWIND || ChosenGame == GAME_ARKTWEND
+  If !BeginGame(ChosenGame)
+    Debug.Trace("[TESGameSelect] game " + ChosenGame + " could not start; resuming Skyrim")
+    ChosenGame = GAME_SKYRIM
     Return
   EndIf
 
-  ; The TES4 engine popped the race menu (with the name prompt) automatically
-  ; on every new game — in the Imperial cell, in Nehrim's start cave, on the
-  ; prison ship. Skyrim's engine only shows it when a script asks, so ask now
-  ; that the chosen game's opening cell is up. The same beat vanilla's own
-  ; quickstart uses: moveto, a settling Wait, then ShowRaceMenu (menus queue
-  ; behind each other, so the converted intro simply resumes when it closes).
-  ;
-  ; FalloutNV is the EXCEPTION and returns above: its intro shows its OWN race
-  ; menu, authored as Doc Mitchell's reflectron at VCG01 stage 36. Asking here
-  ; too put one up before Doc had spoken, then his lines, then the real one.
-  Utility.Wait(0.5)
-  Game.ShowRaceMenu()
+  ; The TES4 engine popped the race menu (with the name prompt) on every new
+  ; game; Skyrim's only shows it when a script asks. FalloutNV and the TES3
+  ; games show their own from inside their openings (Doc Mitchell's
+  ; reflectron, the census office), so asking here too would put one up
+  ; before any of them had spoken.
+  If ChosenGame == GAME_OBLIVION || ChosenGame == GAME_MORROBLIVION \
+     || ChosenGame == GAME_NEHRIM
+    Utility.Wait(0.5)
+    Game.ShowRaceMenu()
+  EndIf
+EndFunction
+
+; Start one converted game; false when its plugin or entry point is missing.
+Bool Function BeginGame(Int game)
+  If game == GAME_OBLIVION
+    Return BeginOblivion()
+  ElseIf game == GAME_MORROWIND
+    Return BeginMorrowind()
+  ElseIf game == GAME_MORROBLIVION
+    Return BeginMorroblivion()
+  ElseIf game == GAME_NEHRIM
+    Return BeginNehrim()
+  ElseIf game == GAME_ARKTWEND
+    Return BeginArktwend()
+  ElseIf game == GAME_FALLOUTNV
+    Return BeginFalloutNV()
+  EndIf
+  Return false
 EndFunction
 
 ; ---------------------------------------------------------------------------
 ; Detection
 ; ---------------------------------------------------------------------------
-
 Function DetectInstalledGames()
   gameCount = 0
   installedMask = 0
 
-  ; Skyrim is always available — it is the game we are running inside, and it
-  ; owns no mask bit because its prologue line is unconditional.
+  ; Skyrim is always available and owns no mask bit: its line is unconditional.
   SetGate(HasSkyrim, true, 0)
   SetGate(HasOblivion, IsPluginPresent(OblivionPlugin, OblivionChargenID), 1)
+  SetGate(HasMorrowind, IsPluginPresent(MorrowindPlugin, MorrowindProbeID), 2)
   SetGate(HasMorroblivion, \
-          IsPluginPresent(MorroblivionPlugin, MorroChargenID), 2)
-  SetGate(HasNehrim, IsPluginPresent(NehrimPlugin, NehrimChargenID), 4)
-  SetGate(HasFalloutNV, \
-          IsPluginPresent(FalloutNVPlugin, FalloutNVChargenID), 8)
-  SetGate(HasMorrowind, \
-          IsPluginPresent(MorrowindPlugin, MorrowindProbeID), 16)
+          IsPluginPresent(MorroblivionPlugin, MorroChargenID), 4)
+  SetGate(HasNehrim, IsPluginPresent(NehrimPlugin, NehrimChargenID), 8)
   SetGate(HasArktwend, \
-          IsPluginPresent(ArktwendPlugin, ArktwendChargenStateID), 32)
+          IsPluginPresent(ArktwendPlugin, ArktwendChargenStateID), 16)
+  SetGate(HasFalloutNV, \
+          IsPluginPresent(FalloutNVPlugin, FalloutNVChargenID), 32)
 
-  ; One line naming what was found. A menu that never appeared, or appeared
-  ; with the wrong buttons, is ALWAYS this pass: gameCount 1 means nothing was
-  ; detected and the takeover runs the vanilla opening with no prompt at all.
+  ; A menu that never appeared, or appeared with the wrong buttons, is ALWAYS
+  ; this pass: gameCount 1 means nothing was detected.
   Debug.Trace("[TESGameSelect] detected " + gameCount + " game(s), mask " \
               + installedMask)
 EndFunction
 
 Function SetGate(GlobalVariable gate, Bool present, Int maskBit)
-  ; The global drives that button's MESG condition: 1 shows it, 0 hides it.
+  ; The global drives that game's button conditions: 1 shows it, 0 hides it.
   If gate != None
     If present
       gate.SetValue(1.0)
@@ -293,7 +350,6 @@ Function SetGate(GlobalVariable gate, Bool present, Int maskBit)
       gate.SetValue(0.0)
     EndIf
   EndIf
-
   If present
     gameCount += 1
     installedMask += maskBit
@@ -303,10 +359,6 @@ EndFunction
 Bool Function IsPluginPresent(String plugin, Int probeID)
   ; GetFormFromFile returns None when the file is not in the load order, so a
   ; successful lookup of a form we know that file defines proves it is loaded.
-  ;
-  ; It takes the form's id WITHIN ITS OWN FILE — the low 24 bits — so a plugin
-  ; that masters Skyrim.esm still probes as 0x00xxxxxx even though its records
-  ; carry index 01 on disk.
   Bool found = Game.GetFormFromFile(probeID, plugin) != None
   If !found
     Debug.Trace("[TESGameSelect] " + plugin + " not found (probe " \
@@ -316,132 +368,120 @@ Bool Function IsPluginPresent(String plugin, Int probeID)
 EndFunction
 
 ; ---------------------------------------------------------------------------
-; Per-game handoff
-;
-; Each converted game's chargen quest owns its own opening: its stage result
-; script moves the player, starts the companion quests, and disables or
-; enables controls to suit its own intro. We only dress the player, move them
-; to that game's start marker, and set the stage its own author wrote as "the
-; game begins here" — then get out of the way. Skyrim's opening never started:
-; the takeover replaced the fragment that would have launched it.
+; Per-game handoff. Each converted game's opening owns itself: we dress the
+; player, move them to that game's start marker, and set the stage its own
+; author wrote as "the game begins here" — then get out of the way.
 ; ---------------------------------------------------------------------------
-
-Function BeginOblivion()
+Bool Function BeginOblivion()
   Quest chargen = GetQuestFrom(OblivionChargenID, OblivionPlugin)
   If chargen == None
-    FallBackToSkyrim()
-    Return
+    Return false
   EndIf
+  WearOblivionPrisonerSet()
+  HandOff(chargen, OblivionChargenStage, \
+          GetRefFrom(OblivionStartMarkerID, OblivionPlugin))
+  Return true
+EndFunction
 
-  StripPlayer()
+Bool Function BeginMorroblivion()
+  Quest chargen = GetQuestFrom(MorroChargenID, MorroblivionPlugin)
+  If chargen == None
+    Return false
+  EndIf
+  WearOblivionPrisonerSet()
+  HandOff(chargen, MorroChargenStage, \
+          GetRefFrom(MorroStartMarkerID, MorroblivionPlugin))
+  Return true
+EndFunction
+
+Function WearOblivionPrisonerSet()
   WearFrom(OblivionPlugin, OblivionShirtID)
   WearFrom(OblivionPlugin, OblivionPantsID)
   WearFrom(OblivionPlugin, OblivionShoesID)
   WearFrom(OblivionPlugin, OblivionWristIronsID)
-
-  HandOff(chargen, OblivionChargenStage, \
-          GetRefFrom(OblivionStartMarkerID, OblivionPlugin))
 EndFunction
 
-Function BeginNehrim()
+Bool Function BeginNehrim()
   Quest chargen = GetQuestFrom(NehrimChargenID, NehrimPlugin)
   If chargen == None
-    FallBackToSkyrim()
-    Return
+    Return false
   EndIf
-
-  StripPlayer()
   WearFrom(NehrimPlugin, NehrimShirtID)
   WearFrom(NehrimPlugin, NehrimPantsID)
   WearFrom(NehrimPlugin, NehrimShoesID)
   CarryFrom(NehrimPlugin, NehrimTorchID)
   CarryFrom(NehrimPlugin, NehrimDiaryID)
   CarryFrom(NehrimPlugin, NehrimNoteID)
-
   HandOff(chargen, NehrimChargenStage, \
           GetRefFrom(NehrimStartMarkerID, NehrimPlugin))
 
-  ; Nehrim's intro is driven by MQ00, not by Charactergen — Charactergen only
-  ; places the player, and MQ00 stage 2 is what stops it and hands controls
-  ; back. In Nehrim itself MQ00 is Start-Game-Enabled, but that flag only fires
-  ; for Nehrim's OWN new game, so start it explicitly here.
-  ;
-  ; Its stage is deliberately NOT set: Nehrim's GlobalplayerScript polls
-  ; `If StartQuest == 0 -> MQ00.SetStage(1)` and drives the opening from there,
-  ; so forcing a stage would race that script rather than help it.
+  ; MQ00 drives Nehrim's intro; its stage 2 stops Charactergen and hands the
+  ; controls back. Nehrim's player script sets stage 1 only ONCE, and it may
+  ; have spent that before HoldSelfStartingOpenings reset the quest, so the
+  ; stage is set here. Setting a done stage again does nothing.
   Quest mq00 = GetQuestFrom(NehrimMainQuestID, NehrimPlugin)
-  If mq00 != None && !mq00.IsRunning()
-    mq00.Start()
+  If mq00 != None
+    If !mq00.IsRunning()
+      mq00.Start()
+    EndIf
+    If mq00.GetStage() < NehrimMainQuestStage
+      mq00.SetStage(NehrimMainQuestStage)
+    EndIf
   EndIf
+  Quest playerScripts = GetQuestFrom(NehrimPlayerScriptsID, NehrimPlugin)
+  If playerScripts != None && !playerScripts.IsRunning()
+    playerScripts.Start()
+  EndIf
+  Return true
 EndFunction
 
-Function BeginMorroblivion()
-  Quest chargen = GetQuestFrom(MorroChargenID, MorroblivionPlugin)
-  If chargen == None
-    FallBackToSkyrim()
-    Return
-  EndIf
-
-  ; A TES4 Morroblivion prisoner wore Oblivion's starting set — Morroblivion
-  ; never overrides the player record, so it inherited its master file's.
-  StripPlayer()
-  WearFrom(OblivionPlugin, OblivionShirtID)
-  WearFrom(OblivionPlugin, OblivionPantsID)
-  WearFrom(OblivionPlugin, OblivionShoesID)
-  WearFrom(OblivionPlugin, OblivionWristIronsID)
-
-  HandOff(chargen, MorroChargenStage, \
-          GetRefFrom(MorroStartMarkerID, MorroblivionPlugin))
-EndFunction
-
-Function BeginFalloutNV()
+Bool Function BeginFalloutNV()
   Quest chargen = GetQuestFrom(FalloutNVChargenID, FalloutNVPlugin)
   If chargen == None
-    FallBackToSkyrim()
-    Return
+    Return false
   EndIf
-
-  ; Nothing to wear: VCG00 stage 0 strips the Pip-Boy the player record carries,
-  ; so only Skyrim's own debug inventory has to go.
-  StripPlayer()
-
   HandOff(chargen, FalloutNVChargenStage, \
           GetRefFrom(FalloutNVStartMarkerID, FalloutNVPlugin))
+  Return true
 EndFunction
 
-; A TES3 game (vanilla Morrowind, Arktwend) has no chargen quest: its opening
-; is object scripts gated on the TES3 global CharGenState, and setting that to
-; 1 is the whole start. `Main` — which the runtime starts by itself — then
-; launches `CharGen`, which positions the player itself (the Imperial Prison
-; Ship; Arktwend's monastery), so no marker is moved to and no stage is set.
-;
-; The global is a real GLOB in the converted plugin, which is why this is a
-; plain SetValue: MorrowindRuntime mirrors it back into its own global space
-; each tick, so a write here reaches the scripts polling it.
-;
-; Morrowind's player record carries no inventory (the gear comes from the
-; census office stuff room), so stripping Skyrim's debug items is the rest.
+Bool Function BeginMorrowind()
+  If !BeginTes3(MorrowindPlugin, MorrowindChargenStateID)
+    Return false
+  EndIf
+  WearFrom(MorrowindPlugin, MorrowindShirtID)
+  WearFrom(MorrowindPlugin, MorrowindPantsID)
+  WearFrom(MorrowindPlugin, MorrowindShoesID)
+  Return true
+EndFunction
+
+Bool Function BeginArktwend()
+  If !BeginTes3(ArktwendPlugin, ArktwendChargenStateID)
+    Return false
+  EndIf
+  WearFrom(ArktwendPlugin, ArktwendShirtID)
+  WearFrom(ArktwendPlugin, ArktwendPantsID)
+  WearFrom(ArktwendPlugin, ArktwendShoesID)
+  WearFrom(ArktwendPlugin, ArktwendRobeID)
+  Return true
+EndFunction
+
+; A TES3 game (vanilla Morrowind, Arktwend) has no chargen quest: setting its
+; CharGenState global to 1 is the whole start. `Main` then launches `CharGen`,
+; which positions the player itself, so no marker is moved to and no stage is
+; set. MorrowindRuntime mirrors the GLOB back into its own global space each
+; tick, so a write here reaches the scripts polling it.
 ; See: docs/commentary/morrowind_runtime.md#vanilla-morrowind-chargen
-Function BeginTes3(String plugin, Int chargenStateID)
+Bool Function BeginTes3(String plugin, Int chargenStateID)
   GlobalVariable chargen = \
       Game.GetFormFromFile(chargenStateID, plugin) as GlobalVariable
   If chargen == None
-    FallBackToSkyrim()
-    Return
+    Return false
   EndIf
-
-  StripPlayer()
   chargen.SetValue(1.0)
   Debug.Trace("[TESGameSelect] " + plugin + " CharGenState " + chargen \
               + " set to 1")
-EndFunction
-
-Function FallBackToSkyrim()
-  ; The plugin is installed but its chargen quest is missing or renamed.
-  ; Nothing has been touched yet — the takeover reads ChosenGame and runs the
-  ; vanilla opening.
-  Debug.Trace("[TESGameSelect] chargen quest missing; resuming Skyrim")
-  ChosenGame = GAME_SKYRIM
+  Return true
 EndFunction
 
 Quest Function GetQuestFrom(Int formID, String plugin)
@@ -450,13 +490,6 @@ EndFunction
 
 ObjectReference Function GetRefFrom(Int formID, String plugin)
   Return Game.GetFormFromFile(formID, plugin) as ObjectReference
-EndFunction
-
-; Clear Skyrim's base-record starting inventory — the same RemoveAllItems
-; vanilla runs at MQ101 stage 10 (and in every debug quickstart) before
-; dressing the player.
-Function StripPlayer()
-  Game.GetPlayer().RemoveAllItems()
 EndFunction
 
 Function WearFrom(String plugin, Int formID)
@@ -477,15 +510,13 @@ EndFunction
 Function HandOff(Quest chargen, Int stage, ObjectReference marker)
   ; Move first so the destination cell loads while the quest spins up. Some
   ; chargen stage scripts move the player to the same marker themselves — a
-  ; redundant MoveTo is harmless — but Morroblivion's does not, so the move
-  ; here is what actually delivers the player.
+  ; redundant MoveTo is harmless — but Morroblivion's does not.
   Actor player = Game.GetPlayer()
   If marker != None
     player.MoveTo(marker)
   EndIf
 
-  ; Let the arrival cell finish loading before the game's opening (and the
-  ; race menu BeginChosenGame shows next) run on top of it.
+  ; Let the arrival cell finish loading before the game's opening runs on it.
   Int guard = 0
   While !player.Is3DLoaded() && guard < 200
     Utility.Wait(0.1)

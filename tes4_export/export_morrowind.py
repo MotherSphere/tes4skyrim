@@ -34,7 +34,6 @@ from .morrowind_ids import (IdIndex, encode_editor_id, exterior_key,
 from .morrowind_markers import MarkerBuilder, marker_lines
 from .morrowind_travel import travel_marker_records
 from .morrowind_pathgrid import pathgrid_records
-from .morrowind_patch import PATCH_NAME
 from .morrowind_region import region_records
 from .morrowind_grass import (GrassTally, grass_records, is_grass_model,
                               ltex_grass_lines, master_ltex_fields,
@@ -510,6 +509,12 @@ def run_export(file_name: str, source: str, export_dir: str,
     start = time.time()
     print(f'[{file_name}] Exporting (Morrowind)...')
     mode = (config or {}).get(MORROWIND_SOURCE_KEY, SOURCE_VANILLA)
+    if mode == SOURCE_MORROBLIVION and not morroblivion_allowed(file_name, source):
+        print(f'[{file_name}] ERROR: {file_name} is a vanilla Morrowind master '
+              'or has no masters, so it is never built in Morroblivion mode. '
+              'Export again with --morrowind-source vanilla, or choose '
+              'Settings > Morrowind source > Vanilla.')
+        return False
     masters, missing = converted_master_dirs(export_dir, file_name, source, mode)
     if missing:
         print(f'[{file_name}] ERROR: '
@@ -537,12 +542,11 @@ def converted_master_dirs(export_dir: str, plugin: str, source_path: str,
     The plugin's own MAST chain, in its order. In Morroblivion mode every
     converted `Morrowind_ob*` export comes first, then the compatibility patch
     supplying what Morroblivion lacks, and the three vanilla ESMs it replaces
-    are dropped, so those three are never reported missing. One of those three
-    is itself always built on its own masters.
+    are dropped, so those three are never reported missing.
     See: docs/commentary/tes4_export_morrowind.md#masters
     """
     names = read_masters(source_path)
-    if mode == SOURCE_MORROBLIVION and plugin.lower() not in VANILLA_MASTERS:
+    if mode == SOURCE_MORROBLIVION:
         names = morroblivion_exports(export_dir) + [PATCH_NAME] + [
             n for n in names if n.lower() not in VANILLA_MASTERS]
     found, missing = [], []
@@ -555,6 +559,15 @@ def converted_master_dirs(export_dir: str, plugin: str, source_path: str,
         else:
             missing.append(name)
     return found, missing
+
+
+def morroblivion_allowed(plugin: str, source_path: str) -> bool:
+    """Whether Morroblivion mode may build this plugin: a dependent mod only.
+
+    See: docs/commentary/tes4_export_morrowind.md#masters
+    """
+    return (plugin.lower() not in VANILLA_MASTERS
+            and bool(read_masters(source_path)))
 
 
 def morroblivion_exports(export_dir: str) -> list:
