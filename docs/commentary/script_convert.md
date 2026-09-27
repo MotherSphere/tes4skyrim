@@ -2223,6 +2223,45 @@ text still on screen. A Skyrim notification lives 3.33 s: `hudmenu.swf`'s
 after a load because the real-time clock restarts, also sends. Fragments
 keep a plain `Debug.Notification`, since they run once.
 
+### <a id="stray-elseif-starts-a-chain"></a>A stray `elseif` starts a new chain (2026-09-27, confirmed in game)
+
+**Code:** `tes4/parser.Parser.parse_statement`.
+
+Translation.esp's English `GlobaltagebuchScript` has one extra `endif`, so its
+`elseif (Step == -10)` … `(Step == -60)` sub-menus follow a closed chain. The
+German original in Nehrim.esm does not. The CS compiled it anyway: the
+bytecode reads `endif`, `endif`, `elseif`. The converter dropped each header as
+an unmatched closer and ran every sub-menu body in turn.
+
+Oblivion's runner (`ExecuteLine` `0x5169a0`) keeps a depth at `+0x20` and a flag
+word per level at `+0x24 + depth*4`: bit 0 in use, bit 1 branch taken.
+
+| Opcode | Handler | Does |
+|---|---|---|
+| `if` 0x16 | `0x516e9f` | one level deeper if this one is in use; mark it in use; test |
+| `elseif` 0x18 | `0x516ebe` | never changes depth; skip if taken, else test |
+| `else` 0x17 | `0x516fce` | run if not taken |
+| `endif` 0x19 | `0x517007` | clear the level; one level up unless at the top |
+
+A skip is a count of statements the loop at `0x5174da` passes over. So a
+stray `elseif` at a block's top level finds its flags cleared by the `endif`
+and tests its condition like a new `if`; the parser now reads it as one. A
+stray inside a running branch would find "taken" set and never run; the parser
+only sees strays at a block's or fragment's top level, since inside an `if`
+body the `elseif` belongs to that chain.
+
+### <a id="messagebox-values-fill-show"></a>A button MessageBox passes its values to Show() (2026-09-27, confirmed in game)
+
+**Code:** `commands._box_values`, `ScriptConverter._emit_button_helpers`.
+
+`Message.Show(afArg1 … afArg9)` fills `%[flags][width][.precision]f` in the
+MESG text (CK wiki, `Show_-_Message`). The converter used to call `Show()`
+with no arguments, so every value read 0. The unquoted arguments between the
+text and the first button are now passed, cast to `Float`, through
+`TES4_ShowMsg`. All 73 specifiers in Nehrim's, Translation.esp's and
+Oblivion's button boxes are `%…f` (plus 9 copies of the authored typo
+`%4.O`), and none has more than 9 values.
+
 ### A bare GameMode block also forces relocation (2026-08-02)
 
 The two triggers above still missed a whole class: an actor script that is

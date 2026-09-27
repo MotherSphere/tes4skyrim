@@ -768,6 +768,46 @@ End
         fragment = '\n'.join(converter.convert_fragment('Message "Done"', 'Quest'))
         assert 'Debug.Notification("Done")' in fragment
 
+    def test_stray_elseif_at_block_top_starts_a_new_chain(self, converter):
+        """An `elseif` after its chain closed tests its own condition, as Oblivion did.
+
+        See: docs/commentary/script_convert.md#stray-elseif-starts-a-chain
+        """
+        source = """ScriptName StepScript
+short step
+Begin GameMode
+  if step == 1
+    set step to 2
+  endif
+  endif
+  elseif step == -10
+    set step to 10
+  elseif step == -20
+    set step to 20
+  endif
+End
+"""
+        result = converter.convert_standalone('StepScript', source,
+                                              'ObjectReference', 'StepScript')
+        chain = result.split('If step == -10', 1)[1]
+        assert chain.index('step = 10') < chain.index('ElseIf step == -20')
+        assert 'elseif  ;unmatched closer' not in result
+
+    def test_button_box_passes_its_format_values(self, converter):
+        """A button MessageBox hands its format values to Show() as Floats.
+
+        See: docs/commentary/script_convert.md#messagebox-values-fill-show
+        """
+        source = ('ScriptName DiaryScript\nshort ep\n\nBegin GameMode\n'
+                  '  MessageBox "EP: %5.0f / %3.0f", ep, 7, "Level up", "Close"\nEnd\n')
+        converter.message_menus = build_message_plan(
+            [{'EditorID': 'DiaryScript', 'SCTX': source}])
+        out = converter.convert_standalone('DiaryScript', source, 'ObjectReference',
+                                           'DiaryScript')
+        assert ('TES4_ShowMsg(TES4Msg_DiaryScript_01, (ep) as Float, (7) as Float)'
+                in out)
+        assert 'Return TES4_akMsg.Show(afArg1, afArg2, afArg3' in out
+
     def test_book_read_while_carried_runs_the_read_hook(self, converter):
         """A book's opening OnActivate also runs from OnRead for a carried
         read: the opening Activate is dropped, a flag skips the read the
@@ -5364,7 +5404,7 @@ class TestFalloutShowMessageMenus:
                                            'VCG01SCRIPT')
         assert 'TES4_MsgButton = TES4_ShowMsg(VCG01ChooseSexMessage)' in out
         assert 'nButton = TES4_TakeMsgButton()' in out
-        assert 'Int Function TES4_ShowMsg(Message TES4_akMsg)' in out
+        assert 'Int Function TES4_ShowMsg(Message TES4_akMsg, Float afArg1 = 0.0' in out
         assert 'Message Property VCG01ChooseSexMessage Auto' in out
 
     def test_importer_writes_no_record_for_an_authored_site(self):

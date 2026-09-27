@@ -441,9 +441,10 @@ class ScriptConverter:
             '; Displaying a box resets the pressed state (TES4: GetButtonPressed',
             '; reads -1 from display until the click), then Show() parks this',
             '; thread on the box and its return lands in TES4_MsgButton.',
-            'Int Function TES4_ShowMsg(Message TES4_akMsg)',
+            'Int Function TES4_ShowMsg(Message TES4_akMsg, ' + ', '.join(
+                f'Float afArg{n} = 0.0' for n in range(1, 10)) + ')',
             '  TES4_MsgButton = -1',
-            '  Return TES4_akMsg.Show()',
+            '  Return TES4_akMsg.Show(' + ', '.join(f'afArg{n}' for n in range(1, 10)) + ')',
             'EndFunction',
             '',
             'Int Function TES4_TakeMsgButton()',

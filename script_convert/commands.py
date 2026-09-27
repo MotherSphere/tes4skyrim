@@ -876,6 +876,22 @@ def _message_function(ctx, name: str) -> str:
     return 'TES4_Notify'
 
 
+def _box_values(ctx, call) -> list:
+    """The box's format values, as Show()'s Float arguments (at most 9).
+
+    They are the unquoted arguments between the text and the first button;
+    Show() fills the text's `%f` specifiers from them in order.
+
+    See: docs/commentary/script_convert.md#messagebox-values-fill-show
+    """
+    values = []
+    for i, src in enumerate(ctx.arg_sources()[1:], start=1):
+        if src.startswith('"') or len(values) == 9:
+            break
+        values.append(f'({ctx.arg_expr(i, call.extends)}) as Float')
+    return values
+
+
 def _button_box(ctx, call) -> str:
     """A MessageBox WITH buttons, as an authored MESG's Show().
 
@@ -894,7 +910,7 @@ def _button_box(ctx, call) -> str:
         return None
     ctx.sc.property_refs[mesg] = 'Message'
     ctx.sc.uses_msg_buttons = True
-    return f'TES4_MsgButton = TES4_ShowMsg({mesg})'
+    return f'TES4_MsgButton = TES4_ShowMsg({", ".join([mesg] + _box_values(ctx, call))})'
 
 
 @command('isactionref')
