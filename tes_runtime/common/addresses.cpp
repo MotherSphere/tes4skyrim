@@ -133,6 +133,7 @@ bool DecodeFlat(Reader& r, AddressMap& map, std::int32_t count) {
 }  // namespace
 
 bool VersionDb::Load(std::uint32_t runtimeVersion) {
+    runtime_ = runtimeVersion;
     // SKSE packs (major<<24 | minor<<16 | build<<4 | sub); BUILD IS 12 BITS.
     const unsigned maj   = (runtimeVersion & 0xFF000000u) >> 24;
     const unsigned min   = (runtimeVersion & 0x00FF0000u) >> 16;
@@ -200,6 +201,12 @@ bool VersionDb::LoadFile(const std::string& path) {
     }
     loaded_ = true;
     return true;
+}
+
+std::size_t PlayerField(std::size_t offset16) {
+    constexpr std::uint32_t kRuntime17 = 0x01070000u;
+    constexpr std::size_t kShift17 = 8;
+    return g_versionDb.runtime() >= kRuntime17 ? offset16 + kShift17 : offset16;
 }
 
 std::uintptr_t VersionDb::Get(std::uint64_t id) const {

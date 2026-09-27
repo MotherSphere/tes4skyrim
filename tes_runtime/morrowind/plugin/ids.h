@@ -672,7 +672,7 @@ constexpr std::uint64_t kFactionSendPlayerToJail = 55807;
 // Game.ServeTime (1.6.1170 0xa126b0): PlayerCharacter's ServeTime, which
 // passes the sentence's days and releases the player. kOffPlayerJailFaction is
 // the faction whose jail holds the player; SendPlayerToJail sets it only once
-// no menu is open.
+// no menu is open. A 1.6.x offset: read it through PlayerField.
 constexpr std::uint64_t kGameServeTime = 55573;
 constexpr std::size_t kOffPlayerJailFaction = 0x720;
 

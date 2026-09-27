@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -20,11 +21,14 @@ public:
     bool loaded() const { return loaded_; }
     const std::string& path() const { return path_; }
     size_t count() const { return map_.size(); }
+    // SKSE's packed runtime version handed to Load, loaded or not.
+    std::uint32_t runtime() const { return runtime_; }
 
 private:
     std::unordered_map<std::uint64_t, std::uint64_t> map_;
     bool        loaded_ = false;
     std::string path_;
+    std::uint32_t runtime_ = 0;
 };
 
 std::uintptr_t ModuleBase();
@@ -48,6 +52,13 @@ std::uintptr_t Resolve(const char* debugName, std::uint64_t stableId,
 void* SwapVtableSlot(const char* debugName, std::uintptr_t vtable,
                      std::size_t slotOffset, std::uintptr_t expected,
                      void* replacement);
+
+// A PlayerCharacter field's offset on the running build, given its offset on
+// 1.6.x. 1.7 put 8 more bytes ahead of every PlayerCharacter field the
+// runtimes read (0x588 through 0xbe5): the same engine functions read them 8
+// later on 1.7.104, while Actor's own fields (0xb8, 0xc8, 0xcc, 0xf8) stay put.
+// See: docs/commentary/tes_runtime_journal.md#player-fields-move-on-17
+std::size_t PlayerField(std::size_t offset16);
 
 // Virtual call by INDEX into an engine object's vtable.
 template <typename Fn>

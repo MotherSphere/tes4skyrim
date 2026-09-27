@@ -32,7 +32,7 @@ on 1.6.659, same offsets in both):
   texted log entry and 26 stages in 18 quests (MQ102, DA16, MS13, CWObj ...)
   have 2-9 condition-picked alternatives, so the pair is recorded whole.
 - Objectives come from the **player's** objective array (`PlayerCharacter+0x588`,
-  count `+0x598`, 16 bytes each: objective, instance, state), appended in
+  count `+0x598` on 1.6 -- [8 later on 1.7](#player-fields-move-on-17) -- 16 bytes each: objective, instance, state), appended in
   display order. The journal walks it **newest first** and makes one row per
   entry that is: state 1, 3 or 5; for a Miscellaneous-type quest
   (`TESQuest+0xdf == 6`) state 1 only; of the selected quest and instance; and
@@ -41,6 +41,32 @@ on 1.6.659, same offsets in both):
 - A row the movie receives carries formID, instance, status flags, target and
   text -- **no objective number**. Row position is the only exact identity, so
   the runtime rebuilds the same row list to map a clicked row back.
+
+### <a id="player-fields-move-on-17"></a>🛑 PlayerCharacter fields sit 8 bytes later on 1.7
+
+The offsets above are 1.6.x offsets. On 1.7.104 the same builder (id 53171,
+`0x9a1e00`) reads the objective array at `+0x590` and its count at `+0x5a0`.
+Read at the 1.6 offsets, the array pointer is some other field. The first poll
+after a load only stores those pointers, so nothing happens until an objective
+is shown. Then `RecordShown` follows one and the game crashes at
+`TESRuntime.dll+0x1683C` (`mov r9, [rdi+8]` with `rdi = 0x0908070605040302`)
+on the first quest to show an objective, in any game.
+
+Paired Actor and PlayerCharacter vtable slots (380 and 400 functions) show the
+extent. Every PlayerCharacter field the runtimes read moves by exactly 8:
+- objectives `0x588`/`0x598`;
+- jail faction `0x720` (ServeTime, PayCrimeGold);
+- serve flags `0xbe5` (ServeTime).
+
+The Actor fields the Fallout and Morrowind runtimes read (`0xb8`, `0xc8`,
+`0xcc`, `0xf8`) did not move: thousands of reads are identical on both builds.
+So each PlayerCharacter offset stays written as its 1.6 value and is read
+through `PlayerField()` (`common/addresses.cpp`), which adds 8 from runtime
+1.7 on. 1.7.104 is the only 1.7 build measured. `stable_id_check.py` only
+proves ids exist on every build, so it cannot catch a field that moved.
+`tests/test_player_fields.py` requires every PlayerCharacter offset read to go
+through `PlayerField()`, and checks the shift against the unpacked exes when
+they are present.
 
 ### Recording
 

@@ -46,6 +46,7 @@ from core.gui.config import (
 )
 from core.gui.menus import build_menubar
 from core.worker_budget import cpu_total, worker_count
+from output_layout import configured_output, output_setting
 from preflight import RC_MISSING_DEP
 
 # ---------------------------------------------------------------------------
@@ -280,7 +281,7 @@ class GuiApp:
     def out_root(self) -> Path:
         """The configured output directory, or the default beside the repo."""
         chosen = self.output_var.get().strip() if self.output_var else ""
-        return Path(chosen or str(REPO_ROOT / "output"))
+        return configured_output(chosen)
 
     def winding_on(self) -> bool:
         """Whether the INFERRED winding steps run for the current plugin."""
@@ -433,7 +434,7 @@ def _initial_paths(cfg: dict) -> tuple:
     """(tes4, tes5, output) from the config, auto-detecting what is missing."""
     return (cfg.get("tes4DataPath", "") or find_game_path("oblivion"),
             cfg.get("tes5DataPath", "") or find_game_path("skyrimse"),
-            cfg.get("outputDir", "") or str(REPO_ROOT / "output"))
+            str(configured_output(cfg.get("outputDir", ""))))
 
 
 def _initial_workers(cfg: dict, cpu_max: int) -> int:
@@ -777,7 +778,7 @@ def _save_dirs(app):
     updated = load_config()
     updated["tes4DataPath"] = app.tes4_var.get()
     updated["tes5DataPath"] = app.tes5_var.get()
-    updated["outputDir"] = app.output_var.get()
+    updated["outputDir"] = output_setting(app.output_var.get().strip())
     updated["workers"] = app.get_workers()
     save_config(updated)
 

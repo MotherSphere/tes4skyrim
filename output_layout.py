@@ -164,6 +164,27 @@ DEFAULT_EXPORT = REPO_ROOT / "export"
 DEFAULT_OUTPUT = REPO_ROOT / "output"
 
 
+def configured_output(saved) -> Path:
+    """The output root a saved `outputDir` names; a relative one is in this install.
+
+    See: docs/reference/pipeline.md#the-config-file-is-per-install
+    """
+    return REPO_ROOT / saved if saved else DEFAULT_OUTPUT
+
+
+def output_setting(out_root) -> str:
+    """`out_root` as the config saves it: relative when inside this install, else in full.
+
+    A relative path follows the install when the config is copied into a new one.
+    See: docs/reference/pipeline.md#the-config-file-is-per-install
+    """
+    path = configured_output(out_root)
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 class PluginPaths:
     """Every path belonging to one plugin. Read attributes, never build paths.
 

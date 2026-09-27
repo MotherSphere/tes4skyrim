@@ -529,3 +529,10 @@ failing-then-passing test.
 - Read the code; don't infer — inference produces confident nonsense.
 - Mark verified and suspected findings differently.
 - Don't nitpick: no theoretical edge cases, style, or naming.
+- 🛑 **Fork PRs: check the Commits and Files tabs before merging.** History was
+  rewritten on 2026-09-26 to purge Bethesda art (`morrowind_dialogue.swf`); a
+  branch older than that carries the old commits, and any merge style, squash
+  included, brings the file back. Flag a PR that contains commit `88fe78ac`,
+  shows commits already on master, or lists that `.swf`: the author must rebase
+  onto the new master. Also flag any added binary (`.swf`, `.dds`, `.nif`,
+  `.bsa`, `.dll`), since a file-type test cannot see art embedded inside one.

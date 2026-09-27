@@ -81,8 +81,8 @@ char* PlayerObjectives(std::uint32_t* count) {
     void* player = g_playerSlot ? *reinterpret_cast<void**>(g_playerSlot)
                                 : nullptr;
     if (!player) return nullptr;
-    *count = At<std::uint32_t>(player, ids::kOffPlayerObjectiveCount);
-    return At<char*>(player, ids::kOffPlayerObjectives);
+    *count = At<std::uint32_t>(player, PlayerField(ids::kOffPlayerObjectiveCount));
+    return At<char*>(player, PlayerField(ids::kOffPlayerObjectives));
 }
 
 void* ShownObjectiveAt(char* entries, std::uint32_t i) {

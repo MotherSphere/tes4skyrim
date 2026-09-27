@@ -42,7 +42,8 @@ constexpr std::size_t kFactionInventory = 0x78;
 // directly): its first call fades out and sets kServeFadePending, its second
 // passes the days and hands back the player-inventory chest. Slot 187 is
 // PayCrimeGold(faction, goToJail, removeStolen) (0x747a10). kPlayerJailFaction
-// is the faction whose jail holds the player.
+// is the faction whose jail holds the player. Both fields are 1.6.x offsets:
+// read them through PlayerField (0x728 and 0xbed on 1.7.104).
 constexpr std::uint64_t kPlayerVtable = 208040;
 constexpr std::size_t kVtServeTime = 186;
 constexpr std::size_t kVtPayCrimeGold = 187;
@@ -61,7 +62,8 @@ constexpr std::uint64_t kPlayerSingleton = 403521;
 
 // The player's objective array: every objective ever shown, oldest first, 16
 // bytes each -- BGSQuestObjective* at +0, instance id at +8, state at +0xc.
-// The journal walks it newest first.
+// The journal walks it newest first. 1.6.x offsets: read them through
+// PlayerField (0x590 and 0x5a0 on 1.7.104, in the same builder there, 0x9a1e00).
 constexpr std::size_t kOffPlayerObjectives = 0x588;
 constexpr std::size_t kOffPlayerObjectiveCount = 0x598;
 constexpr std::size_t kShownObjectiveSize = 0x10;

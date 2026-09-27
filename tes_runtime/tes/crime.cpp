@@ -260,9 +260,10 @@ private:
 // evidence chest the stolen goods went into; both source games keep those.
 // See: docs/commentary/tes_runtime_crime.md#serve-time
 void ServeTimeHook(void* player) {
-    void* faction = At<void*>(player, ids::kPlayerJailFaction);
+    void* faction = At<void*>(player, PlayerField(ids::kPlayerJailFaction));
     g_serveTime(player);
-    const bool fading = At<std::uint8_t>(player, ids::kPlayerServeFlags) & ids::kServeFadePending;
+    const bool fading = At<std::uint8_t>(player, PlayerField(ids::kPlayerServeFlags)) &
+                        ids::kServeFadePending;
     if (faction && !fading &&
         std::find(g_pools.begin(), g_pools.end(), faction) != g_pools.end()) {
         RunOnMainThread(new ConfiscateTask(faction));

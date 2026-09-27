@@ -61,8 +61,9 @@ if sys.stderr and hasattr(sys.stderr, "buffer"):
 SCRIPT_DIR = Path(__file__).parent.resolve()  # TESConversion root
 
 
-from output_layout import (BODY_SLOTS_PATCH, finished_dir, plugin_out_root,
-                           record_dir, tree_members, write_mod_zip)
+from output_layout import (BODY_SLOTS_PATCH, configured_output, finished_dir,
+                           plugin_out_root, record_dir, tree_members,
+                           write_mod_zip)
 from papyrus_compile import phase_compile
 from tes4_export.tes3_reader import is_tes3
 from core.plugin_masters import (get_masters_from_binary, is_master_export,
@@ -1027,7 +1028,7 @@ def _run_pipeline():
     tes4_data, tes5_data = get_paths(config)
     tes4_data = args.data_dir or tes4_data
     source_registry.select_directory(tes4_data)
-    output_dir = args.output_dir or config.get("outputDir") or str(SCRIPT_DIR / "output")
+    output_dir = args.output_dir or str(configured_output(config.get("outputDir")))
     export_dir = str(SCRIPT_DIR / "export")
     os.makedirs(export_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)

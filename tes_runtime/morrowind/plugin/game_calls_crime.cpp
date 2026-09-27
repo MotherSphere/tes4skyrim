@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include "activation.h"
+#include "addresses.h"
 #include "conversation.h"
 #include "game_calls.h"
 #include "game_calls_internal.h"
@@ -120,8 +121,7 @@ void ServeSentence() {
         g_toJail = nullptr;
     }
     void* player = g_sentenced ? PlayerRef() : nullptr;
-    if (!player || *reinterpret_cast<void**>(static_cast<char*>(player) +
-                                             ids::kOffPlayerJailFaction) != g_sentenced) {
+    if (!player || At<void*>(player, PlayerField(ids::kOffPlayerJailFaction)) != g_sentenced) {
         return;
     }
     g_sentenced = nullptr;

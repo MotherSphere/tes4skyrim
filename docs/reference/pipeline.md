@@ -224,6 +224,14 @@ absent file as `{}`, and each consumer falls back on its own constant
 An explicit `--config PATH` is the one exception: a named file that does not
 exist raises, because that is a typo rather than a fresh install.
 
+**`outputDir` is saved relative to the install when it lies inside it**
+(`output_layout.output_setting`, so the default saves as `output`), and a
+relative value is read against the install, not the working directory
+(`output_layout.configured_output`). Users copy their config into each new
+release's folder. An absolute default sent every later build back to the old
+install's `output/`, so the new zips never appeared where they looked. A folder
+outside the install is still saved in full.
+
 **Per-run overrides** change a setting for one run without saving it
 (`convert_cli.apply_config_overrides`): `--morrowind-source vanilla|morroblivion`
 picks the Morrowind export mode, so an agent can build Arktwend in authored mode
