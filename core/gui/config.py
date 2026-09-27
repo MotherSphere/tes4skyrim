@@ -17,12 +17,11 @@ module may re-anchor on its own `__file__`: doing so silently repoints
 _OFFICIAL_PLUGINS lists the base game and official Creation Club content in
 Bethesda's own load-order priority, independent of whatever plugins.txt says.
 
-`create_pool_job()` runs at import so the whole conversion is contained in a
-Job Object owned by this process: a GUI that dies without cleanup (crash, Task
-Manager, closed window) then takes convert.py and every pool worker with it.
-Cancel covers only a DELIBERATE stop; without the job, orphaned console-less
-pythonw workers survive invisibly, holding the export index in RAM and keeping
-handles open on output/ files.
+Importing this module has no process-level side effects beyond
+`configure_multiprocessing()`. The Job Object that ties convert.py and its
+workers to the window is created by `gui.gui_main`, in the process that shows
+the window, never at import: an importer that relaunches itself (gui.py under
+pythonw) would otherwise hand the job to its child and kill it on exit.
 
 See: docs/reference/pipeline.md#game-data-path-detection
 """
@@ -515,7 +514,7 @@ def parse_dropped_paths(data: str) -> list:
 # ---------------------------------------------------------------------------
 
 configure_multiprocessing()
-process_job.create_pool_job()
+
 
 def run_process(cmd, log_cb, env=None, cancel_event=None) -> int:
     """`process_job.run_process`, run from the repo root."""
