@@ -331,7 +331,8 @@ def _prescan_npc_voice_map(by_type: dict, ctx, writer, num_new_masters: int, _st
     return npc_to_vtyp
 
 
-def _prescan_unlock_plan(by_type: dict, writer, _step_done):
+def _prescan_unlock_plan(by_type: dict, writer, num_tes4_masters: int,
+                         _step_done):
     """Plan the AddTopic unlock gates; returns (plan, globals, ScriptConverter).
 
     Gated topics get one GLOB each plus `GetGlobalValue` conditions,
@@ -341,7 +342,7 @@ def _prescan_unlock_plan(by_type: dict, writer, _step_done):
     See: docs/commentary/tes5_import_pipeline.md#reserved-ids-and-preflight
     """
     from .dialogue.unlocks import build_unlock_plan, create_unlock_globals
-    unlock_plan = build_unlock_plan(by_type)
+    unlock_plan = build_unlock_plan(by_type, num_tes4_masters)
     unlock_globals = create_unlock_globals(writer, unlock_plan)
 
     from script_convert.converter import ScriptConverter as _SC
@@ -1142,7 +1143,7 @@ def _run_prescans(st: ImportState, all_records: list, num_new_masters: int,
     st.npc_to_vtyp = _prescan_npc_voice_map(by_type, ctx, writer,
                                             num_new_masters, _step_done)
     st.unlock_plan, st.unlock_globals, _SC = _prescan_unlock_plan(
-        by_type, writer, _step_done)
+        by_type, writer, st.num_tes4_masters, _step_done)
     _prescan_force_greets(by_type, ctx, writer, _SC)
     _prescan_menu_records(by_type, writer, _SC, _step_done)
     st.fid_to_edid = _prescan_fid_to_edid(all_records, ctx, _step_done)

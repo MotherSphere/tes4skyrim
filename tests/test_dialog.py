@@ -1387,7 +1387,8 @@ class TestAddTopicUnlocks:
                 # Mention revealer: response text names the gated topic "Rats"
                 {'FormID': '000C0002', 'ParentDIAL': '000B0004',
                  'QSTI.Quest': '000A0001', 'ResponseCount': '1',
-                 'Response[0].ResponseText': 'Ask Azzan about Rats sometime.',
+                 'Response[0].ResponseText':
+                     'Ask Azzan about Rats and his Contract sometime.',
                  'Response[0].EmotionType': '0', 'Response[0].EmotionValue': '0',
                  'Response[0].ResponseNumber': '1',
                  'ChoiceCount': '0', 'ConditionCount': '0', 'DATA.Flags': '0'},
@@ -1543,6 +1544,40 @@ class TestAddTopicUnlocks:
                 "gated (explicitly added) topic stays top-level"
         finally:
             set_formid_index_offset(0)
+
+    def test_never_added_topic_is_unreachable(self):
+        """A regular topic nothing adds, links to or names never lists in
+        Oblivion (Nehrim's SayTo-only NQ00Soldat01); a master's topic is
+        never judged, since the master's adders are not in this export."""
+        from tes5_import.dialogue.unlocks import build_unlock_plan
+        bt = self._by_type()
+        bt['DIAL'].append({'FormID': '000B0007', 'EditorID': 'sayOnly',
+                           'DATA.Type': '0', 'QuestCount': '1',
+                           'Quest[0]': '000A0001', 'FULL': 'sayOnly'})
+        bt['INFO'].append({'FormID': '000C0007', 'ParentDIAL': '000B0007',
+                           'QSTI.Quest': '000A0001', 'ResponseCount': '0',
+                           'ChoiceCount': '0', 'ConditionCount': '0',
+                           'DATA.Flags': '0'})
+        plan = build_unlock_plan(bt)
+        assert plan['unreachable'] == {0x0B0007}, \
+            "added, choice-linked and name-mentioned topics stay reachable"
+        assert build_unlock_plan(bt, own_index=1)['unreachable'] == set()
+
+    def test_greeting_line_credits_its_own_quest(self):
+        """A shared GREETING's line names its speaker for its OWN quest, not
+        the topic's first quest, or a condition-free reply in that quest
+        reaches every NPC (Sentry Morten offering Helene's bottles line)."""
+        from tes5_import.dialogue.groups import _quest_npc_sets
+        helene = '000000000000803f48000000010d00000000000000000000'
+        dial = {'FormID': '000B0001', 'EditorID': 'GREETING',
+                'DATA.Type': '6', 'QuestCount': '2',
+                'Quest[0]': '000A0001', 'Quest[1]': '000A0002'}
+        info = {'FormID': '000C0001', 'ParentDIAL': '000B0001',
+                'QSTI.Quest': '000A0002', 'ConditionCount': '1',
+                'Condition[0].Raw': helene}
+        npcs = _quest_npc_sets([dial], {0x000B0001: [info]})
+        assert npcs.get(0x000A0002) == {0x00000D01}
+        assert not npcs.get(0x000A0001)
 
     def test_infos_sorted_by_quest_priority(self):
         """Oblivion picks the first passing INFO by QUEST PRIORITY (desc);

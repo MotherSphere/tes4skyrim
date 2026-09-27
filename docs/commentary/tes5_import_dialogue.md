@@ -1686,6 +1686,34 @@ has one "Greymarch" DIAL per main quest (SE03, SE04, SE06-SE10); the name map
 used to keep one global per name, so a mention opened only whichever topic was
 written last.
 
+### <a id="never-added-topics"></a>A topic nothing adds never lists
+
+**Code:** `tes5_import/dialogue/unlocks.py:_unreachable_topics`,
+`groups.py:_branch_is_linked`
+
+Oblivion lists a regular (Type-0) topic only after something adds it: an Add-Topics
+list, an `AddTopic` in any script, a choice link, or a spoken line naming it. A
+topic with none of those never reaches the menu. Nehrim authors its scripted
+shouts this way (`SayTo Player NQ00Soldat01`, `SoldatenStehenBleiben`,
+`FuerDieFreiheit`), and some topics nothing uses at all (`FuerTaranor`). Skyrim has
+no "not yet added" state, so they all sat in every NPC's menu. They now get a
+Normal branch; `Say` still reaches them. The name match is by word sequence,
+punctuation ignored, so an ambiguous name errs toward listing.
+
+Only this plugin's own topics are judged (raw index byte `>= num_tes4_masters`): a
+dependent plugin's overrides were added by its master, whose scripts are not in
+this export. Counts: Nehrim.esm 622 topics, Oblivion.esm 39 topics / 146 lines
+(Martin's and Mankar's speeches, SE09Ceremony, `GlenmorilWitches`,
+`TGDirectGiveCoin`), Translation.esp 0. Confirmed in-game.
+
+**The same fix's second half:** `_quest_npc_sets` credited every line to its
+topic's `Quest[0]`. GREETING serves dozens of quests, so a quest whose NPCs are
+named only in its greeting lines got no NPCs, and a condition-free reply behind
+that greeting's choice (Nehrim `NQHeleneWorumGehts`, the bottles line) had no
+speaker fallback: Sentry Morten offered it. Each line now counts toward its own
+`QSTI.Quest`. On Oblivion.esm this widens the fallback on 3 topics / 4 lines
+(`Dark08Choice2A`/`3A` 5 -> 13 NPCs, `MS45Mother` 9 -> 11) and opens none.
+
 ## <a id="info-fragment-emission"></a>INFO fragment emission: one decision function
 
 **Code:** `tes5_import/dialogue/converter.py:_info_vmad`

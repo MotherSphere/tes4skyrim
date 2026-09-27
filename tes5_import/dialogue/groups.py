@@ -146,7 +146,8 @@ def _branch_is_linked(dial_rec, dial_fid, tclt_targets, bark_choice_targets,
 
     A TCLT target or a StartConversation force-greet topic never explicitly
     AddTopic'd stays off the menu; a TCLT target reached from a bark/greeting
-    choice does not.  Script-driven Conversation topics are forced Normal.
+    choice does not.  Script-driven Conversation topics and topics nothing
+    ever adds are forced Normal.
 
     See: docs/commentary/tes5_import_dialogue.md#branches-views-topic-ownership
     """
@@ -156,7 +157,8 @@ def _branch_is_linked(dial_rec, dial_fid, tclt_targets, bark_choice_targets,
     forced = get_str(dial_rec, 'EditorID', '').lower() in FORCE_GREET_SLOTS
     return ((never_added and (forced or (dial_fid in tclt_targets
                                          and dial_fid not in bark_choice_targets)))
-            or _is_script_topic(dial_rec, dial_fid))
+            or _is_script_topic(dial_rec, dial_fid)
+            or fid24 in unlock_plan.get('unreachable', ()))
 
 
 def _topic_branch(dial_rec, writer, owner_qfid, tclt_targets,
@@ -263,8 +265,10 @@ def _scan_bark_choice_links(dials, infos, offset, script_vars):
 def _quest_npc_sets(dials, info_by_dial) -> dict:
     """Per-quest NPC FormID sets, for fallback identity gating.
 
-    Service-menu topics are excluded: their per-merchant GetIsIDs would widen
-    the identity gate on every other topic the quest owns.
+    Each line counts toward its own QSTI quest, so a shared topic such as
+    GREETING credits every quest it serves.  Service-menu topics are excluded:
+    their per-merchant GetIsIDs would widen the identity gate on every other
+    topic the quest owns.
 
     See: docs/commentary/tes5_import_dialogue.md#voice-types-conditions
     """
@@ -272,13 +276,12 @@ def _quest_npc_sets(dials, info_by_dial) -> dict:
     for d in dials:
         if should_skip_dial(d) or service_menu_kind(d):
             continue
-        qfid = get_formid(d, 'Quest[0]')
-        if not qfid:
-            continue
-        npcs = read_getisid_fids_for_topic(
-            info_by_dial.get(get_formid(d, 'FormID'), []))
-        if npcs:
-            quest_npc_fids[qfid] |= npcs
+        topic_qfid = get_formid(d, 'Quest[0]')
+        for info_rec in info_by_dial.get(get_formid(d, 'FormID'), []):
+            qfid = get_formid(info_rec, 'QSTI.Quest') or topic_qfid
+            if qfid:
+                quest_npc_fids[qfid] |= read_getisid_fids(info_rec,
+                                                          positive_only=True)
     return quest_npc_fids
 
 
