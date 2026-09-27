@@ -241,41 +241,54 @@ def scriptvar_refs_from_conditions(rec: dict) -> list:
     return out
 
 
-def build_scriptvar_owner_map(by_type: dict, fid_to_edid: dict) -> dict:
+def _stage_scripts(rec: dict):
+    """Yield every stage result script of a TES4 QUST record."""
+    s = 0
+    while f'Stage[{s}].Index' in rec:
+        for j in range(max(get_int(rec, f'Stage[{s}].LogCount'), 1)):
+            yield get_str(rec, f'Stage[{s}].Log[{j}].ResultScript')
+        s += 1
+
+
+def _quest_scripts(by_type: dict, master_export: dict):
+    """Yield (quest_fid, script) from INFO and QUST result scripts, own first.
+
+    A master INFO's Quest field is in the master's id space, so it resolves
+    through the masters' re-keyed QUST ids by low 24 bits.
+    """
+    for rec in by_type.get('INFO', []):
+        yield get_formid(rec, 'Quest'), get_str(rec, 'ResultScript')
+    for rec in by_type.get('QUST', []):
+        qfid = get_formid(rec, 'FormID')
+        yield from ((qfid, text) for text in _stage_scripts(rec))
+    master_quests = dict(_master_records(master_export, 'QUST'))
+    by_low = {q & 0x00FFFFFF: q for q in master_quests}
+    for _fid, rec in _master_records(master_export, 'INFO'):
+        quest = get_formid(rec, 'Quest') & 0x00FFFFFF
+        yield by_low.get(quest, 0), get_str(rec, 'ResultScript')
+    for qfid, rec in master_quests.items():
+        yield from ((qfid, text) for text in _stage_scripts(rec))
+
+
+def build_scriptvar_owner_map(by_type: dict, fid_to_edid: dict,
+                              master_export: dict = None) -> dict:
     """ref_fid -> quest_fid, for refs whose script variables a quest writes.
 
-    An Oblivion quest package gated on `GetScriptVariable(SomeRef, var)` belongs
-    to whichever quest SETS that variable.  Quests set it from two places:
-      * a dialogue INFO result script  (INFO.Quest names the quest)
-      * a quest stage result script    (the QUST itself)
-    Both look like `set SomeRef.var to N` / `SomeRef.var = N`, so we scan the
-    result-script text for `<EditorID>.<anything>` and attribute the ref to that
-    quest.  This recovers the same "package belongs to quest" relation the
-    original author expressed.
+    A package gated on `GetScriptVariable(SomeRef, var)` belongs to the quest
+    whose INFO or stage result script names `SomeRef.<var>`. The masters'
+    scripts count too: a dependent plugin's actor lists master packages.
+
+    See: docs/commentary/tes5_import_override.md#scriptvar-owner-reads-masters
     """
     edid_to_fid = {v.lower(): k for k, v in fid_to_edid.items() if v}
     owner = {}
-
-    def _scan(text: str, qfid: int):
+    for qfid, text in _quest_scripts(by_type, master_export):
         if not text or not qfid:
-            return
+            continue
         for m in re.finditer(r'\b(\w+)\s*\.\s*\w+', text):
             ref = edid_to_fid.get(m.group(1).lower())
             if ref:
                 owner.setdefault(ref & 0x00FFFFFF, qfid)
-
-    for rec in by_type.get('INFO', []):
-        qfid = get_formid(rec, 'Quest')
-        _scan(get_str(rec, 'ResultScript'), qfid)
-
-    for rec in by_type.get('QUST', []):
-        qfid = get_formid(rec, 'FormID')
-        s = 0
-        while f'Stage[{s}].Index' in rec:
-            lc = get_int(rec, f'Stage[{s}].LogCount')
-            for j in range(max(lc, 1)):
-                _scan(get_str(rec, f'Stage[{s}].Log[{j}].ResultScript'), qfid)
-            s += 1
     return owner
 
 

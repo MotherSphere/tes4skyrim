@@ -15,7 +15,8 @@ from ..base.constants import TES5_SKILL_ORDER
 from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
 from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
 from ..actors.outfits import split_inventory
-from ..packages.actor_wiring import CSTY_DEFAULT, DPLT_NPC_LIST, npc_packages
+from ..packages.actor_wiring import (CSTY_DEFAULT, DPLT_NPC_LIST, authored_packages,
+                                     npc_packages)
 from ..base.equivalents import map_hair_color
 from ..base.race_factions import race_faction
 from .actor_common import (GOLD001_FID, NAM5_UNKNOWN, SOUND_LEVEL_NORMAL,
@@ -285,9 +286,7 @@ def _identity_subs(rec: dict, skyrim_race: int, gender: str, carried: list,
                             get_int(rec, 'ACBS.BarterGold') if vendor_fid else 0)
     subs += pack_subrecord('AIDT', build_aidt(rec))
 
-    pack_fids = [get_formid(rec, f'AIPackage[{i}]')
-                 for i in range(get_int(rec, 'AIPackageCount'))]
-    for pfid in npc_packages(pack_fids):
+    for pfid in npc_packages(authored_packages(rec)):
         subs += pack_formid_subrecord('PKID', pfid)
 
     cnam = trainer_clas_fid or get_formid(rec, 'CNAM.Class')

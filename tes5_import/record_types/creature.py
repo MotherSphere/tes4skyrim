@@ -13,7 +13,8 @@ from ..actors.creature_unarmed import creature_unarmed_ability
 from ..actors.outfits import split_inventory
 from ..packages.actor_wiring import (CLAS_CREATURE_CASTER, CLAS_CREATURE_PREDATOR,
                         CSTY_ANIMAL, CSTY_DEFAULT, DPLT_CREATURE_LIST,
-                        PKID_CREATURE_MASTER)
+                        PKID_CREATURE_MASTER, authored_packages,
+                        npc_packages)
 from ..base.equivalents import (TES4_RACE_FID_TO_EDID, VOICE_TYPE_MAP,
                                 resolve_creature_race)
 from .actor_common import (GOLD001_FID, NAM5_UNKNOWN, SOUND_LEVEL_NORMAL,
@@ -521,7 +522,8 @@ def convert_CREA(rec: dict, writer=None) -> bytes:
         get_int(rec, 'ACBS.BarterGold') if crea_vendor_fid else 0)
 
     subs += pack_subrecord('AIDT', build_aidt(rec))
-    subs += pack_formid_subrecord('PKID', PKID_CREATURE_MASTER)
+    for pfid in npc_packages(authored_packages(rec)) + [PKID_CREATURE_MASTER]:
+        subs += pack_formid_subrecord('PKID', pfid)
     subs += pack_formid_subrecord('CNAM', _crea_class(rec))
 
     if full:

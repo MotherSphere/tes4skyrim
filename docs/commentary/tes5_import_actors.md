@@ -949,6 +949,17 @@ engine never sent the graph movement/attack events. That was the stuck-in-idle
 root cause. Every vanilla creature carries exactly ONE package,
 `DefaultMasterPackageCreature`, so converted creatures get the same hookup.
 
+Once PACK records were converted, that single package became the bug: it threw
+away the creature's authored AIPackage list. Nehrim's black troll
+(`SchattenrufAlptraumTroll01`) is walked across a rope by its own Travel
+packages, and its script advances a state per marker it reaches. With only the
+default package, the troll stood at the rope's start forever (save: script
+`myState = 5`, position = marker 03), so MQ00 never got it into its cave. So
+`PKID` is now the creature's own packages in TES4 order, through the same
+`npc_packages` filter NPCs use (quest packages stay on the QUST alias),
+followed by `DefaultMasterPackageCreature` as the fallback. Confirmed in game
+2026-09-26.
+
 **ZNAM.** CSTY is skipped, so the vanilla styles stand in, chosen off TES4
 `DATA.Type` (0 Creature, 1 Daedra, 2 Undead, 3 Humanoid, 4 Horse).
 

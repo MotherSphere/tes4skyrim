@@ -409,8 +409,9 @@ exist:
 - `PKID` = the actor's converted packages, **in TES4 order** (Skyrim, like
   Oblivion, takes the first package whose conditions pass — order is behavior).
 - Keep `DPLT` (`DefaultMasterPackageList`) as the fallback beneath them.
-- Keep the creature path (`DefaultMasterPackageCreature`) — creature AI is driven
-  by the behavior-graph work, not by TES4 packages.
+- Creatures get the same list, with `DefaultMasterPackageCreature` appended as
+  the fallback. Dropping their authored packages stranded scripted creatures
+  ([why](tes5_import_actors.md#creature-class-and-package)).
 - `packages.py` shrinks to the creature default + a fallback for actors whose
   packages all failed to convert.
 

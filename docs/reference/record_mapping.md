@@ -193,6 +193,8 @@ because it runs too early or in the wrong order:
   (00021E81). Skipped CSTY refs are likewise replaced: ZNAM = `csWolf` (00057BE8) for animal/horse CREA,
   `DefaultCombatstyle` (0000003D) otherwise. TES4 aggression >5 now maps to TES5 tier 1 (the old >=40
   threshold left e.g. dogs at Unaggressive, which never initiates combat).
+  **Superseded:** PACK records are now converted, so NPC_ and CREA keep their own packages in TES4 order
+  (quest packages excluded); creatures add `DefaultMasterPackageCreature` last as the fallback.
 - **QUST** — Alias system, objectives, and VMAD fragments are all new. Only basic stage data can be transferred.
 - **INFO** — Dialog response structure changed significantly. VMAD fragments replace result scripts.
 - **NPC_/CREA** — Attribute system removed, skill system changed, many new subsystems (templates, outfits, perks, keywords).

@@ -787,6 +787,27 @@ class TestConverters:
             if after in order:
                 assert order.index('SPLO') < order.index(after)
 
+    def test_crea_keeps_its_authored_packages(self):
+        """A creature's own packages come first in TES4 order, quest packages
+        excluded, then DefaultMasterPackageCreature as the fallback.
+
+        See: docs/commentary/tes5_import_actors.md#creature-class-and-package
+        """
+        from tes5_import.packages import actor_wiring as aw
+        rec = {'Signature': 'CREA', 'FormID': '0003E9CD', 'RecordFlags': '0',
+               'EditorID': 'TestTroll', 'SpellCount': '0',
+               'ACBS.Flags': '0', 'ACBS.Level': '5', 'FactionCount': '0',
+               'ItemCount': '0', 'AIPackageCount': '3',
+               'AIPackage[0]': '0001AB01', 'AIPackage[1]': '0001AB02',
+               'AIPackage[2]': '0001AB03'}
+        aw.set_quest_packages({0x0001AB01})
+        try:
+            pkids = [struct.unpack('<I', d)[0]
+                     for s, d in self._iter_subrecords(convert_CREA(rec)) if s == 'PKID']
+        finally:
+            aw.set_quest_packages(())
+        assert pkids == [0x0001AB02, 0x0001AB03, aw.PKID_CREATURE_MASTER]
+
     def test_shared_race_keeps_each_creatures_unarmed_damage(self):
         """Creatures sharing a generated race keep their own AttackDamage: the
         race carries the weakest, the rest get an AbFortifyUnarmedDamage

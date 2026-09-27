@@ -823,7 +823,7 @@ def _prescan_package_plan(by_type: dict, ctx, writer, fid_to_edid: dict, _step_d
     _script_vars = build_script_var_map(by_type, _master_export)
     set_assigned_var_names(
         build_assigned_var_names(by_type, _master_export))
-    _sv_owner = build_scriptvar_owner_map(by_type, fid_to_edid)
+    _sv_owner = build_scriptvar_owner_map(by_type, fid_to_edid, _master_export)
     pack_plan = PackagePlan()
     _script_assigned = build_script_assigned_packages(by_type, fid_to_edid,
                                                       _master_export)
