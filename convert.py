@@ -653,6 +653,8 @@ def phase_assets(file_name: str, config: dict, output_dir: str = None,
         print(f"[{file_name}] Textures only: no meshes, no book art "
               f"(PGPatcher patches the meshes in the load order)")
         return True
+    if mesh_subdirs:
+        return True
 
     from asset_convert.ui.book_inam import generate_book_inams
 
