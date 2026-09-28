@@ -11,6 +11,8 @@ from asset_convert.character.hair_plan import (mesh_name_family, output_model_pa
                                                output_tri_path, variant_edid,
                                                variant_tag)
 from ..actors import hair_variants
+from ..actors.combat_style import actor_combat_style
+from ..actors.confidence import actor_confidence, flee_memberships, flee_spells
 from ..base.constants import TES5_SKILL_ORDER
 from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
 from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
@@ -171,6 +173,8 @@ def _npc_snams(rec: dict, vendor_fids: list, trainer_clas_fid: int) -> bytes:
         subs += _pack_snam(get_trainer_faction_fid())
     for origin_fid in origin_memberships():
         subs += _pack_snam(origin_fid)
+    for flee_fid, rank in flee_memberships(actor_confidence(rec)):
+        subs += _pack_snam(flee_fid, rank)
     race_fact = race_faction(get_formid(rec, 'RNAM.Race'))
     if race_fact:
         subs += _pack_snam(race_fact)
@@ -203,6 +207,7 @@ def _spell_subs(rec: dict) -> bytes:
     """SPCT + SPLO for the actor's spell list (b'' when it has none)."""
     fids = [get_formid(rec, f'Spell[{i}]')
             for i in range(get_int(rec, 'SpellCount'))]
+    fids += flee_spells(actor_confidence(rec))
     fids = [f for f in fids if f]
     if not fids:
         return b''
@@ -234,9 +239,9 @@ def _inventory_subs(carried: list, barter_gold: int) -> bytes:
 def _appearance_subs(rec: dict, race_edid: str, gender: str, writer) -> bytes:
     """Head parts, hair color, combat style and the four required NAM slots.
 
-    ZNAM is forced to the vanilla default combat style: CSTY is skipped, so
-    the TES4 reference would dangle. NAM6/NAM7 are neutral 1.0 so the race's
-    own scale applies.
+    ZNAM is the converted combat style; a source whose styles are not
+    converted keeps the vanilla default for an authored one. NAM6/NAM7 are
+    neutral 1.0 so the race's own scale applies.
 
     See: docs/commentary/tes5_import_actors.md#required-nam-subrecords
     """
@@ -248,8 +253,9 @@ def _appearance_subs(rec: dict, race_edid: str, gender: str, writer) -> bytes:
             else map_hair_color(*rgb))
     subs += pack_formid_subrecord('HCLF', hclf)
 
-    if get_formid(rec, 'ZNAM.CombatStyle'):
-        subs += pack_formid_subrecord('ZNAM', CSTY_DEFAULT)
+    style = actor_combat_style(rec) or (CSTY_DEFAULT if get_formid(rec, 'ZNAM.CombatStyle') else 0)
+    if style:
+        subs += pack_formid_subrecord('ZNAM', style)
 
     subs += pack_subrecord('NAM5', NAM5_UNKNOWN)
     subs += pack_subrecord('NAM6', struct.pack('<f', 1.0))

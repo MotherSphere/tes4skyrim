@@ -6663,18 +6663,17 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
 
 
 class TestAidtConfidenceTiers:
-    """TES4 confidence is a 0-100 scalar; TES5 wants a 0-4 tier.
+    """TES4 confidence N flees after losing N% of the actor's OWN health; Skyrim's
+    Cowardly-Brave tiers flee by comparing strength with the enemy, which sent
+    Nehrim's 1-HP exit trolls running.  Only Cowardly (0) and Foolhardy (4) are
+    written; 1-99 rides on a faction rank the flee ability reads.
 
-    xEdit wbConfidenceEnum: 0 Cowardly, 1 Cautious, 2 Average, 3 Brave,
-    4 Foolhardy.  Only Foolhardy never flees.  The original mapping
-    (`<30 -> 0, >=70 -> 3, else 2`) never produced tier 1 or tier 4, so
-    Oblivion's most common "fearless" value 100 landed on Brave and actors
-    kept running away.  Vanilla Skyrim's own 5,118 NPC_ records are
-    292/90/1730/393/2613 across the five tiers.
+    See: docs/commentary/tes5_import_actors.md#confidence-tiers
     """
 
     @staticmethod
     def _conf(raw):
+        """The TES5 tier build_aidt writes for TES4 confidence `raw`."""
         from tes5_import.record_types.actor_common import build_aidt
         rec = {'AIDT.Aggression': '5', 'AIDT.Confidence': str(raw),
                'AIDT.Responsibility': '50', 'DATA.Personality': '50'}
@@ -6683,21 +6682,83 @@ class TestAidtConfidenceTiers:
     def test_fearless_maps_to_foolhardy(self):
         assert self._conf(100) == 4
 
-    def test_all_five_tiers_reachable(self):
-        got = {self._conf(v) for v in range(0, 101)}
-        assert got == {0, 1, 2, 3, 4}, f'unreachable tiers: {got}'
+    def test_any_courage_is_foolhardy(self):
+        """No strength-comparing tier: 1-100 are all Foolhardy."""
+        assert {self._conf(v) for v in range(1, 101)} == {4}
 
     def test_tier_is_monotonic_in_confidence(self):
         tiers = [self._conf(v) for v in range(0, 101)]
         assert tiers == sorted(tiers), 'more confidence must never mean more fleeing'
 
-    def test_oblivion_default_50_is_average(self):
-        """50 is Oblivion's engine default and must not read as cowardly."""
-        assert self._conf(50) == 2
-
-    def test_timid_still_flees(self):
+    def test_zero_is_cowardly(self):
         assert self._conf(0) == 0
-        assert self._conf(5) == 0
+
+    def test_threshold_rides_on_the_faction_rank(self):
+        """1-99 is the own-health threshold; 0 and 100 carry none."""
+        from tes5_import.actors.confidence import flee_rank
+        assert [flee_rank(v) for v in (0, 1, 50, 99, 100)] == [0, 1, 50, 99, 0]
+
+
+class TestCombatStyleConversion:
+    """TES4 CSTY records become Skyrim CSTYs; Oblivion's chances are inverted
+    onto Skyrim's min + (max - min) * mult, and Fleeing Disabled makes the
+    actor never flee.
+
+    See: docs/commentary/tes5_import_actors.md#combat-styles
+    """
+
+    class _Writer:
+        """Collects records; FormIDs count up."""
+
+        def __init__(self):
+            self.records, self.next = [], 0x900
+
+        def derive_formid(self, _site, _key):
+            """The next id."""
+            self.next += 1
+            return self.next
+
+        def add_record(self, sig, data):
+            """Keep the record."""
+            self.records.append((sig, data))
+
+    @staticmethod
+    def _style() -> dict:
+        """A Fleeing Disabled TES4 style with a 50% attack chance."""
+        return {'FormID': '00000ABC', 'EditorID': 'TrollStyle', 'CSTD.Flags': '32',
+                'CSTD.AttackChance': '50'}
+
+    def _styles(self):
+        """Index _style() as this plugin's own; returns the default style's FormID."""
+        from tes5_import.actors.combat_style import create_combat_styles
+        return create_combat_styles(self._Writer(), {'CSTY': [self._style()]}, None)
+
+    def teardown_method(self):
+        """Switch style conversion back off for the other tests."""
+        from tes5_import.actors.combat_style import create_combat_styles
+        create_combat_styles(self._Writer(), {}, None, wanted=False)
+
+    def test_attack_chance_becomes_the_offensive_mult(self):
+        """50% attack is (0.5 - 0.05) / (1.0 - 0.05) of Skyrim's attack range."""
+        from tes5_import.actors.combat_style import convert_CSTY
+        self._styles()
+        csgd = _find_subrecord(convert_CSTY(self._style()), b'CSGD')
+        assert abs(struct.unpack_from('<f', csgd)[0] - 0.45 / 0.95) < 1e-5
+
+    def test_fleeing_disabled_style_never_flees(self):
+        """An actor on a Fleeing Disabled style is Foolhardy whatever its confidence."""
+        from tes5_import.actors.combat_style import actor_combat_style
+        from tes5_import.actors.confidence import actor_confidence
+        self._styles()
+        actor = {'ZNAM.CombatStyle': '00000ABC', 'AIDT.Confidence': '0'}
+        assert actor_combat_style(actor) == 0xABC
+        assert actor_confidence(actor) == 100
+
+    def test_styleless_actor_gets_the_default(self):
+        """An actor with no authored style points at the generated default."""
+        from tes5_import.actors.combat_style import actor_combat_style
+        default = self._styles()
+        assert default and actor_combat_style({'AIDT.Confidence': '50'}) == default
 
 
 class TestAggressionTierTargeting:

@@ -441,14 +441,19 @@ Function ForceCombat(Actor akAttacker, Actor akTarget, Faction akAttackers, Fact
     akAttacker.SetActorValue("Aggression", 1)
   EndIf
   If akAttacker.IsInCombat() && akAttacker.GetCombatTarget() != akTarget
-    akAttacker.StopCombat()
-    Int waited = 0
-    While akAttacker.IsInCombat() && waited < 20
-      Utility.Wait(0.05)
-      waited += 1
-    EndWhile
+    StandDown(akAttacker)
   EndIf
   akAttacker.StartCombat(akTarget)
+EndFunction
+
+; StopCombat, then wait (up to a second) for the controller to actually let go.
+Function StandDown(Actor akActor) Global
+  akActor.StopCombat()
+  Int waited = 0
+  While akActor.IsInCombat() && waited < 20
+    Utility.Wait(0.05)
+    waited += 1
+  EndWhile
 EndFunction
 
 ; TES4 StopCombat.  Takes the actor back out of the memberships ForceCombat
@@ -468,6 +473,98 @@ Function EndCombat(Actor akActor, Faction akAttackers) Global
     akActor.RemoveFromFaction(hatesPlayer)
   EndIf
   akActor.StopCombat()
+EndFunction
+
+; ==========================================================================
+; Confidence
+; ==========================================================================
+; TES4 Confidence N means "flee once N% of my own health is lost"; Skyrim's
+; tiers 1-3 instead flee by comparing strength with the enemy.  So a converted
+; actor is only ever Cowardly (0) or Foolhardy (4), and 1-99 lives on as the
+; actor's rank in TES4ConfidenceFaction, which the TES4ConfidenceFlee ability
+; watches.  The combat controller copies the tier when combat STARTS
+; (1.6.1170 0x840c90, reached only from combat start), so a change made
+; mid-fight restarts the fight against the same target.
+; See docs/commentary/tes5_import_actors.md#confidence-tiers
+
+Function SetConfidenceTier(Actor akActor, Int aiTier) Global
+  If akActor == None || akActor.GetActorValue("Confidence") as Int == aiTier
+    Return
+  EndIf
+  akActor.SetActorValue("Confidence", aiTier)
+  Actor target = akActor.GetCombatTarget()
+  If target != None
+    StandDown(akActor)
+    akActor.StartCombat(target)
+  EndIf
+  akActor.EvaluatePackage()
+EndFunction
+
+; Cowardly once health is at or below 1 - rank/100, Foolhardy above it.
+Function ApplyConfidence(Actor akActor, Faction akFaction) Global
+  If akActor == None || akFaction == None || akActor.IsDead()
+    Return
+  EndIf
+  Int rank = akActor.GetFactionRank(akFaction)
+  If rank < 1
+    Return
+  EndIf
+  If akActor.GetActorValuePercentage("Health") <= 1.0 - rank / 100.0
+    SetConfidenceTier(akActor, 0)
+  Else
+    SetConfidenceTier(akActor, 4)
+  EndIf
+EndFunction
+
+; TES4 GetAV Confidence: the 0-100 value the actor was converted or set to.
+; Without the faction (an FO3/FNV plugin, whose Confidence is already the
+; Skyrim tier) the tier itself.
+Float Function GetConfidence(Actor akActor, Faction akFaction) Global
+  If akActor == None
+    Return 0.0
+  ElseIf akFaction == None
+    Return akActor.GetActorValue("Confidence")
+  ElseIf akActor.GetFactionRank(akFaction) >= 1
+    Return akActor.GetFactionRank(akFaction) as Float
+  ElseIf akActor.GetActorValue("Confidence") >= 1.0
+    Return 100.0
+  EndIf
+  Return 0.0
+EndFunction
+
+; TES4 SetAV/ForceAV Confidence (ModAV passes GetConfidence + delta).  Without
+; the faction, afValue is already a tier and is written as one.
+Function SetConfidence(Actor akActor, Float afValue, Faction akFaction, Spell akFlee) Global
+  If akActor == None
+    Return
+  EndIf
+  Int raw = afValue as Int
+  If akFaction == None
+    If raw < 0
+      raw = 0
+    ElseIf raw > 4
+      raw = 4
+    EndIf
+    SetConfidenceTier(akActor, raw)
+    Return
+  EndIf
+  If raw > 0 && raw < 100 && akFlee != None
+    akActor.SetFactionRank(akFaction, raw)
+    akActor.AddSpell(akFlee, False)
+    ApplyConfidence(akActor, akFaction)
+    Return
+  EndIf
+  If akFaction != None
+    akActor.RemoveFromFaction(akFaction)
+  EndIf
+  If akFlee != None
+    akActor.RemoveSpell(akFlee)
+  EndIf
+  If raw > 0
+    SetConfidenceTier(akActor, 4)
+  Else
+    SetConfidenceTier(akActor, 0)
+  EndIf
 EndFunction
 
 ; TES4 SetAV Speed.  Skyrim has no Speed attribute, so the write becomes a
@@ -686,12 +783,17 @@ Function EvaluatePackage(Actor akActor) Global
 EndFunction
 
 ; TES4 `StartConversation Player [topic]`.  Papyrus cannot open dialogue, so the
-; actor joins one alias of the topic's pool (aiFirst .. aiFirst+aiCount-1) on the
-; importer's TES4ForceGreets quest; that alias's ForceGreet package walks over
-; and opens the topic, and its OnEnd fragment (TES4_ForceGreetDone) empties the
-; alias again.  An actor already holding a slot is only re-evaluated; with every
-; slot busy, the first is taken over.
+; actor joins one alias of the topic's pool on the importer's TES4ForceGreets
+; quest; that alias's ForceGreet package walks over and opens the topic.
 Function ForceGreet(Quest akPool, Int aiFirst, Int aiCount, Actor akActor) Global
+  FillPoolSlot(akPool, aiFirst, aiCount, akActor)
+EndFunction
+
+; Hand `akActor` the package of one alias in aiFirst .. aiFirst+aiCount-1 of
+; `akPool` (TES4ForceGreets, TES4ForceFlees).  The package's OnEnd fragment
+; (TES4_ForceGreetDone) empties the alias again.  An actor already holding a
+; slot is only re-evaluated; with every slot busy, the first is taken over.
+Function FillPoolSlot(Quest akPool, Int aiFirst, Int aiCount, Actor akActor) Global
   If !akPool || !akActor
     Return
   EndIf

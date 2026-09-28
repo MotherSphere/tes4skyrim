@@ -19,7 +19,7 @@ argument text -- so those are properties of the CALL and live on it.
 from script_convert import resolve_name as _resolve_name
 from script_convert.constants import (
     ACTOR_VALUE_MAP, ANIM_GROUP_EVENTS, ATTRIBUTE_STUB_VALUE, CASTABLE,
-    FORCE_GREET_QUEST, PLACED_REF_SIGS, TES4_ASSAULT_BOUNTY, TES4_ATTRIBUTES,
+    FORCE_FLEE_QUEST, FORCE_GREET_QUEST, PLACED_REF_SIGS, TES4_ASSAULT_BOUNTY, TES4_ATTRIBUTES,
     SPLIT_SKILLS, TES4_MISC_STAT_NAMES, TES4_MURDER_BOUNTY, TES4_SCRIPT_OWNED_MISC_STATS,
     TES4_STEAL_BOUNTY, is_generated_script_type, mgef_family_keyword_name,
     safe_property_name, papyrus_script_name
@@ -36,6 +36,9 @@ from script_convert.emit import expr as _expr
 from script_convert.constants import typed_already
 from script_convert.constants_falloutnv import FALLOUT_COMMAND_ALIASES
 from tes5_import.dialogue.say_topics import PLAYER_TOKENS
+from tes5_import.actors.confidence import (
+    FACTION_EDID as CONFIDENCE_FACTION, FLEE_SPELL_EDID as CONFIDENCE_FLEE_SPELL)
+from tes5_import.dialogue.say_topics import flee_key
 
 #: TES4 command name (lowercase) -> handler `(ctx, call) -> str | None`.
 REGISTRY: dict = dict(FALLOUT_HANDLERS)
@@ -352,6 +355,28 @@ def _force_greet(ctx, ref: str, parts: list) -> str:
     ctx.sc.property_refs[FORCE_GREET_QUEST] = 'Quest'
     return (f'TES4Polyfill.ForceGreet({FORCE_GREET_QUEST}, {slot[0]}, '
             f'{slot[1]}, {ref})')
+
+
+def _actor_arg(ctx, call) -> str:
+    """The call's receiver as an Actor expression, for passing to TES4Polyfill."""
+    ref = ctx._resolve_self_ref(call.ref, call.extends, actor_func=True)
+    if ref != 'Self' or call.extends == 'Actor':
+        return ref
+    return '(Self as Actor)'
+
+
+@command('forceflee', 'flee')
+def force_flee(ctx, call) -> str:
+    """ForceFlee [cell] [ref]: hand the actor its destination's Flee package.
+
+    See: docs/commentary/script_convert.md#forceflee-is-a-package
+    """
+    slot = ctx.force_flee_slots.get(flee_key(ctx.arg_srcs()))
+    if not slot:
+        return ctx.note(f'NE: {call.raw_name} - no ForceFlee pool for this destination')
+    ctx.sc.property_refs[FORCE_FLEE_QUEST] = 'Quest'
+    return (f'TES4Polyfill.FillPoolSlot({FORCE_FLEE_QUEST}, {slot[0]}, '
+            f'{slot[1]}, {_actor_arg(ctx, call)})')
 
 
 #: SayLine's assumed length for an unmeasured line, and the beat between them.
@@ -1420,7 +1445,25 @@ _AV_SET = frozenset({'setactorvalue', 'setav', 'forceactorvalue', 'forceav',
 _AV_READ = frozenset({'getactorvalue', 'getav'})
 
 #: AVs the engine refuses to Force/Mod/Damage/Restore from Papyrus; only SetActorValue writes them.
-_AV_SET_ONLY = frozenset({'aggression', 'confidence', 'morality', 'mood', 'assistance'})
+_AV_SET_ONLY = frozenset({'aggression', 'morality', 'mood', 'assistance'})
+
+
+def _confidence(ctx, call) -> str:
+    """Get/Set/Force/Mod Confidence as TES4's 0-100 value, through TES4Polyfill.
+
+    See: docs/commentary/script_convert.md#confidence-through-the-polyfill
+    """
+    ref = _actor_arg(ctx, call)
+    ctx.sc.property_refs[CONFIDENCE_FACTION] = 'Faction'
+    current = f'TES4Polyfill.GetConfidence({ref}, {CONFIDENCE_FACTION})'
+    if call.name in ACTOR_VALUE_READ_FUNCTIONS:
+        return current
+    ctx.sc.property_refs[CONFIDENCE_FLEE_SPELL] = 'Spell'
+    value = call.arg(1)
+    if _AV_PAPYRUS[call.name] == 'ModActorValue':
+        value = f'{current} + ({value})'
+    return (f'TES4Polyfill.SetConfidence({ref}, {value}, {CONFIDENCE_FACTION}, '
+            f'{CONFIDENCE_FLEE_SPELL})')
 
 
 #: Reads a split skill answers with the higher half; a BASE read feeds a write, so it stays One-Handed.
@@ -1459,6 +1502,8 @@ def actor_value(ctx, call) -> str:
     if raw.lower() in TES4_ATTRIBUTES:
         return _attribute_access(ctx, call, raw)
     av = ACTOR_VALUE_MAP.get(raw.lower(), raw)
+    if av.lower() == 'confidence' and call.name in _AV_PAPYRUS:
+        return _confidence(ctx, call)
     if raw.lower() == 'encumbrance' and call.name in _AV_READ:
         av = 'InventoryWeight'
     args = [f'"{av}"']

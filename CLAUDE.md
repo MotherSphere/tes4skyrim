@@ -100,7 +100,7 @@ These protect things that are hard or impossible to get back.
   |---|---|---|
   | `...\content\app_489830\depot_489833\` (unpacked exes) | exe decompilation | assets, deployment checks |
   | Oblivion / Nehrim LE install | BSA files and NIFs | anything Skyrim-side |
-  | The modded SSE install | Papyrus logs, and reading `Skyrim.esm` | everything else, especially verifying deployment |
+  | The modded SSE install | Papyrus logs, reading `Skyrim.esm`, and the vanilla `.psc` sources in `Data\Source\Scripts` | everything else, especially verifying deployment |
 
 ## Working with the user
 
@@ -468,6 +468,11 @@ ordinary fixes the edit gate is enough.
 - <a id="ck-wiki-offline"></a>**What a Papyrus native does:**
   `references/SkyrimCKWiki_210522/skyrim/<Func>_-_<Script>.html`. Grep it before
   describing one — never invent semantics. Oblivion: `references/cs_wiki/` (.txt).
+- **How vanilla scripts use it:** the game's own `.psc` sources, at
+  `<SSE>\Data\Source\Scripts` — the directory `find_skyrim_source_scripts()`
+  (`papyrus_compile.py`) resolves and the script stage compiles against. Other
+  mods' sources sit beside vanilla's there, so check a file is Bethesda's
+  before calling a pattern vanilla.
 - **LE assets are SSE-compatible** — never dig through SSE-format assets. BSA
   meshes are SSE-format; read them with `asset_convert/nif/sse_nif.py` (`read_nif`
   converts BSTriShape to LE NiTriShape in memory; pyffi Patch 8 supplies the SSE

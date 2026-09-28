@@ -106,6 +106,8 @@ class ScriptConverter:
 
     #: StartConversation topic (lower, '' = none) -> (first alias, count), from build_force_greet_slots.
     force_greet_slots: dict = {}
+    #: ForceFlee destination key ('cell|ref', lower) -> (first alias, count), from build_force_flee_slots.
+    force_flee_slots: dict = {}
 
     # script EditorID (lower) -> [(mesg_edid, text, buttons)], from
     # script_convert.message_menus.build_message_plan. Populated once per run

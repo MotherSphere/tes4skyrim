@@ -21,8 +21,8 @@ _PLAYER_FORMID = 0x14
 #: The script tokens that name the player as a call's target.
 PLAYER_TOKENS = ('player', 'playerref')
 
-#: Most actors one force-greet topic can greet at once (one alias each).
-_MAX_FORCE_GREET_SLOTS = 8
+#: Most actors one force-greet topic or flee destination serves at once (one alias each).
+_MAX_POOL_SLOTS = 8
 
 #: Say-driven topics: raw24 DIAL fid -> ('ref', fid) or ('drop', None) for RunOn=Target.
 SAY_TOPIC_DISPOSITIONS: dict = {}
@@ -34,6 +34,10 @@ _SAYTO_RE = re.compile(r'\bsayto[\s,]+(\w+)[\s,]+(\w+)', re.IGNORECASE)
 _SAY_RE = re.compile(r'\bsay[\s,]+(\w+)', re.IGNORECASE)
 _STARTCONV_RE = re.compile(r'\bstartconversation[\s,]+(\w+)(?:[\s,]+(\w+))?',
                            re.IGNORECASE)
+
+#: A statement calling ForceFlee/Flee, with up to two arguments (cell, reference).
+_FLEE_RE = re.compile(r'^\s*(?:"?\w+"?\s*\.\s*)?(?:forceflee|flee)\b'
+                      r'[\s,]*("?\w+"?)?(?:[\s,]+("?\w+"?))?\s*$', re.IGNORECASE)
 
 
 def build_say_topic_dispositions(by_type: dict) -> dict:
@@ -109,38 +113,60 @@ def _scan_say_votes(texts: list, dial_by_edid: dict,
         return ref_by_edid.get(t)
 
     votes = defaultdict(set)
-    for line in _script_lines(texts):
+    for line in script_lines(texts):
         low = line.lower()
         if 'say' in low or 'startconversation' in low:
             _scan_say_line(line, votes, dial_by_edid, target_fid)
     return votes
 
 
-def _script_lines(texts: list):
+def script_lines(texts: list):
     """Every script line of `texts` with its `;` comment stripped."""
     for text in texts:
         for raw in (text or '').replace('\\r\\n', '\n').splitlines():
             yield raw.split(';', 1)[0]
 
 
+def _alias_pools(counts: dict) -> dict:
+    """{key: (first alias id, slot count)}: keys sorted, ids contiguous, at most _MAX_POOL_SLOTS each."""
+    slots, first = {}, 0
+    for key in sorted(counts):
+        n = min(counts[key], _MAX_POOL_SLOTS)
+        slots[key] = (first, n)
+        first += n
+    return slots
+
+
 def build_force_greet_slots(by_type: dict) -> dict:
     """Force-greet pool per `StartConversation Player [<topic>]` topic.
 
     Returns {lowercased topic token, '' when none: (first alias id, slot
-    count)}, keys in sorted order and ids contiguous, so the importer's alias
-    quest and every converted call site agree from the same export.
+    count)}, so the importer's alias quest and every converted call site
+    agree from the same export.
     """
     counts = defaultdict(int)
-    for line in _script_lines(collect_script_texts(by_type)):
+    for line in script_lines(collect_script_texts(by_type)):
         for m in _STARTCONV_RE.finditer(line):
             if m.group(1).lower() in PLAYER_TOKENS:
                 counts[(m.group(2) or '').lower()] += 1
-    slots, first = {}, 0
-    for key in sorted(counts):
-        n = min(counts[key], _MAX_FORCE_GREET_SLOTS)
-        slots[key] = (first, n)
-        first += n
-    return slots
+    return _alias_pools(counts)
+
+
+def flee_key(args: list) -> str:
+    """`cell|ref`, lowercased and unquoted, from a ForceFlee call's argument sources."""
+    toks = [(a or '').strip(' \t,"').lower() for a in list(args)[:2]]
+    toks += [''] * (2 - len(toks))
+    return '|'.join(toks)
+
+
+def build_force_flee_slots(by_type: dict) -> dict:
+    """ForceFlee pool per destination: {flee_key: (first alias id, slot count)}."""
+    counts = defaultdict(int)
+    for line in script_lines(collect_script_texts(by_type)):
+        m = _FLEE_RE.match(line)
+        if m:
+            counts[flee_key(m.groups())] += 1
+    return _alias_pools(counts)
 
 
 def _scan_say_line(line: str, votes: dict, dial_by_edid: dict,

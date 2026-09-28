@@ -46,12 +46,17 @@ from .record_types import magic_art
 from .record_types.crime import plan_crime
 from .record_types.spell_tomes import create_spell_tomes
 from .record_types.spell_tomes_morrowind import chain_tables
-from script_convert.constants import FORCE_GREET_QUEST
+from .record_types.world_falloutnv import is_fallout_export
+from .actors.combat_style import create_combat_styles
+from .actors.confidence import create_confidence_records
+from script_convert.constants import FORCE_FLEE_QUEST, FORCE_GREET_QUEST
+from .packages.force_flee import write_force_flee_quest
 from script_convert.cross_ref import hosted_script_type, index_record_details
 from .dialogue.converter import build_npc_to_vtyp_map
 from .dialogue.force_greets import dial_index, write_force_greet_quest
 from .dialogue.morrowind_sidecar import is_tes3_export
-from .dialogue.say_topics import FORCE_GREET_SLOTS, build_force_greet_slots
+from .dialogue.say_topics import (FORCE_GREET_SLOTS, build_force_flee_slots,
+                                   build_force_greet_slots)
 from .runtime_sidecars import begin_sidecar_run
 from .base.adopted_records import adopt_master_special_records
 from .base.cell_family import set_cell_families
@@ -282,6 +287,11 @@ def _prescan_special_records(by_type: dict, ctx, writer, export_dir: str, _step_
         create_ambient_gmst_overrides(writer, by_type)
     WELL_KNOWN_PROPERTIES.update(create_fall_damage_spell(
         writer, getattr(ctx, 'master_index', None)))
+    tes4_source = not is_tes3_export(export_dir) and not is_fallout_export(by_type)
+    WELL_KNOWN_PROPERTIES.update(create_confidence_records(
+        writer, getattr(ctx, 'master_index', None), wanted=tes4_source))
+    create_combat_styles(writer, by_type, getattr(ctx, 'master_export', None),
+                         getattr(ctx, 'master_index', None), wanted=tes4_source)
     set_whole_day_global(create_day_clock(writer, by_type, ctx))
     _step_done('vtyp/special records')
 
@@ -365,7 +375,7 @@ def _prescan_unlock_plan(by_type: dict, writer, num_tes4_masters: int,
 
 
 def _prescan_force_greets(by_type: dict, ctx, writer, _SC) -> None:
-    """Mint the StartConversation force-greet quest and share its alias pools.
+    """Mint the StartConversation force-greet and ForceFlee quests and share their alias pools.
 
     Before any script VMAD, so the converted call's Quest property binds.
     """
@@ -379,6 +389,14 @@ def _prescan_force_greets(by_type: dict, ctx, writer, _SC) -> None:
         WELL_KNOWN_PROPERTIES[FORCE_GREET_QUEST] = quest_fid
     print(f"  StartConversation force greets: {len(slots)} topics, "
           f"{sum(n for _f, n in slots.values())} alias slots")
+    flee_slots = build_force_flee_slots(by_type)
+    _SC.force_flee_slots = flee_slots
+    flee_fid = write_force_flee_quest(writer, flee_slots, by_type,
+                                      getattr(ctx, 'master_index', None))
+    if flee_fid:
+        WELL_KNOWN_PROPERTIES[FORCE_FLEE_QUEST] = flee_fid
+    print(f"  ForceFlee pools: {len(flee_slots)} destinations, "
+          f"{sum(n for _f, n in flee_slots.values())} alias slots")
 
 
 def _prescan_menu_records(by_type: dict, writer, _SC, _step_done):

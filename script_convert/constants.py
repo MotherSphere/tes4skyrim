@@ -628,6 +628,9 @@ PLACED_REF_SIGS = ('ACHR', 'ACRE', 'REFR')
 #: The importer's force-greet alias quest, which StartConversation's Quest property names.
 FORCE_GREET_QUEST = 'TES4ForceGreets'
 
+#: The importer's flee alias quest, which ForceFlee's Quest property names.
+FORCE_FLEE_QUEST = 'TES4ForceFlees'
+
 #: The importer's fall-damage spell, which ResetFallDamageTimer's Spell property names.
 FALL_DAMAGE_SPELL = 'TES4NoFallDamage'
 

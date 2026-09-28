@@ -315,6 +315,17 @@ FLEE_TO = Template(
     slots={'location': 0, 'flee_distance': 2},
 )
 
+#: FleeFrom (000197F1, Find -> Flee): flee the actor's threats; defaults are the root's own values.
+FLEE_FROM = Template(
+    formid=0x000197F1, edid='FleeFrom', xnam=20, version=7,
+    index_list=(7, 6, 1, 0, 3, 4, 10, 13, 15, 17, 19),
+    inputs=(T_TARGETSEL, T_OBJECTLIST, T_FLOAT, T_BOOL, T_LOCATION, T_FLOAT,
+            T_LOCATION, T_BOOL, T_BOOL, T_BOOL, T_BOOL),
+    defaults={0: (2, 0, 0), 1: 0, 2: 0.0, 3: 1, 4: (2, 0, 0), 5: 200.0,
+              6: (12, 0, 1000), 7: 0, 8: 0, 9: 0, 10: 0},
+    slots={'flee_distance': 2},
+)
+
 # --- UseMagic (000504F5) — 46 instances ----------------------------------
 USE_MAGIC = Template(
     formid=0x000504F5, edid='UseMagic', xnam=13, version=1,

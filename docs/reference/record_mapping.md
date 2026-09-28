@@ -40,7 +40,7 @@ see the `oblivion-to-skyrim-dialog` skill.
 | CLOT | ARMO | Clothing → ARMO with ArmorType=Clothing in BOD2. Same ARMA requirement. |
 | CONT | CONT | Add OBND. Minor changes. |
 | CREA | NPC_ | **No CREA in TES5**. Must convert to NPC_. TES4 creature stats (attributes, skills) must map to TES5 DNAM. Needs race assignment. |
-| CSTY | CSTY | **Completely restructured**: TES4 CSTD/CSAD → TES5 CSGD/CSMD/CSME. |
+| CSTY | CSTY | **Completely restructured**: TES4 CSTD/CSAD chances → TES5 CSGD/CSME/CSCR/CSLR multipliers ([why](../commentary/tes5_import_actors.md#combat-styles)). FO3/FNV styles are not converted. |
 | DIAL | DIAL | Categories restructured. TES5 adds DLBR (Dialog Branch) and DLVW (Dialog View). |
 | DOOR | DOOR | Add OBND. Minor changes. |
 | EFSH | EFSH | DATA structure differs. |
@@ -193,6 +193,8 @@ because it runs too early or in the wrong order:
   (00021E81). Skipped CSTY refs are likewise replaced: ZNAM = `csWolf` (00057BE8) for animal/horse CREA,
   `DefaultCombatstyle` (0000003D) otherwise. TES4 aggression >5 now maps to TES5 tier 1 (the old >=40
   threshold left e.g. dogs at Unaggressive, which never initiates combat).
+  **Superseded:** TES4 CSTY records are now converted and ZNAM points at them; the csWolf /
+  DefaultCombatstyle fallback remains only for FO3/FNV and Morrowind sources.
   **Superseded:** PACK records are now converted, so NPC_ and CREA keep their own packages in TES4 order
   (quest packages excluded); creatures add `DefaultMasterPackageCreature` last as the fallback.
 - **QUST** — Alias system, objectives, and VMAD fragments are all new. Only basic stage data can be transferred.

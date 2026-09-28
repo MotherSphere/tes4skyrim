@@ -474,7 +474,7 @@ the normal "headers not found" Missing rather than crashing.
 
 `SKIP_TYPES` in [tes5_import/base/constants.py](../../tes5_import/base/constants.py) is the
 single source of truth. Currently skipped: ROAD, SCPT, SKIL, BSGN, RACE, MGEF,
-CSTY, IDLE, GMST, EYES, HAIR.
+IDLE, GMST, EYES, HAIR.
 
 Notably **converted** (do not assume otherwise): GLOB, CLAS, CLMT, WATR, PACK,
 WTHR, REGN. PACK is converted in its own phase (3b2, after QUST) rather than

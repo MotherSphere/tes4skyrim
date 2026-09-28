@@ -1422,10 +1422,12 @@ leaves the trait **unchanged**, so every scripted "now turn hostile" beat
 silently did nothing. 160 such writes in Nehrim alone (94 of them `Aggression
 100`), 509 enum-AV writes across both plugins.
 
-`_scale_enum_av()` buckets literals onto the same thresholds the record-side
-converter uses (`tes5_import/record_types/actors.py`), so a scripted change lands
-on the tier the NPC's AIDT was converted to. Values already inside the enum range
-pass through untouched; non-literals are left alone. `ModActorValue` is
+`_scale_enum_av()` buckets Aggression literals onto the same thresholds the
+record-side converter uses (`tes5_import/record_types/actor_common.py`), so a
+scripted change lands on the tier the NPC's AIDT was converted to. Values already
+inside the enum range pass through untouched; non-literals are left alone.
+Confidence is no longer one of these: see
+[the next section](#confidence-through-the-polyfill). `ModActorValue` is
 deliberately NOT scaled — a delta on a 0-100 scale has no enum equivalent, and no
 such call exists in the source. Verify with
 grep the generated sources for `Set/ForceActorValue` on the enum AVs
@@ -1503,6 +1505,76 @@ is deliberate — `tes5_import/dialogue/unlocks.py` re-expresses topic visibilit
 `TES4Unlock_*` GLOB gates and scans SCPT sources *because* script_convert leaves
 an inert comment. `ModDisposition` (414) is a genuine engine removal, with the
 `<= -100` hostility case already converting to `StartCombat`.
+
+## Confidence goes through the polyfill (2026-09-27, confirmed in game: Nehrim mine exit, Charactergen)
+<a id="confidence-through-the-polyfill"></a>
+
+**Code:** `commands._confidence`, `TES4Polyfill` (Confidence section),
+`static_scripts/TES4_ConfidenceFlee.psc`.
+
+A converted actor is only ever Cowardly or Foolhardy, and a TES4 confidence of
+1-99 lives on as its rank in `TES4ConfidenceFaction`
+([why](tes5_import_actors.md#confidence-tiers)). A script therefore cannot
+write or read the Confidence actor value directly any more:
+
+| TES4 | Papyrus |
+|---|---|
+| `GetAV` / `GetBaseAV Confidence` | `TES4Polyfill.GetConfidence(ref, TES4ConfidenceFaction)`: the rank, else 100 for Foolhardy, else 0 |
+| `SetAV` / `ForceAV Confidence N` | `TES4Polyfill.SetConfidence(ref, N, TES4ConfidenceFaction, TES4ConfidenceFlee)` |
+| `ModAV Confidence D` | `SetConfidence(ref, GetConfidence(...) + (D), ...)` |
+
+`SetConfidence` with 1-99 sets the rank, adds the flee ability and applies the
+tier the actor's health calls for now; 0 or 100 removes both and writes
+Cowardly or Foolhardy. So a script's own round trip works: Unique Landscapes'
+fish (`xulcfFishScript`) reads its confidence into `baseConf`, computes a flee
+distance from `100 - baseConf`, and restores it later, all on the 0-100 scale
+it was written for. Before, the read returned the tier (0-4) and its
+`ModActorValue("Confidence", ...)` was refused by the engine.
+
+FO3/FNV already store Confidence as the Skyrim tier. Their plugins have no
+`TES4ConfidenceFaction`, so the property stays None and `SetConfidence`/
+`GetConfidence` write and read the tier unchanged (clamped to 0-4), exactly as
+the old pass-through did. The script converter cannot tell the games apart; the
+missing faction can.
+
+### Changing the tier mid-fight restarts the fight
+<a id="confidence-restarts-combat"></a>
+
+The combat controller copies the Confidence tier into its own state when combat
+starts (1.6.1170 0x840c90 writes controller +0x6c/+0x6d; its only caller,
+0x559280, runs from combat start). Its flee test reads that copy. A
+`SetActorValue("Confidence", ...)` on an actor already fighting therefore does
+not change how it fights. `TES4Polyfill.SetConfidenceTier` stands the actor down
+(`StandDown`, the wait `ForceCombat` already used) and starts combat again
+against the same target. This is a disassembly finding; it has not been
+confirmed in game.
+
+## ForceFlee is a package
+<a id="forceflee-is-a-package"></a>
+
+**Code:** `commands.force_flee`, `tes5_import/packages/force_flee.py`,
+`say_topics.build_force_flee_slots`.
+
+Skyrim keeps `ForceFlee` (opcode 0x10F5) only as a console command. Papyrus
+cannot call it, and the old conversion (`SetActorValue("Confidence", 0)`) both
+dropped the destination and left the actor Cowardly forever: per the CK wiki a
+Cowardly actor never fights again. Skyrim's own mechanism is the Flee procedure,
+a package:
+
+- `ForceFlee <cell> <ref>` / `ForceFlee <cell>` becomes a `FleeTo` (000C7039)
+  package to that reference (PLDT type 0), else into that cell (type 1).
+- `ForceFlee` with no destination becomes a `FleeFrom` (000197F1) package, which
+  flees the actor's threats until it is `fFleeDistanceExterior` (5000) away, the
+  value vanilla WEJS11SigarFlee writes.
+
+The packages sit in an alias pool on the `TES4ForceFlees` quest, one pool per
+destination, built exactly like the StartConversation force-greet pool. The
+call becomes `TES4Polyfill.FillPoolSlot(TES4ForceFlees, first, count, actor)`,
+and the package's OnEnd fragment (`TES4_ForceGreetDone`) empties the alias when
+the flee completes, so nothing about the actor stays changed. Oblivion uses it
+once (the Paradise cultist, `forceflee ParadiseGrotto01, MQ15ResurrectPad3`);
+FalloutNV a handful of times. Unconfirmed in game, including whether a Flee
+package runs while its actor is in combat.
 
 ## GameMode steps are rates (2026-09-26, confirmed in game)
 <a id="gamemode-steps-are-rates"></a>
@@ -4379,9 +4451,9 @@ release call lives in the same unloaded script's update loop and can never run.
 Where Skyrim has no matching call, the engine's own mechanism is preferred over
 a Papyrus approximation.
 
-- **`ForceFlee` / `Flee`** (UESP index 407): Skyrim has no flee call — fleeing
-  is driven by the Confidence actor value, so dropping the actor to Cowardly and
-  re-evaluating its package makes the ENGINE break off combat.
+- **`ForceFlee` / `Flee`** (UESP index 407): Skyrim's flee is a package
+  procedure, handed out through an alias pool
+  ([ForceFlee is a package](#forceflee-is-a-package)).
 - **`SetForceRun`** → the `SpeedMult` actor value; Skyrim has no force-run flag
   and the AV is what the engine reads for movement speed. Its getter reads the
   live sneak state for the same reason. `setforcerun` is deliberately absent

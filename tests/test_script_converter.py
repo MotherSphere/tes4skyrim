@@ -2601,6 +2601,26 @@ class TestSayTimerConversion:
             ScriptConverter.force_greet_slots = saved
         assert 'TES4Polyfill.ForceGreet(TES4ForceGreets, 1, 1, GaiusRef)' in result
 
+    def test_forceflee_joins_its_destinations_flee_pool(self, converter):
+        """`ForceFlee <cell>, <ref>` fills a slot of that destination's pool; a variable named Flee does not count.
+
+        See: docs/commentary/script_convert.md#forceflee-is-a-package
+        """
+        from tes5_import.dialogue.say_topics import build_force_flee_slots
+        by_type = {'INFO': [{'ResultScript': 'forceflee ParadiseGrotto01, MQ15ResurrectPad3'}],
+                   'SCPT': [{'SCTX': 'begin GameMode\nKimballRef.ForceFlee\n'
+                                     'set Flee to 1\nif Flee == 1\nendif\nend'}]}
+        slots = build_force_flee_slots(by_type)
+        assert slots == {'paradisegrotto01|mq15resurrectpad3': (0, 1), '|': (1, 1)}
+        saved = ScriptConverter.force_flee_slots
+        ScriptConverter.force_flee_slots = slots
+        try:
+            result = conv_lines(converter,
+                'forceflee ParadiseGrotto01, MQ15ResurrectPad3', 'Actor')
+        finally:
+            ScriptConverter.force_flee_slots = saved
+        assert result == 'TES4Polyfill.FillPoolSlot(TES4ForceFlees, 0, 1, Self)'
+
     def test_sayline_uses_the_topics_measured_maximum_as_fallback(self, converter):
         from script_convert.converter import ScriptConverter
         saved = ScriptConverter.say_durations
@@ -2982,20 +3002,23 @@ class TestEnumActorValues:
             'SetActorValue Aggression, 0', 'ObjectReference')
         assert 'SetActorValue("Aggression", 0)' in out
 
-    def test_confidence_scaled(self, converter):
-        """Oblivion 100 = fearless → Foolhardy (4), the only tier that never
-        flees.  Mapping it to Brave (3) left actors with a nonzero flee score
-        and made them run away constantly."""
-        out = conv_line(converter,
-            'SetActorValue Confidence, 100', 'ObjectReference')
-        assert 'SetActorValue("Confidence", 4)' in out
+    def test_confidence_write_goes_through_the_polyfill(self, converter):
+        """The 0-100 value reaches TES4Polyfill.SetConfidence unscaled.
 
-    def test_confidence_tiers_span_full_range(self, converter):
-        """Must mirror _convert_aidt: all five tiers are reachable."""
-        for raw, tier in ((100, 4), (75, 3), (50, 2), (20, 1), (5, 0)):
-            out = conv_line(converter,
-                f'SetActorValue Confidence, {raw}', 'ObjectReference')
-            assert f'SetActorValue("Confidence", {tier})' in out, (raw, out)
+        See: docs/commentary/script_convert.md#confidence-through-the-polyfill
+        """
+        out = conv_line(converter, 'SetActorValue Confidence, 80', 'Actor')
+        assert out == ('TES4Polyfill.SetConfidence(Self, 80, '
+                       'TES4ConfidenceFaction, TES4ConfidenceFlee)')
+
+    def test_confidence_read_and_mod_round_trip(self, converter):
+        """GetAV reads the 0-100 value back; ModAV adds to it (the ULC fish script)."""
+        read = conv_line(converter, 'set baseConf to GetAV Confidence', 'Actor')
+        mod = conv_line(converter, 'ModAV Confidence fMod', 'Actor')
+        current = 'TES4Polyfill.GetConfidence(Self, TES4ConfidenceFaction)'
+        assert read == f'baseConf = {current}'
+        assert mod == (f'TES4Polyfill.SetConfidence(Self, {current} + (fMod), '
+                       'TES4ConfidenceFaction, TES4ConfidenceFlee)')
 
     def test_non_enum_actor_value_untouched(self, converter):
         out = conv_line(converter,
@@ -3402,8 +3425,10 @@ class TestStartCombatIsForced:
         body = src[src.index('Function ForceCombat('):]
         body = body[:body.index('EndFunction')]
         assert 'GetCombatTarget() != akTarget' in body
-        assert (body.index('StopCombat()') < body.index('While akAttacker.IsInCombat()')
-                < body.index('StartCombat(akTarget)'))
+        assert body.index('StandDown(akAttacker)') < body.index('StartCombat(akTarget)')
+        stand = src[src.index('Function StandDown('):]
+        stand = stand[:stand.index('EndFunction')]
+        assert stand.index('StopCombat()') < stand.index('While akActor.IsInCombat()')
 
     def test_forcecombat_never_puts_the_player_in_the_shared_pair(self):
         """A player in TES4ForceCombatVictims makes every forced Attacker (Nehrim's
@@ -5303,10 +5328,9 @@ class TestScaleEnumAv:
         assert converter._scale_enum_av('aggression', '5.5') == '1'
         assert converter._scale_enum_av('aggression', '6') == '1'
 
-    def test_confidence_tiers(self, converter):
-        for value, tier in (('0', '0'), ('15', '1'), ('40', '2'),
-                            ('70', '3'), ('100', '4')):
-            assert converter._scale_enum_av('confidence', value) == tier
+    def test_confidence_is_not_bucketed(self, converter):
+        """Confidence keeps its 0-100 value for TES4Polyfill.SetConfidence."""
+        assert converter._scale_enum_av('confidence', '80') is None
 
     def test_value_already_in_range_passes_through(self, converter):
         # A deliberate Skyrim-style tier is not re-bucketed.
