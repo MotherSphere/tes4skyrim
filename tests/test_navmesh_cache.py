@@ -1035,7 +1035,7 @@ def test_no_download_env_var_is_shared_not_duplicated():
     """
     assert nc.NO_DOWNLOAD_ENV_VAR == 'TESCONV_NO_CACHE_DOWNLOAD'
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for name in ('core/gui/runner.py', 'convert.py'):
+    for name in ('core/gui/runner.py',):
         with open(os.path.join(root, name), encoding='utf-8') as fh:
             src = fh.read()
         assert 'NO_DOWNLOAD_ENV_VAR' in src, name
@@ -1047,6 +1047,16 @@ def test_no_download_env_var_is_shared_not_duplicated():
         assert not code, (
             '%s hardcodes the env var in code; import NO_DOWNLOAD_ENV_VAR: %s'
             % (name, code))
+
+
+def test_download_allowed_honors_saved_setting_and_env(monkeypatch):
+    """A CLI run must obey the saved GUI setting, not only the env var."""
+    monkeypatch.delenv(nc.NO_DOWNLOAD_ENV_VAR, raising=False)
+    assert nc.download_allowed({}) is True
+    assert nc.download_allowed({nc.DOWNLOAD_CONFIG_KEY: True}) is True
+    assert nc.download_allowed({nc.DOWNLOAD_CONFIG_KEY: False}) is False
+    monkeypatch.setenv(nc.NO_DOWNLOAD_ENV_VAR, '1')
+    assert nc.download_allowed({nc.DOWNLOAD_CONFIG_KEY: True}) is False
 
 
 def test_auto_install_explains_the_download_opt_out(

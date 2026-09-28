@@ -53,6 +53,7 @@ from core.gui.selection import runnable
 from core.gui.widgets import open_url
 from core.subprocess_flags import POPEN_FLAGS
 from core.worker_budget import worker_count
+from tools.navmesh.navmesh_cache import DOWNLOAD_CONFIG_KEY
 
 DISCORD_URL = "https://discord.gg/NTkCDfYUru"
 YOUTUBE_URL = "https://www.youtube.com/@bryanthinton"
@@ -87,7 +88,7 @@ def _add_cache_download(app, settings_menu) -> None:
     """
     def _changed():
         """Persist the new state."""
-        save_setting("navmeshCacheDownload", bool(app.cache_dl_var.get()))
+        save_setting(DOWNLOAD_CONFIG_KEY, bool(app.cache_dl_var.get()))
 
     settings_menu.add_checkbutton(
         label="Download navmesh cache", variable=app.cache_dl_var,

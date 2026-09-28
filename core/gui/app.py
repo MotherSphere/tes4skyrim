@@ -48,6 +48,7 @@ from core.gui.menus import build_menubar
 from core.worker_budget import cpu_total, worker_count
 from output_layout import configured_output, output_setting
 from preflight import RC_MISSING_DEP
+from tools.navmesh.navmesh_cache import DOWNLOAD_CONFIG_KEY
 
 # ---------------------------------------------------------------------------
 #  Palette and OS chrome
@@ -480,7 +481,7 @@ def build_state(root, cfg: dict) -> GuiApp:
     app.file_var = tk.StringVar()
     app.workers_var = tk.IntVar(value=_initial_workers(cfg, app.cpu_max))
     app.cache_dl_var = tk.BooleanVar(
-        value=cfg.get("navmeshCacheDownload") is not False)
+        value=cfg.get(DOWNLOAD_CONFIG_KEY) is not False)
     app.pack_default_var = tk.BooleanVar(
         value=cfg.get(PACK_DEFAULT_CONFIG_KEY) is not False)
     app.winding_mode_var = tk.StringVar(value=_initial_winding(cfg))
