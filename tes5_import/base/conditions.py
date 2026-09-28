@@ -18,15 +18,18 @@ conditions reference for the methodology.
 
 import struct
 
+from tes4_export.record_types.morrowind import MW_ENCHANT_SKILL
+
 from .cell_family import expand_cell_families, or_groups
 from .constants import ENGINE_GLOBAL_FORMIDS
 from .ctda_bool import bool_outcomes
 from .equivalents import TES4_ITEM_FORMID_TO_SKYRIM
-from .conditions_falloutnv import (FALLOUT_CTDA_SIZE, fallout_function,
-                                   fallout_run_on)
+from .conditions_falloutnv import (FALLOUT_AV_TO_TES5, FALLOUT_CTDA_SIZE,
+                                   fallout_function, fallout_run_on)
 from ..generated.ctda_param_types import CTDA_FORMID_PARAMS
-from .owned_records import MGEF_FAMILY_KEYWORDS
+from .owned_records import MGEF_FAMILY_KEYWORDS, WELL_KNOWN_PROPERTIES
 from .race_factions import race_faction
+from .split_skill_conditions import split_skill_ctdas
 from .text_reader import (_ENGINE_FIXED_FORMIDS, get_formid_index_offset,
                           remap_formid)
 
@@ -208,44 +211,6 @@ _RACE_PARAM_FUNCS = frozenset({69, 130})
 
 
 # --- Actor Value parameters --------------------------------------------------
-# ptActorValue params are RAW INDICES into each game's actor-value table, and
-# the two tables share not one entry: TES4 index 0 is Strength, TES5 index 0 is
-# Aggression; TES4 5 is Endurance, TES5 5 is Assistance. Passing the index
-# through unchanged therefore reads a completely unrelated value.
-#
-# That silently broke every guild in Morroblivion. Joining the Fighters Guild
-# is gated on `GetActorValue Strength >= 30 AND GetActorValue Endurance >= 30`;
-# converted verbatim it became `Aggression >= 30 AND Assistance >= 30`, and
-# those are 0-3 enums that can never reach 30 at any level — so the recruiter
-# always fell through to "You don't meet our requirements." The Thieves Guild
-# (Agility/Personality -> Morality/One-Handed) failed the same way, as did
-# ~600 conditions across the exports.
-#
-# SKYRIM HAS NO ATTRIBUTES. Strength, Intelligence, Willpower, Agility, Speed,
-# Endurance, Personality and Luck simply do not exist as actor values, and no
-# TES5 actor value is a faithful stand-in — every candidate (SpeedMult,
-# HealRate, UnarmedDamage, ...) is on a different scale, so a 0-100 attribute
-# threshold compared against one is arbitrary. An attribute gate is therefore
-# DROPPED, which fails OPEN: the check becomes a no-op and the content behind
-# it stays reachable. That is the faithful outcome here — Oblivion's attribute
-# gates exist to keep an under-developed character out, and a Skyrim character
-# has no way to satisfy them, so enforcing them would lock the content away
-# permanently rather than merely early.
-#
-# Skills DO survive, under different names and indices, so a skill gate is
-# remapped and keeps its threshold (both games score skills 0-100).
-# Derived/status values that exist in both games are remapped too.
-_TES4_AV_ATTRIBUTES = frozenset({
-    0,   # Strength
-    1,   # Intelligence
-    2,   # Willpower
-    3,   # Agility
-    4,   # Speed
-    5,   # Endurance
-    6,   # Personality
-    7,   # Luck
-})
-
 #: TES4 actor-value index -> TES5. See: docs/commentary/tes5_import_conditions.md#actor-value-vs-book-skill-table
 _TES4_AV_TO_TES5 = {
     # --- derived / status values present in both games ---
@@ -266,7 +231,7 @@ _TES4_AV_TO_TES5 = {
     21: 19,   # Conjuration     -> Conjuration
     22: 20,   # Destruction     -> Destruction
     23: 21,   # Illusion        -> Illusion
-    24: 21,   # Mysticism       -> Illusion       (Mysticism was folded in)
+    24: 18,   # Mysticism       -> Alteration     (where its spells convert)
     25: 22,   # Restoration     -> Restoration
     26: 26,   # Acrobatics      -> Stamina        (no Skyrim skill)
     27: 12,   # LightArmor      -> LightArmor
@@ -275,6 +240,7 @@ _TES4_AV_TO_TES5 = {
     30: 14,   # Security        -> Lockpicking
     31: 15,   # Sneak           -> Sneak
     32: 17,   # Speechcraft     -> Speech
+    MW_ENCHANT_SKILL + 12: 23,  # Morrowind Enchant -> Enchanting
     # --- AI / crime values present in both games ---
     33: 0,    # Aggression      -> Aggression
     34: 1,    # Confidence      -> Confidence
@@ -527,19 +493,17 @@ def _disposition_fields(type_byte: int, data: bytes) -> 'tuple | None':
 
 
 def _convert_params(func_idx: int, param1: int, param2: int,
-                    offset: int) -> 'tuple | None':
+                    offset: int, av_table: dict) -> 'tuple | None':
     """(param1, param2) with only FormID slots remapped, or None to drop.
 
-    `func_idx` is the TES5 index.  Actor-value and race parameters are
-    translated between the games' tables rather than remapped.
+    `func_idx` is the TES5 index.  Actor-value parameters translate through
+    `av_table` (the source game's), race parameters to Skyrim's races.
     See: docs/commentary/tes5_import_conditions.md#formid-params
     """
     fid_slots = CTDA_FORMID_PARAMS.get(func_idx, frozenset())
     if func_idx in _AV_PARAM_FUNCS:
-        av = param1 if param1 < 0x80000000 else param1 - 0x100000000
-        if av in _TES4_AV_ATTRIBUTES or av not in _TES4_AV_TO_TES5:
-            return None
-        return _TES4_AV_TO_TES5[av], 0
+        av = av_table.get(param1)
+        return None if av is None else (av, 0)
     if func_idx in _RACE_PARAM_FUNCS:
         param1 = _map_race_param(param1)
         if param1 is None:
@@ -551,6 +515,24 @@ def _convert_params(func_idx: int, param1: int, param2: int,
     if 2 in fid_slots:
         param2 = _remap_formid(param2, offset)
     return param1, param2
+
+
+#: TES4 Fame and Infamy actor values -> the conversion-owned global converted scripts keep them in.
+_FAME_GLOBALS = {38: 'TES4Fame', 39: 'TES4Infamy'}
+
+
+def _fame_global(raw: bytes, type_byte: int, func_idx: int, param1: int) -> 'tuple | None':
+    """(type byte, GetGlobalValue, global FormID) for a PLAYER Fame/Infamy read, else None.
+
+    Only the run-on-target (player) form moves: an NPC's own Fame read 0 in Oblivion and still does.
+    See: docs/plans/character_sheet.md#bug-fame
+    """
+    edid = _FAME_GLOBALS.get(param1)
+    if (not edid or len(raw) == FALLOUT_CTDA_SIZE or func_idx not in _AV_PARAM_FUNCS
+            or not type_byte & CTDA_RUN_ON_TARGET):
+        return None
+    fid = WELL_KNOWN_PROPERTIES.get(edid, 0)
+    return (type_byte & ~CTDA_RUN_ON_TARGET, FUNC_GET_GLOBAL_VALUE, fid) if fid else None
 
 
 def _effect_family(func_idx: int, param1: int) -> tuple:
@@ -659,9 +641,15 @@ def convert_ctda(raw: bytes, offset: 'int | None' = None,
     type_byte, comp_raw, func_idx, param1, param2, run_on, reference = head
     if type_byte & CTDA_USE_GLOBAL:
         comp_raw = _remap_global(comp_raw, offset)
-    params = _convert_params(func_idx, param1, param2, offset)
-    fields = _run_on_fields(type_byte, func_idx, run_on, reference,
-                            run_on_target_ref, drop_run_on_target)
+    fame = _fame_global(raw, type_byte, func_idx, param1)
+    if fame:
+        type_byte, func_idx, gfid = fame
+        params, fields = (gfid, 0), (type_byte, 0, 0)
+    else:
+        av_table = FALLOUT_AV_TO_TES5 if len(raw) >= FALLOUT_CTDA_SIZE else _TES4_AV_TO_TES5
+        params = _convert_params(func_idx, param1, param2, offset, av_table)
+        fields = _run_on_fields(type_byte, func_idx, run_on, reference,
+                                run_on_target_ref, drop_run_on_target)
     if params is None or fields is None:
         return None
     func_idx, param1 = (_authored_race_faction(func_idx, param1, offset)
@@ -759,8 +747,7 @@ def convert_ctda_list_with_strings(rec: dict, script_vars: dict = None,
                                 in_speak_as_topic=speak_as)
         except (ValueError, struct.error):
             continue
-        if ctda is not None:
-            out.append((ctda, None))
+        out.extend((c, None) for c in split_skill_ctdas(raw, ctda))
 
     if out and (out[-1][0][0] & CTDA_OR):
         fixed = bytes([out[-1][0][0] & ~CTDA_OR]) + out[-1][0][1:]

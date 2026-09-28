@@ -485,9 +485,9 @@ class TestFunctionConversion:
         assert 'IsDead' in result
 
     def test_actor_value_function(self, converter):
-        result = emit_function(converter, None, 'GetActorValue', 'Blade', 'Actor')
+        result = emit_function(converter, None, 'GetActorValue', 'Armorer', 'Actor')
         assert 'GetActorValue' in result
-        assert 'OneHanded' in result
+        assert 'Smithing' in result
 
     def test_actor_value_alchemy(self, converter):
         result = emit_function(converter, None, 'ModActorValue', 'Alchemy 5', 'Actor')
@@ -533,10 +533,9 @@ class TestActorValueMap:
     def test_fatigue_to_stamina(self):
         assert ACTOR_VALUE_MAP['fatigue'] == 'Stamina'
 
-    def test_mysticism_to_illusion(self):
-        # Mysticism was folded into Illusion in Skyrim; must agree with the
-        # record side (skyrim_overrides.TES4_SKILL_TO_TES5_INDEX maps 24 -> 21).
-        assert ACTOR_VALUE_MAP['mysticism'] == 'Illusion'
+    def test_mysticism_to_alteration(self):
+        """Mysticism reads Alteration, the school its converted spells train."""
+        assert ACTOR_VALUE_MAP['mysticism'] == 'Alteration'
 
     def test_resistfire(self):
         assert ACTOR_VALUE_MAP['resistfire'] == 'FireResist'
@@ -2061,8 +2060,32 @@ class TestObseBlockAndCallFixes:
     def test_misc_stat_by_name(self, converter):
         """The TES4 index becomes Skyrim's stat name; an untracked one reads 0."""
         assert 'Game.QueryStat("Locations Discovered")' in self._poll(converter, 'set n to getPCMiscStat 7')
-        assert 'Game.IncrementStat("Murders", 2)' in self._poll(converter, 'ModPCMiscStat 32 2')
+        assert 'Game.IncrementStat("Houses Owned", 2)' in self._poll(converter, 'ModPCMiscStat 15 2')
         assert 'QueryStat' not in self._poll(converter, 'set n to getPCMiscStat 13')
+
+    def test_engine_kept_stat_write_is_dropped(self, converter):
+        """Nehrim's EP write to stat 22 never reaches Days as a Vampire."""
+        assert 'IncrementStat' not in self._poll(converter, 'ModPCMiscStat 22 x')
+        assert 'Game.QueryStat("Days as a Vampire")' in self._poll(converter, 'set n to getPCMiscStat 22')
+
+
+class TestSplitSkillReads:
+    """Blade and Blunt read the higher of One-Handed and Two-Handed; writes stay One-Handed."""
+
+    def test_read_takes_the_higher_half(self, converter):
+        """GetAV Blade goes through TES4Polyfill.HigherActorValue."""
+        body = TestObseBlockAndCallFixes._poll(converter, 'set n to player.getav blade')
+        assert 'TES4Polyfill.HigherActorValue(Game.GetPlayer(), "OneHanded", "TwoHanded")' in body
+
+    def test_base_read_matches_the_write(self, converter):
+        """A trainer's GetBaseAV Blade reads the One-Handed its SetAV writes."""
+        base = TestObseBlockAndCallFixes._poll(converter, 'set n to player.getbaseav blunt')
+        assert 'GetBaseActorValue("OneHanded")' in base and 'HigherActorValue' not in base
+
+    def test_write_stays_one_handed(self, converter):
+        """A trainer's SetAV Blade still lands on One-Handed."""
+        body = TestObseBlockAndCallFixes._poll(converter, 'player.setav blade 40')
+        assert 'SetActorValue("OneHanded", 40)' in body
 
 
 class TestSetFunctionValue:

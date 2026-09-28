@@ -172,6 +172,15 @@ def test_npc_exports_in_the_tes4_actor_vocabulary():
     assert 'AIDT.Services=1' in lines and 'AIPackageCount=0' in lines
 
 
+def test_enchant_keeps_its_own_skill():
+    """Morrowind Enchant exports as DATA.Enchant, never folded onto Mysticism."""
+    skills = [10] * 27
+    skills[9], skills[14] = 60, 25
+    npdt = struct.pack(_NPDT_FULL, 5, *([50] * 8), *skills, 40, 40, 40, 50, 0, 0, 0)
+    lines = export_NPC_(_rec('NPC_', 'enchanter', _sub('NPDT', npdt)), MorrowindContext())
+    assert 'DATA.Enchant=60' in lines and 'DATA.Mysticism=25' in lines
+
+
 def test_actor_placements_are_achr_and_acre():
     """A placed NPC is an ACHR, a creature an ACRE, a static a REFR.
 

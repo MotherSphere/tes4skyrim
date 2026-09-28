@@ -12,6 +12,7 @@ Parameter remapping and the crash rule are in
 ## Contents
 
 - [Actor-value indices diverge from the BOOK skill table](#actor-value-vs-book-skill-table)
+- [Fallout actor values use Fallout's own table](#fallout-actor-values)
 - [Chargen-identity conditions become menu-choice globals](#chargen-identity-to-menu-globals)
 - [Speak-as topics drop the actor-interrogating conditions](#non-actor-speaker-drop)
 - [GetInCell names a prefix family, not a cell](#getincell-prefix-family)
@@ -261,19 +262,54 @@ and only there.
 
 ## <a id="actor-value-vs-book-skill-table"></a>Actor-value indices diverge from the BOOK skill table
 
-`_TES4_AV_TO_TES5` maps a TES4 actor-value index to its TES5 index. Skills
-mostly follow `base.equivalents.TES4_SKILL_TO_TES5_INDEX`, but **two entries
-deliberately differ**, because the two tables answer different questions: the
+`_TES4_AV_TO_TES5` maps a TES4 actor-value index to its TES5 index; FO3/FNV
+conditions use [their own table](#fallout-actor-values). The two games' tables
+share no entry: TES4 0 is Strength, TES5 0 Aggression; TES4 5 Endurance, TES5 5
+Assistance. Passed through unchanged, Morroblivion's Fighters Guild gate
+`Strength >= 30 AND Endurance >= 30` became `Aggression >= 30 AND Assistance >=
+30` (0-3 enums), so every guild refused the player, as did ~600 conditions
+across the exports.
+
+**Skyrim has no attributes**, and no actor value is a faithful stand-in (every
+candidate is on a different scale), so an attribute gate has no key in the
+table and drops, failing open. Oblivion's attribute gates keep an
+under-developed character out; a Skyrim character can never satisfy one, so
+enforcing it would lock the content away for good. Skills, and derived values
+both games have, translate and keep their threshold (both games score skills
+0-100).
+
+The BOOK
+table `base.equivalents.TES4_SKILL_TO_TES5_INDEX` is keyed by BOOK
+`DATA.Teaches`, a 0-20 skill index (xEdit `wbSkillEnum`), so a skill's actor
+value is its book index + 12. Until 2026-09-28 that table was keyed by actor
+value, and all 110 Oblivion skill books taught nothing or the wrong skill
+(a Mysticism book taught Smithing). Skills follow the BOOK table, except **one entry that
+deliberately differs**, because the two tables answer different questions: the
 BOOK table must name a real *trainable* skill, while a CONDITION only has to
 read a comparable number.
 
 | TES4 value | BOOK table | Condition table | Why |
 |---|---|---|---|
-| Mercantile | Pickpocket | **Speech (17)** | Mercantile is Oblivion's haggling skill and Speech is Skyrim's. Pickpocket appears in the BOOK table only because Skyrim already ships a Speech skill book for that slot. |
 | Athletics, Acrobatics | — | **Stamina (26)** | Neither has a Skyrim skill at all; Stamina is the athletic-capacity value the engine actually tracks. |
 
-Changing either to match the BOOK table would make the condition read a value
-the actor never trains, so it would compare against a constant.
+Mercantile used to differ (Pickpocket in the BOOK, NPC and trainer tables,
+Speech here). A book's Teaches field is only a skill index, so nothing forced
+Pickpocket; every table now reads Speech, and Mysticism reads Alteration
+everywhere, the school its spells convert to. See
+[the character sheet plan](../plans/character_sheet.md#bug-mysticism).
+
+### <a id="fame-infamy-global"></a>A player Fame/Infamy test reads the scripts' global
+
+Converted scripts keep Fame and Infamy in the conversion-owned `TES4Fame` and
+`TES4Infamy` globals (`ModPCFame` → `TES4Fame.Mod`). Skyrim's own Fame and
+Infamy actor values (60, 61) exist, but nothing in vanilla reads or writes them
+(0 of Skyrim.esm's conditions), so a condition mapped onto them always read 0.
+A **run-on-target** `GetActorValue Fame/Infamy` (the player, 10 of Oblivion.esm's
+14) becomes `GetGlobalValue` on the global (`_fame_global`). A **subject** test
+stays on the actor value: those 4 are guard greetings testing the guard's own
+Infamy, which read 0 in Oblivion too. FO3/FNV conditions are left alone; their
+indices 38 and 39 are Melee Weapons and Repair
+([Fallout's table](#fallout-actor-values)).
 
 ## <a id="fallout-ctda"></a>A Fallout CTDA is 28 bytes and numbers its functions differently
 
@@ -315,6 +351,37 @@ Absent functions are dropped, failing open, the way TES4's `_FUNC_DROP` does.
 the disposition-tier evaluation applies. `GetScriptVariable` (53) and
 `GetQuestVariable` (79) keep TES4's treatment: the strings path rewrites them
 to the VM reads, every other path drops them.
+
+### <a id="fallout-actor-values"></a>Actor values: Fallout's own table
+
+**Code:** `FALLOUT_AV_TO_TES5` in `conditions_falloutnv.py`, chosen by CTDA size in
+`convert_ctda`.
+
+An actor-value parameter is a raw index into each game's own table, and the
+three tables share no numbering (TES4 0 Strength, FNV 0 Aggression, TES5 0
+Aggression). A Fallout condition used to go through the TES4 table, so the
+FalloutNV.esm census of `GetActorValue`/`GetBaseActorValue` conditions read:
+
+| FNV value | Conditions | Read as |
+|---|---|---|
+| Speech (43) | 540 | dropped (no TES4 43), so every Speech check passed |
+| Barter (32) | 209 | Speech, by accident (TES4 32 Speechcraft) |
+| SPECIAL (5-11) | 133 | dropped, or Health, Magicka, Stamina, Carry Weight |
+| Medicine (37) | 63 | dropped (TES4 37 is Bounty) |
+| Karma (23) | 44 | Illusion |
+| Limb conditions (25-31) | 274 | Stamina and assorted skills |
+| Melee Weapons (38), Repair (39) | 16 | Fame, Infamy |
+| Variable01-10 (62-71) | 48 | resistances, or dropped |
+
+The table maps a value to its Skyrim counterpart where one exists. The Fallout
+skills fold where converted content makes them: Guns, Energy Weapons and Big
+Guns to Archery (guns convert to crossbows), Melee Weapons to One-Handed (and
+Two-Handed, [split](../plans/character_sheet.md#bug-blade-blunt)), Unarmed to
+One-Handed like TES4 Hand to Hand, Barter and Speech to Speech, Lockpick to
+Lockpicking, Repair to Smithing, Medicine to Restoration. SPECIAL, Karma,
+Action Points, XP, limb condition, rads, Explosives, Science and Survival have
+none and drop (fail open), for the reason TES4 attributes do (below).
+`Variable01`-`10` keep their names, as the converted FNV scripts do.
 
 ## <a id="convert-ctda-phases"></a>`convert_ctda`: the three phases and why each is shaped as it is
 

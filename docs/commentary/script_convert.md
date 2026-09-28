@@ -1329,6 +1329,33 @@ range wider than 0/1 is mapped onto a Papyrus Bool, rescale to the source's
 range** — do not let the generic `as Int` cast decide, because it collapses the
 range to 0/1 and quietly kills every threshold above 1.
 
+### <a id="actor-value-reads"></a>Actor-value commands: what `actor_value` emits
+
+**Code:** `script_convert/commands.py` `actor_value`.
+
+- **The AV name is a quoted string** in Papyrus, for the OBSE `...2` aliases
+  too: they take the same (name, value) arguments, and without quoting
+  `modAV2 Health 300` emitted an unquoted `Health` ("undefined identifier").
+- **Attributes** read as the stub and drop their writes; see
+  [below](#skyrim-has-no-attributes).
+- **Encumbrance is two values in Skyrim.** A read is `InventoryWeight` (carried),
+  the base stays `CarryWeight` (the cap). Oblivion's over-encumbered idiom is
+  `player.getav encumbrance > player.getbaseav encumbrance` (MQ01 stages 75/78);
+  mapping both to CarryWeight compared the cap with itself and those stages
+  never fired.
+- **`GetAV Blade`/`Blunt` reads the higher of One-Handed and Two-Handed**
+  (`SPLIT_SKILLS`, `TES4Polyfill.HigherActorValue`). Both covered one- and
+  two-handed weapons in Oblivion, so a gate on either must pass for a character
+  who trained either kind. **Writes and BASE reads stay One-Handed**: a base
+  read feeds a write (Nehrim's trainers run `LPState = GetBaseAV Blade`,
+  `SetAV Blade LPState + 1`), and reading the higher half there would jump
+  One-Handed to Two-Handed's value on one lesson. The same rule covers NPC
+  skills and dialogue conditions; see
+  [the character sheet plan](../plans/character_sheet.md#bug-blade-blunt).
+- **An actor script's own `Self` is written bare** (`GetActorValue(...)`):
+  `Self.` changes nothing at runtime but makes every such line differ from the
+  reference output. Any other `Self` is cast, `(Self as Actor)`.
+
 ### Skyrim has NO attributes — the AV tables share nothing (2026-08-06)
 <a id="skyrim-has-no-attributes"></a>
 
@@ -2034,6 +2061,21 @@ Potions Made → Potions Mixed, People Fed On → Necks Bitten, Days In Prison �
 Days Jailed, Hours Waited → Hours Waiting). Picks Broken, Oblivion Gates Shut,
 Artifacts Found, Last Day As Vampire and Jokes Told have no Skyrim stat and
 read as 0 with a note.
+
+**A write converts only for the stats Oblivion's own content writes**
+(`TES4_SCRIPT_OWNED_MISC_STATS`: Horses Owned 14, Houses Owned 15, Stores
+Invested In 16, Artifacts Found 19, Nirnroots Found 27, the only indices
+`ModPCMiscStat` touches in Oblivion.esm). The engine keeps every other stat
+itself, so a plugin writing one has repurposed it. Nehrim does exactly that: its
+`GlobalplayerScript` runs `ModPCMiscStat 22 EPdiff` and `ModPCMiscStat 24
+LPdiff`, relabeled "Overall amount of experience points" and "Current amount of
+learning points" through its `sMisc*` game settings, so converted Nehrim added
+every experience point to Skyrim's "Days as a Vampire". Such a write now becomes
+a note. The labels are the precise indicator but cannot be compared across
+languages (German Nehrim.esm relabels every stat), so the rule is the census.
+Its cost: Nehrim's dialogue trainers (`ModPCMiscStat 3`, 40 lines) and skill
+books (`ModPCMiscStat 18`) no longer add to Skyrim's Training Sessions and Skill
+Books Read. See [the character sheet plan](../plans/character_sheet.md#bug-nehrim-misc-stats).
 - `eval <expr>` is a pure pass-through wrapper (Nehrim uses it only around
   `Call`) — drop it. Beware over-broad stripping: an earlier pass ate a variable
   named `Eval`.

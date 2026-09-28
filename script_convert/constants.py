@@ -34,6 +34,12 @@ TES4_MISC_STAT_NAMES = (
     'Murders', 'Horses Stolen',
 )
 
+#: TES4 skills Skyrim split in two; a read takes the higher. See: docs/plans/character_sheet.md#bug-blade-blunt
+SPLIT_SKILLS = {'blade': ('OneHanded', 'TwoHanded'), 'blunt': ('OneHanded', 'TwoHanded')}
+
+#: Misc stats Oblivion content writes; its engine keeps the rest. See: docs/commentary/script_convert.md#pc-misc-stat-names
+TES4_SCRIPT_OWNED_MISC_STATS = frozenset({14, 15, 16, 19, 27})
+
 from script_convert.reserved_names import papyrus_reserved
 
 
@@ -104,10 +110,7 @@ ACTOR_VALUE_MAP = {
     'conjuration':  'Conjuration',
     'destruction':  'Destruction',
     'illusion':     'Illusion',
-    # Mysticism was folded into Illusion in Skyrim (Detect Life, Telekinesis
-    # and Soul Trap all became Illusion/Conjuration spells); Alteration was a
-    # mismatch with the record side, which already maps it to Illusion.
-    'mysticism':    'Illusion',
+    'mysticism':    'Alteration',
     'restoration':  'Restoration',
     # Acrobatics and Athletics have no Skyrim skill at all. Stamina is the
     # athletic-capacity value the engine actually tracks, and matches the

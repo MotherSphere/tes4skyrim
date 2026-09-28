@@ -119,6 +119,18 @@ Float Function TES4AttributeStub() Global
   Return 100.0
 EndFunction
 
+; The higher of two actor values: an Oblivion skill Skyrim split in two (Blade
+; and Blunt covered one- and two-handed weapons alike).
+; See: docs/plans/character_sheet.md#bug-blade-blunt
+Float Function HigherActorValue(Actor akActor, String asFirst, String asSecond) Global
+  Float first = akActor.GetActorValue(asFirst)
+  Float second = akActor.GetActorValue(asSecond)
+  If first > second
+    Return first
+  EndIf
+  Return second
+EndFunction
+
 String Function MapActorValue(String avName) Global
   ; Skills (renamed and/or merged in TES5). "Speechcraft" and "Marksman" are
   ; the engine's internal AV names for the skills Skyrim's UI calls Speech and
@@ -134,7 +146,7 @@ String Function MapActorValue(String avName) Global
   ElseIf avName == "HandToHand"
     Return "UnarmedDamage"
   ElseIf avName == "Mysticism"
-    Return "Illusion"
+    Return "Alteration"
   ElseIf avName == "Mercantile"
     Return "Speechcraft"
   ElseIf avName == "Security"

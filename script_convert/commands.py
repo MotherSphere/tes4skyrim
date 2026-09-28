@@ -20,7 +20,7 @@ from script_convert import resolve_name as _resolve_name
 from script_convert.constants import (
     ACTOR_VALUE_MAP, ANIM_GROUP_EVENTS, ATTRIBUTE_STUB_VALUE, CASTABLE,
     FORCE_GREET_QUEST, PLACED_REF_SIGS, TES4_ASSAULT_BOUNTY, TES4_ATTRIBUTES,
-    TES4_MISC_STAT_NAMES, TES4_MURDER_BOUNTY,
+    SPLIT_SKILLS, TES4_MISC_STAT_NAMES, TES4_MURDER_BOUNTY, TES4_SCRIPT_OWNED_MISC_STATS,
     TES4_STEAL_BOUNTY, is_generated_script_type, mgef_family_keyword_name,
     safe_property_name, papyrus_script_name
 )
@@ -245,6 +245,8 @@ def pc_misc_stat(ctx, call) -> str:
     name = TES4_MISC_STAT_NAMES[idx] if 0 <= idx < len(TES4_MISC_STAT_NAMES) else ''
     if not name:
         return ctx.note(f'{call.raw_name} {src} - Skyrim tracks no such stat')
+    if call.name == 'modpcmiscstat' and idx not in TES4_SCRIPT_OWNED_MISC_STATS:
+        return ctx.note(f'{call.raw_name} {src} - the engine keeps this stat; a script writing it repurposed it')
     if call.name == 'modpcmiscstat':
         return f'Game.IncrementStat("{name}", {call.arg(1, "1")})'
     return f'Game.QueryStat("{name}")'
@@ -1421,55 +1423,49 @@ _AV_READ = frozenset({'getactorvalue', 'getav'})
 _AV_SET_ONLY = frozenset({'aggression', 'confidence', 'morality', 'mood', 'assistance'})
 
 
+#: Reads a split skill answers with the higher half; a BASE read feeds a write, so it stays One-Handed.
+_SPLIT_READS = frozenset({'GetActorValue'})
+
+
+def _attribute_access(ctx, call, raw: str) -> str:
+    """A TES4 attribute: Speed through the walk formula, other reads the stub, writes dropped.
+
+    See: docs/commentary/script_convert.md#skyrim-has-no-attributes
+    """
+    speed = _speed_access(ctx, call) if raw.lower() == 'speed' else None
+    if speed:
+        return speed
+    if call.name in ACTOR_VALUE_READ_FUNCTIONS:
+        return ATTRIBUTE_STUB_VALUE
+    return f';TES4 attribute {raw} has no Skyrim equivalent -- write dropped'
+
+
+def _actor_subject(ref: str, extends: str) -> str:
+    """The subject as an Actor expression: `ref`, `Self`, or `(Self as Actor)`."""
+    if ref != 'Self' or extends == 'Actor':
+        return ref
+    return '(Self as Actor)'
+
+
 @command(*sorted(ACTOR_VALUE_FUNCTIONS))
 def actor_value(ctx, call) -> str:
-    """Get/Set/Mod ActorValue -- the AV NAME is a quoted string in Papyrus.
+    """Get/Set/Mod ActorValue with the AV name quoted; attributes stubbed, split skills read the higher.
 
-    The OBSE `...2` aliases take the same (AV name, value) arguments as the
-    vanilla commands they map onto, so they quote the name here too: without
-    them `modAV2 Health 300` emitted an unquoted `Health` and the script failed
-    with "undefined identifier".
-
-    SKYRIM HAS NO ATTRIBUTES.  A call naming Strength, Intelligence,
-    Willpower, Agility, Speed, Endurance, Personality or Luck has no faithful
-    target -- every TES5 actor value sits on a different scale than TES4's
-    0-100, so aliasing one onto the nearest look-alike does not preserve the
-    authored threshold.  Aliasing them (strength->UnarmedDamage,
-    agility/speed->SpeedMult) broke every Morroblivion guild: the Fighters
-    Guild gates each rank on `GetAV Strength >= 30`, UnarmedDamage sits near 0
-    so nobody qualified, while the Thieves Guild's Agility gate read SpeedMult
-    (~100) and passed unconditionally.  A read becomes ATTRIBUTE_STUB_VALUE
-    (above every authored threshold) so the gate falls OPEN -- the faithful
-    outcome, since a Skyrim character cannot raise an attribute at all and
-    enforcing it would lock the content away permanently rather than early.
+    See: docs/commentary/script_convert.md#actor-value-reads
     """
     if not len(call):
         return None
     raw = call.source(0).rstrip(',').strip('"\'')
     if raw.lower() in TES4_ATTRIBUTES:
-        speed = _speed_access(ctx, call) if raw.lower() == 'speed' else None
-        if speed:
-            return speed
-        if call.name in ACTOR_VALUE_READ_FUNCTIONS:
-            return ATTRIBUTE_STUB_VALUE
-        return f';TES4 attribute {raw} has no Skyrim equivalent -- write dropped'
-
+        return _attribute_access(ctx, call, raw)
     av = ACTOR_VALUE_MAP.get(raw.lower(), raw)
-    # Oblivion's single Encumbrance AV is TWO in Skyrim: the current carried
-    # weight is InventoryWeight, the maximum is CarryWeight.  TES4 splits them
-    # the modified-vs-base way, so the over-encumbered idiom is
-    # `player.getav encumbrance > player.getbaseav encumbrance` -- MQ01's
-    # stage 75/78 tutorial.  Mapping both sides to CarryWeight compared the cap
-    # against itself, so neither tutorial stage could ever fire.
     if raw.lower() == 'encumbrance' and call.name in _AV_READ:
         av = 'InventoryWeight'
-
     args = [f'"{av}"']
     if len(call) > 1:
         scaled = (ctx._scale_enum_av(av, call.source(1))
                   if call.name in _AV_SET else None)
         args.append(scaled if scaled is not None else call.arg(1))
-
     papyrus = (_AV_PAPYRUS.get(call.name)
                or getattr(COMMAND_ROWS.get(call.name), 'emit', '')
                or 'GetActorValue')
@@ -1478,13 +1474,12 @@ def actor_value(ctx, call) -> str:
     if call.name in _AV_PLAYER_ONLY:
         return f'Game.GetPlayer().{papyrus}({", ".join(args)})'
     ref = ctx._resolve_self_ref(call.ref, call.extends, actor_func=True)
-    if ref == 'Self':
-        # An ACTOR script IS the subject, so the call is written bare -- adding
-        # `Self.` changes nothing at runtime but every such line then differs
-        # from the reference output.  Any other Self needs the cast.
-        return (f'{papyrus}({", ".join(args)})' if call.extends == 'Actor'
-                else f'(Self as Actor).{papyrus}({", ".join(args)})')
-    return f'{ref}.{papyrus}({", ".join(args)})'
+    subject = _actor_subject(ref, call.extends)
+    split = SPLIT_SKILLS.get(raw.lower())
+    if split and papyrus in _SPLIT_READS:
+        return f'TES4Polyfill.HigherActorValue({subject}, "{split[0]}", "{split[1]}")'
+    expr = f'{papyrus}({", ".join(args)})'
+    return expr if subject == 'Self' else f'{subject}.{expr}'
 
 
 def _speed_access(ctx, call):

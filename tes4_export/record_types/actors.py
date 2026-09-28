@@ -505,16 +505,18 @@ def export_BSGN(rec: Record) -> list:
 
 
 def export_SKIL(rec: Record) -> list:
-    """Skill."""
+    """Skill: DATA is Action, governing Attribute, Specialization, two use values (20 bytes).
+
+    See: docs/plans/character_sheet.md#bug-skil-shift
+    """
     lines = []
     emit_string(lines, "EditorID", get_subrecord(rec, "EDID"))
     data = get_subrecord(rec, "DATA")
-    if data and len(data.data) >= 16:
-        d = data.data
-        lines.append(f"DATA.Attribute={struct.unpack_from('<i', d, 0)[0]}")
-        lines.append(f"DATA.Specialization={struct.unpack_from('<I', d, 4)[0]}")
-        lines.append(f"DATA.UseValue1={struct.unpack_from('<f', d, 8)[0]}")
-        lines.append(f"DATA.UseValue2={struct.unpack_from('<f', d, 12)[0]}")
+    if data and len(data.data) >= 20:
+        action, attribute, spec, use1, use2 = struct.unpack_from('<iIIff', data.data)
+        lines.extend([f"DATA.Action={action}", f"DATA.Attribute={attribute}",
+                      f"DATA.Specialization={spec}", f"DATA.UseValue1={use1}",
+                      f"DATA.UseValue2={use2}"])
     emit_string(lines, "DESC", get_subrecord(rec, "DESC"))
     return lines
 

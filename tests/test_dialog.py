@@ -19,6 +19,7 @@ import struct
 
 import pytest
 
+from tes4_export.record_types.morrowind import MW_ENCHANT_SKILL
 from tes5_import.base.conditions import (
     CTDA_OR,
     FUNC_GET_IS_ID,
@@ -276,15 +277,60 @@ class TestCTDAConversion:
         for tes4_av, tes5_av in ((12, 10),   # Armorer     -> Smithing
                                  (14, 6),    # Blade       -> OneHanded
                                  (16, 6),    # Blunt       -> OneHanded
-                                 (24, 21),   # Mysticism   -> Illusion
+                                 (24, 18),   # Mysticism   -> Alteration
                                  (28, 8),    # Marksman    -> Archery
                                  (29, 17),   # Mercantile  -> Speech
                                  (30, 14),   # Security    -> Lockpicking
-                                 (32, 17)):  # Speechcraft -> Speech
+                                 (32, 17),   # Speechcraft -> Speech
+                                 (MW_ENCHANT_SKILL + 12, 23)):
             for func in (14, 277):
                 out = convert_ctda(_tes4_ctda(func=func, p1=tes4_av), offset=1)
                 assert out is not None
                 assert struct.unpack_from('<I', out, 12)[0] == tes5_av
+
+    @staticmethod
+    def _split(op: int, or_flag: int = 0) -> list:
+        """(type byte, AV) of each TES5 CTDA a Blade `op 50` condition becomes."""
+        from tes5_import.base.conditions import convert_ctda_list_with_strings
+        raw = _tes4_ctda(type_byte=(op << 5) | or_flag, comp=0x42480000, func=14, p1=14)
+        rec = {'FormID': '01000001', 'Condition[0].Raw': raw.hex()}
+        return [(c[0], struct.unpack_from('<I', c, 12)[0]) for c, _s in
+                convert_ctda_list_with_strings(rec, {}, 0x01000000)]
+
+    def test_split_skill_at_least_is_either_half(self):
+        """Blade >= 50 passes on One-Handed OR Two-Handed."""
+        assert self._split(3) == [(0x60 | CTDA_OR, 6), (0x60, 7)]
+
+    def test_split_skill_below_is_both_halves(self):
+        """Blade < 50 needs One-Handed AND Two-Handed below it."""
+        assert self._split(4) == [(0x80, 6), (0x80, 7)]
+
+    def test_base_read_is_never_split(self):
+        """Nehrim's trainer cap GetBaseAV Blade < 90 gates a write to One-Handed."""
+        from tes5_import.base.split_skill_conditions import split_skill_ctdas
+        cap = _tes4_ctda(type_byte=0x80, func=277, p1=14)
+        assert split_skill_ctdas(cap, b'converted') == [b'converted']
+
+    def test_fallout_splits_melee_weapons_not_critical_chance(self):
+        """FNV's 38 is Melee Weapons and splits; its 14 is Critical Chance and does not."""
+        from tes5_import.base.split_skill_conditions import split_skill_ctdas
+        crit = _tes4_ctda(type_byte=0x60, func=14, p1=14) + b'\0' * 4
+        assert split_skill_ctdas(crit, b'converted') == [b'converted']
+        melee = _tes4_ctda(type_byte=0x60, func=14, p1=38) + b'\0' * 4
+        assert len(split_skill_ctdas(melee, convert_ctda(melee, offset=1))) == 2
+
+    def test_split_skill_below_inside_or_group_keeps_one_test(self):
+        """An AND pair cannot sit inside an OR group, so One-Handed alone remains."""
+        assert self._split(4, CTDA_OR) == [(0x80, 6)]
+
+    def test_player_infamy_reads_the_scripts_global(self, monkeypatch):
+        """Run-on-target Infamy >= 100 reads TES4Infamy; the speaker's own Infamy stays an AV."""
+        from tes5_import.base import owned_records
+        monkeypatch.setitem(owned_records.WELL_KNOWN_PROPERTIES, 'TES4Infamy', 0x01000ABC)
+        player = convert_ctda(_tes4_ctda(type_byte=0x62, comp=0x42C80000, func=14, p1=39), offset=1)
+        assert (player[0], struct.unpack_from('<HxxI', player, 8)) == (0x60, (74, 0x01000ABC))
+        speaker = convert_ctda(_tes4_ctda(type_byte=0x60, comp=0x42480000, func=14, p1=39), offset=1)
+        assert struct.unpack_from('<HxxI', speaker, 8) == (14, 61)
 
     def test_attribute_conditions_dropped(self):
         """SKYRIM HAS NO ATTRIBUTES, so an attribute gate must be dropped.
@@ -1136,6 +1182,13 @@ class TestFalloutConditions:
                             '00000000')
         assert struct.unpack_from('<I', convert_ctda(raw), 20)[0] == 1
         assert convert_ctda(raw, drop_run_on_target=True) is None
+
+    def test_actor_values_use_fallouts_table(self):
+        """FNV Speech, Barter, Repair, Guns and Variable01 keep their meaning; Karma drops."""
+        for fnv_av, tes5_av in ((43, 17), (32, 17), (39, 10), (41, 8), (62, 68), (0, 0)):
+            raw = _tes4_ctda(func=14, p1=fnv_av) + b'\0' * 4
+            assert struct.unpack_from('<I', convert_ctda(raw, offset=1), 12)[0] == tes5_av
+        assert convert_ctda(_tes4_ctda(func=14, p1=23) + b'\0' * 4, offset=1) is None
 
 
 # ---------------------------------------------------------------------------

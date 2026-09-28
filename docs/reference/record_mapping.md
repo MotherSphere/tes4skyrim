@@ -521,9 +521,9 @@ FormID drift and breaks saves.
 |---------------------|---------------------|-------|
 | Armorer (12) | Smithing (10) | |
 | Athletics (13) | *(none)* | Removed in TES5 |
-| Blade (14) | One-Handed (6) | |
+| Blade (14) | One-Handed (6) and Two-Handed (7) | NPC skills feed both; reads take the higher; writes, trainers and books use One-Handed |
 | Block (15) | Block (9) | |
-| Blunt (16) | One-Handed (6) | Merged with Blade |
+| Blunt (16) | One-Handed (6) and Two-Handed (7) | As Blade; Fortify Blunt is Two-Handed |
 | Hand to Hand (17) | One-Handed (6) | Merged with Blade |
 | Heavy Armor (18) | Heavy Armor (11) | |
 | Alchemy (19) | Alchemy (16) | |
@@ -531,14 +531,14 @@ FormID drift and breaks saves.
 | Conjuration (21) | Conjuration (19) | |
 | Destruction (22) | Destruction (20) | |
 | Illusion (23) | Illusion (21) | |
-| Mysticism (24) | Illusion (21) | Merged with Illusion |
+| Mysticism (24) | Alteration (18) | Where its spells' school converts |
 | Restoration (25) | Restoration (22) | |
 | Acrobatics (26) | *(none)* | Removed in TES5 |
 | Light Armor (27) | Light Armor (12) | |
 | Marksman (28) | Archery (8) | |
-| Mercantile (29) | Pickpocket (13) | Approximate |
+| Mercantile (29) | Speech (17) | Speech trains from trading and sets prices |
 | Security (30) | Lockpicking (14) | |
-| Sneak (31) | Sneak (15) | |
+| Sneak (31) | Sneak (15), and Pickpocket (13) for NPC skills | Oblivion's Sneak covered pickpocketing ("Pick pockets and move unseen") |
 | Speechcraft (32) | Speech (17) | |
 
 TES4 Attributes (Strength, Intelligence, etc.) have no TES5 equivalent. Health/Magicka/Stamina are derived from TES4 attributes for NPC conversion.

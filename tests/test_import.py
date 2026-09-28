@@ -6844,6 +6844,56 @@ class TestFactionRelationReaction:
         assert all(mod == 0 for mod, _ in rel.values())
 
 
+class TestNpcSkillFolding:
+    """TES4 NPC skills land where the character sheet folds them.
+
+    See: docs/plans/character_sheet.md#folding
+    """
+
+    def test_split_and_folded_skills(self):
+        """Blade feeds both weapon skills; Mysticism is Alteration; Mercantile is Speech; Sneak picks pockets."""
+        from tes5_import.base.constants import TES5_SKILL_ORDER
+        from tes5_import.record_types.npc import npc_skills_dnam
+        dnam = npc_skills_dnam({'DATA.Blade': '60', 'DATA.Mysticism': '40', 'DATA.Mercantile': '50',
+                                'DATA.Sneak': '35'})
+        got = dict(zip(TES5_SKILL_ORDER, dnam))
+        assert (got['OneHanded'], got['TwoHanded']) == (60, 60)
+        assert (got['Alteration'], got['Illusion']) == (40, 15)
+        assert (got['Speechcraft'], got['Sneak'], got['Pickpocket']) == (50, 35, 35)
+
+    def test_morrowind_enchant_is_enchanting(self):
+        """A Morrowind NPC's Enchant lands on Enchanting."""
+        from tes5_import.base.constants import TES5_SKILL_ORDER
+        from tes5_import.record_types.npc import npc_skills_dnam
+        got = dict(zip(TES5_SKILL_ORDER, npc_skills_dnam({'DATA.Enchant': '45'})))
+        assert got['Enchanting'] == 45
+
+
+class TestSkillIndexTables:
+    """Book skill indices and Morrowind Enchant reach the right TES5 skill."""
+
+    @staticmethod
+    def _book_teaches(teaches: int) -> int:
+        """The TES5 skill a converted BOOK with this DATA.Teaches teaches."""
+        rec = {'Signature': 'BOOK', 'FormID': '00006000', 'RecordFlags': '0',
+               'EditorID': 'TestBook', 'DATA.Flags': '0', 'DATA.Teaches': str(teaches),
+               'DATA.Value': '5', 'DATA.Weight': '1.0', 'Model.MODL': 'Books\\TestBook.nif'}
+        data = TestConverters()._get_subrecord_data(convert_BOOK(rec), 'DATA')
+        return struct.unpack_from('<i', data, 4)[0]
+
+    def test_book_teaches_by_skill_index(self):
+        """Book index 2 Blade, 12 Mysticism, 20 Speech; 1 Athletics none."""
+        from tes4_export.record_types.morrowind import MW_ENCHANT_SKILL
+        got = [self._book_teaches(i) for i in (2, 12, 20, 1, 255, MW_ENCHANT_SKILL)]
+        assert got == [6, 18, 17, -1, -1, 23]
+
+    def test_morrowind_fortify_enchant_effect(self):
+        """Fortify Skill on Morrowind Enchant fortifies Enchanting."""
+        from tes4_export.record_types.morrowind import MW_ENCHANT_SKILL
+        from tes5_import.record_types.magic_morrowind import mw_actor_value
+        assert mw_actor_value(83, MW_ENCHANT_SKILL + 12) == 23
+
+
 class TestLeveledActorShellDNAM:
     """A placed leveled creature's shell NPC_ must not cache a zero health pool.
 

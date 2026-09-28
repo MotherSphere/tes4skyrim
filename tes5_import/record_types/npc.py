@@ -57,32 +57,28 @@ _AUTO_CALC_STATS = 0x10
 # ---------------------------------------------------------------------------
 
 
+#: TES4 NPC_ DATA skill -> the TES5 skills it feeds (the higher value wins). See: docs/plans/character_sheet.md#folding
+_TES4_SKILL_TO_TES5 = {
+    "Armorer": ("Smithing",), "Blade": ("OneHanded", "TwoHanded"), "Block": ("Block",),
+    "Blunt": ("OneHanded", "TwoHanded"), "HandToHand": ("OneHanded",),
+    "HeavyArmor": ("HeavyArmor",), "Alchemy": ("Alchemy",),
+    "Alteration": ("Alteration",), "Conjuration": ("Conjuration",),
+    "Destruction": ("Destruction",), "Illusion": ("Illusion",),
+    "Mysticism": ("Alteration",), "Restoration": ("Restoration",),
+    "LightArmor": ("LightArmor",), "Marksman": ("Marksman",),
+    "Mercantile": ("Speechcraft",), "Security": ("Lockpicking",),
+    "Sneak": ("Sneak", "Pickpocket"), "Speechcraft": ("Speechcraft",),
+    "Enchant": ("Enchanting",),
+}
+
+
 def npc_skills_dnam(rec: dict) -> bytes:
     """Build TES5 NPC_ DNAM subrecord (52 bytes, skills + stats)."""
     dnam = bytearray(52)
     skill_vals = {}
-    skill_names_tes4 = [
-        "Armorer", "Athletics", "Blade", "Block", "Blunt",
-        "HandToHand", "HeavyArmor", "Alchemy", "Alteration",
-        "Conjuration", "Destruction", "Illusion", "Mysticism",
-        "Restoration", "Acrobatics", "LightArmor", "Marksman",
-        "Mercantile", "Security", "Sneak", "Speechcraft"
-    ]
-    tes4_to_tes5_skill = {
-        "Armorer": "Smithing", "Blade": "OneHanded", "Block": "Block",
-        "Blunt": "OneHanded", "HandToHand": "OneHanded",
-        "HeavyArmor": "HeavyArmor", "Alchemy": "Alchemy",
-        "Alteration": "Alteration", "Conjuration": "Conjuration",
-        "Destruction": "Destruction", "Illusion": "Illusion",
-        "Mysticism": "Illusion", "Restoration": "Restoration",
-        "LightArmor": "LightArmor", "Marksman": "Marksman",
-        "Mercantile": "Pickpocket", "Security": "Lockpicking",
-        "Sneak": "Sneak", "Speechcraft": "Speechcraft",
-    }
-    for tes4_name in skill_names_tes4:
+    for tes4_name, tes5_names in _TES4_SKILL_TO_TES5.items():
         val = get_int(rec, f'DATA.{tes4_name}')
-        tes5_name = tes4_to_tes5_skill.get(tes4_name)
-        if tes5_name and val:
+        for tes5_name in tes5_names if val else ():
             skill_vals[tes5_name] = max(skill_vals.get(tes5_name, 0), val)
     for i, skill_name in enumerate(TES5_SKILL_ORDER):
         dnam[i] = min(skill_vals.get(skill_name, 15), 255)
