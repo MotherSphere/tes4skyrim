@@ -194,6 +194,8 @@ scene.add(sun);
    by hand rather than pulling OrbitControls, because dragging a NODE and
    orbiting share the same pointer and the interaction has to arbitrate. */
 const orbit = { target: new THREE.Vector3(), dist: 3000, yaw: -0.9, pitch: 0.95 };
+/* Camera speeds in world units: per wheel deltaY unit, and per dragged pixel. */
+const ZOOM_UNITS = 2, PAN_UNITS = 4, MIN_DIST = 50;
 
 function applyCamera() {
   const cp = Math.cos(orbit.pitch), sp = Math.sin(orbit.pitch);
@@ -666,8 +668,8 @@ el.addEventListener('pointermove', ev => {
     applyCamera(); return;
   }
   if (panning && lastPtr) {
-    const dx = (ev.clientX - lastPtr[0]) * orbit.dist * 0.0013;
-    const dy = (ev.clientY - lastPtr[1]) * orbit.dist * 0.0013;
+    const dx = (ev.clientX - lastPtr[0]) * PAN_UNITS;
+    const dy = (ev.clientY - lastPtr[1]) * PAN_UNITS;
     const right = new THREE.Vector3().crossVectors(
       camera.getWorldDirection(new THREE.Vector3()), camera.up).normalize();
     const up = new THREE.Vector3().crossVectors(right,
@@ -716,8 +718,15 @@ el.addEventListener('contextmenu', e => e.preventDefault());
 
 el.addEventListener('wheel', ev => {
   ev.preventDefault();
-  orbit.dist = Math.max(80, Math.min(60000,
-    orbit.dist * Math.exp(ev.deltaY * 0.0012)));
+  /* Fixed speed: each wheel step moves the camera the same world distance.
+     Past the orbit target, the target is carried forward so zoom never stalls. */
+  const px = ev.deltaMode === 1 ? 33 : ev.deltaMode === 2 ? 800 : 1;
+  const d = orbit.dist + ev.deltaY * px * ZOOM_UNITS;
+  if (d < MIN_DIST) {
+    orbit.target.addScaledVector(camera.getWorldDirection(new THREE.Vector3()),
+                                 MIN_DIST - d);
+  }
+  orbit.dist = Math.max(MIN_DIST, Math.min(60000, d));
   applyCamera();
 }, { passive: false });
 

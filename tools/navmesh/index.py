@@ -30,7 +30,7 @@ from tes5_import.navmesh.from_pgrd import (
 )
 from tes5_import.base.text_reader import parse_export_file
 from tes5_import.record_types.items import load_furniture_models
-from tools.navmesh.audit import cell_index
+from tools.navmesh.audit import cell_index, master_dirs
 from tes5_import.overrides.nested import (
     export_master_names, export_root, master_export_dir,
 )
@@ -237,15 +237,18 @@ class NavIndex(object):
         NavIndex._armed = key
 
     def collision_caches(self):
-        """Every collision cache this export needs, MASTERS FIRST.
+        """Every collision cache this export needs, MASTERS FIRST, whole chain.
 
         A child plugin caches only the meshes it ships, so loading its own
-        cache alone leaves every master-owned static uncarved.
+        cache alone leaves every master-owned static uncarved -- and a master's
+        base may use ITS master's mesh (Morrowind_ob placing Oblivion clutter).
 
         See: docs/commentary/tes5_import_navmesh.md#cellview-master-owned-cells
         """
         out = []
-        for d in master_export_dirs_of(self.export) + [self.export]:
+        direct = master_export_dirs_of(self.export)
+        deeper = [d for d in master_dirs(self.export) if d not in direct]
+        for d in deeper + direct + [self.export]:
             path = os.path.join(str(assets_for(d)), 'collision_cache.bin')
             if path not in out:
                 out.append(path)

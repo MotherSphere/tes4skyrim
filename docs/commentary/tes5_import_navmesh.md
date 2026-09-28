@@ -4146,6 +4146,33 @@ so indexes written with masked keys rebuild instead of being served. Measured on
 (no masters) and `Oblivion.esm` are unchanged -- with one plugin in the chain the
 two keyings agree.
 
+### <a id="cellview-master-numbering"></a>Each master's ids are rebased into the child's numbering
+
+**Keying by the full FormID only works if every table in the chain uses the
+SAME numbering, and each plugin numbers by its own master list.**
+`TR_Mainland.esm` lists `Morrowind_ob.esm` as master 00, but `Morrowind_ob.esm`
+lists Oblivion as 00 and itself as 01. So TR's REFRs name the ashland grass
+static `000C084C`, while Morrowind_ob's export stores it as `010C084C`. The
+low-24 mask had hidden this; the full-FormID switch made cellview draw TR
+exteriors as bare terrain.
+
+`cell_index.index_map(child, master)` maps each index byte in a master's export
+to the child's byte, matching masters by export directory
+(`master_export_dir`). A byte the child does not declare (Oblivion, seen from TR)
+is dropped. `CellIndex` rebases the masters' `base_model` and `door_fids` keys,
+and the REFR `NAME`s of master-owned cells, so everything is in the child's
+numbering. `NavIndex.collision_caches` now loads the whole master chain, deepest
+first, because a Morrowind_ob base can use an Oblivion (`tes4/`) mesh whose
+collision lives only in Oblivion's cache.
+
+Measured on `TR_Mainland.esm` cell `wrldmorrowind -17 -51`, before -> after:
+REFRs whose base resolves to collision went from 1/104 to 68/104, and collision
+triangles from 1,924 walkable + 124 blocking to 3,448 walkable + 8,458 blocking.
+Of the other 36 objects, 25 are grass with no collision, and 11 are ARMO, FLOR,
+INGR, LIGH or WEAP bases, which never carve. `Morrowind_ob.esm`'s
+`ImperialSPrisonSShip` is unaffected: with Oblivion as its only master, the map
+is the identity.
+
 ## <a id="master-owned-cells"></a>Navmesh in a cell the plugin does not own
 
 **Code:** `navmesh/pool.py:gather_navm_jobs`, `overrides/master_index.py:navms`.
