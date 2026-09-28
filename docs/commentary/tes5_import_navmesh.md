@@ -4594,8 +4594,16 @@ exactly (234,128.6 u²), in 62 pieces, all in one component with the lattice
 floor, and no edge has more than two owners.
 
 `FROZEN_VERSION` enters `digest()`, so a change to `apply_frozen` re-caches
-only patched cells. Not yet carried: door flags and ledge links authored inside
-a patch; a ledge naming a removed triangle is dropped.
+only patched cells.
+
+**A ledge whose triangle the patch replaced moves to its heir**
+(`_carry_ledges`): the patch or refill triangle that overlaps the removed one
+on its storey and still has an open edge. If several do, the winner is the one
+whose open edge lies nearest the other side, which is the same rule
+`_open_edge_towards` uses to pick the edge. So extending or re-cutting a lip
+triangle keeps its drop-down. A lip on a triangle deleted with nothing frozen
+over it has no heir, and its link is dropped. Not yet carried: door flags, and
+ledge links added or removed in the editor (the pin file stores no links).
 
 ### <a id="pin-ab-toggle"></a>The pinned-edits toggle is a RE-BAKE
 

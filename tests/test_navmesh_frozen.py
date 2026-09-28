@@ -123,11 +123,39 @@ def test_a_sliver_the_human_replaced_is_claimed_whatever_its_size():
     assert len(out) == len(GRID_TRIS)
 
 
-def test_ledges_follow_the_kept_triangles_and_drop_with_removed_ones():
-    """A ledge on a removed triangle goes; one between kept triangles is renumbered."""
+def test_ledges_follow_kept_triangles_and_move_to_the_patch_over_removed_ones():
+    """A removed side moves to the patch triangle over it that still has a lip.
+
+    Of the two frozen triangles over generated triangle 0, only the first has
+    an open edge; the ledge between kept triangles is renumbered.
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
     ledges = [(0, 7, 50.0), (2, 7, 40.0)]
-    _v, _t, out = apply_frozen(GRID, GRID_TRIS, ledges, FLIPPED, REPLACED)
-    assert out == [(0, 5, 40.0)]
+    verts, tris, out = apply_frozen(GRID, GRID_TRIS, ledges, FLIPPED, REPLACED)
+    assert out == [(6, 5, 50.0), (0, 5, 40.0)]
+    assert frozenset(_pts(verts, tris[6])) == frozenset(FLIPPED[0])
+
+
+def test_a_ledge_follows_its_triangle_when_the_lip_is_extended():
+    """Dragging the lip out 4u keeps the drop-down on the triangle at the new lip.
+
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    up = [(0.0, 0.0, 100.0), (10.0, 0.0, 100.0), (10.0, 10.0, 100.0), (0.0, 10.0, 100.0)]
+    down = [(20.0, 0.0, 0.0), (30.0, 0.0, 0.0), (20.0, 10.0, 0.0)]
+    grown = [(0.0, 0.0, 100.0), (14.0, 0.0, 100.0), (14.0, 10.0, 100.0), (0.0, 10.0, 100.0)]
+    faces = [(0, 1, 2), (0, 2, 3)]
+    verts, tris, out = apply_frozen(
+        up + down, faces + [(4, 5, 6)], [(0, 2, 100.0)],
+        [_pts(grown, t) for t in faces], [_pts(up, t) for t in faces])
+    assert len(out) == 1 and out[0][1:] == (0, 100.0)
+    assert frozenset(_pts(verts, tris[out[0][0]])) == frozenset(_pts(grown, faces[0]))
+
+
+def test_a_ledge_on_a_triangle_deleted_outright_is_dropped():
+    """A void with nothing frozen over it leaves no heir, so its ledge goes."""
+    _v, _t, out = apply_frozen(GRID, GRID_TRIS, [(0, 7, 50.0)], [], REPLACED)
+    assert out == []
 
 
 def test_no_patch_leaves_the_mesh_untouched():

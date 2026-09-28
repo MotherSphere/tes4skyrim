@@ -20,7 +20,7 @@ from shapely.ops import unary_union
 from tes5_import.navmesh.corridor import ccw_in_plan
 
 #: Bump when `apply_frozen` builds differently, so every patched cell re-caches.
-FROZEN_VERSION = 2
+FROZEN_VERSION = 3
 
 #: Plan area (u^2) below which an overlap or a refill piece is float noise.
 AREA_EPS = 1.0
@@ -338,9 +338,75 @@ def _stitch(verts, frozen_t, kept_t, refill_t):
     return frozen_t
 
 
+def _open_edges(tris):
+    """`{triangle index: [(a, b)]}` of every edge no other triangle shares."""
+    counts = _edge_counts(tris)
+    out = {}
+    for i, t in enumerate(tris):
+        for k in range(3):
+            a, b = t[k], t[(k + 1) % 3]
+            if counts.get(frozenset((a, b))) == 1:
+                out.setdefault(i, []).append((a, b))
+    return out
+
+
+def _mean(pts):
+    """Centroid of a triangle given as three points."""
+    return tuple(sum(p[k] for p in pts) / 3.0 for k in range(3))
+
+
+def _lip_distance(verts, lips, toward):
+    """Plan distance² from `toward` to the nearest midpoint of `lips`."""
+    return min((0.5 * (verts[a][0] + verts[b][0]) - toward[0]) ** 2
+               + (0.5 * (verts[a][1] + verts[b][1]) - toward[1]) ** 2
+               for a, b in lips)
+
+
+def _heir(verts, out, first, lips, old, toward):
+    """Index of the new triangle taking over removed triangle `old`'s ledge, or None.
+
+    Of the patch and refill triangles (`out[first:]`) overlapping `old` on its
+    storey with an open edge, the one whose open edge lies nearest `toward`
+    wins -- the rule `from_pgrd._open_edge_towards` picks the edge by.
+    """
+    foot = _footprint(old)
+    best = None
+    for i in range(first, len(out)):
+        pts = [verts[k] for k in out[i]]
+        hit = foot.intersection(_footprint(pts)) if i in lips else None
+        if hit is None or hit.area <= AREA_EPS:
+            continue
+        c = hit.representative_point()
+        if abs(plane_z(old, c.x, c.y) - plane_z(pts, c.x, c.y)) > STOREY_BAND:
+            continue
+        d = _lip_distance(verts, lips[i], toward)
+        if best is None or d < best[0]:
+            best = (d, i)
+    return None if best is None else best[1]
+
+
+def _carry_ledges(verts, out, first, keep, before, ledges):
+    """Ledge pairs renumbered into `out`; a removed side moves to its heir.
+
+    `before` is each ledge triangle's corners as the generator built them.
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    lips = _open_edges(out)
+    carried, seen = [], set()
+    for (u, l, *rest) in ledges or ():
+        ends = tuple(keep[i] if i in keep
+                     else _heir(verts, out, first, lips, before[i], _mean(before[j]))
+                     for i, j in ((u, l), (l, u)))
+        if None not in ends and ends[0] != ends[1] and ends not in seen:
+            seen.add(ends)
+            carried.append(ends + tuple(rest))
+    return carried
+
+
 def apply_frozen(verts, tris, ledges, frozen, voids):
     """(verts, tris, ledges) with each frozen patch put back verbatim.
 
+    A ledge whose triangle the patch replaced moves to the new triangle over it.
     See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
     """
     if not tris or not (frozen or voids):
@@ -355,10 +421,11 @@ def apply_frozen(verts, tris, ledges, frozen, voids):
     keep = {i: n for n, i in enumerate(
         i for i in range(len(tris)) if i not in claimed)}
     kept_t = [tuple(int(k) for k in tris[i][:3]) for i in keep]
+    before = {i: [pool.verts[k] for k in tris[i][:3]]
+              for (u, l, *_r) in ledges or () for i in (u, l)}
     frozen_t = ccw_in_plan(pool.verts, _place(frozen, pool.frozen_corner))
     refill_t = ccw_in_plan(pool.verts, _place(refill, pool.refill_corner))
     out = kept_t + _stitch(pool.verts, frozen_t, kept_t, refill_t) + refill_t
-    ledges = [(keep[u], keep[l]) + tuple(rest) for (u, l, *rest) in ledges or ()
-              if u in keep and l in keep]
+    ledges = _carry_ledges(pool.verts, out, len(kept_t), keep, before, ledges)
     new_verts, new_tris = drop_unused_verts(pool.verts, out)
     return new_verts, new_tris, ledges
