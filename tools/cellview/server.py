@@ -26,7 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from tools.cellview import corpus, plugins, progress
 from tools.cellview.bake import (
-    mesh_bake, mesh_pin, mesh_save, mesh_to_esm, plugin_cells, seams_for,
+    mesh_bake, mesh_pin, mesh_save, mesh_to_esm, mesh_unpin, plugin_cells,
+    seams_for,
 )
 
 #: Files the page is built from; nothing outside this folder is served.
@@ -68,6 +69,11 @@ def lattice_of(params):
     return params.get('lattice', '0') == '1'
 
 
+def pinned_of(params):
+    """True unless the page shows the RAW generator, without committed edits."""
+    return params.get('pinned', '1') != '0'
+
+
 def mesh_job(params):
     """Bake one cell, publishing progress under the page's job id."""
     job = params.get('job', '')
@@ -76,7 +82,7 @@ def mesh_job(params):
     try:
         out = mesh_bake(params.get('plugin', DEFAULT_PLUGIN),
                         params.get('cell', ''), job=job,
-                        pinned=params.get('pinned', '1') != '0',
+                        pinned=pinned_of(params),
                         lattice=lattice_of(params))
         error = out.get('error', '')
         return out
@@ -106,7 +112,8 @@ def esm_patch_job(params, payload):
     error = ''
     try:
         out = mesh_to_esm(params.get('plugin', DEFAULT_PLUGIN),
-                          params.get('cell', ''), payload, lattice_of(params))
+                          params.get('cell', ''), payload, lattice_of(params),
+                          pinned_of(params))
         error = out.get('error', '')
         return out
     finally:
@@ -124,7 +131,8 @@ def pin_job(params, payload):
     error = ''
     try:
         out = mesh_pin(params.get('plugin', DEFAULT_PLUGIN),
-                       params.get('cell', ''), payload, lattice_of(params))
+                       params.get('cell', ''), payload, lattice_of(params),
+                       pinned_of(params))
         error = out.get('error', '')
         return out
     finally:
@@ -149,9 +157,12 @@ def _routes():
         '/save': lambda q, p: corpus.apply_edits(q.get('cell', ''), p),
         '/score': lambda q, p: corpus.score(q.get('cell', ''), p),
         '/mesh_save': lambda q, p: mesh_save(q.get('plugin', DEFAULT_PLUGIN),
-                                             q.get('cell', ''), p, lattice_of(q)),
+                                             q.get('cell', ''), p, lattice_of(q),
+                                             pinned_of(q)),
         '/esm_patch': lambda q, p: esm_patch_job(q, p),
         '/pin_save': lambda q, p: pin_job(q, p),
+        '/pin_remove': lambda q, p: mesh_unpin(q.get('plugin', DEFAULT_PLUGIN),
+                                               q.get('cell', ''), p),
     }
     return get, post
 

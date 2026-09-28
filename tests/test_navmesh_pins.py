@@ -137,20 +137,6 @@ def test_a_weld_whose_endpoint_drifted_is_skipped():
     assert out == [(0, 1, 2)]
 
 
-def test_a_weld_records_where_the_GENERATOR_puts_both_ends():
-    """Both endpoints come from the pre-replay mesh, target included.
-
-    Reading the target after replay records where the human dragged it, which
-    a fresh build never reproduces -- measured on Morrowind_ob.esm, such a
-    target landed 59u from the nearest generated vertex and never welded.
-    """
-    from tools.cellview.bake import weld_pairs
-    verts = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (99.0, 99.0, 0.0)]
-    ops = [{'op': 'move_vert', 'v': 1, 'to': [55.0, 55.0, 0.0]},
-           {'op': 'snap_vert', 'v': 2, 'to_v': 1}]
-    assert weld_pairs(verts, ops) == [((99.0, 99.0, 0.0), (10.0, 0.0, 0.0))]
-
-
 def test_no_welds_leaves_the_mesh_untouched():
     """The unpinned path must be exactly what it was before welds existed."""
     tris = [(0, 1, 2), (0, 2, 3)]

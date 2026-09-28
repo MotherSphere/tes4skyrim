@@ -4561,6 +4561,54 @@ unrelated geometry together, because both endpoints must independently land
 within tolerance.
 
 
+### <a id="frozen-navmesh-patches"></a>Frozen patches: hand-edited triangles kept verbatim
+
+**Code:** `tes5_import/base/navmesh_frozen.py` (`apply_frozen`), stored in the
+`frozen`/`voids` sections of `navmesh_pins/<plugin>.json`, written by cellview's
+**Pin edits** (`bake.frozen_patch`), removed with `u` / `shift+u`
+(`navmesh_pins.remove_patch`). Applied after the generator in
+`from_pgrd._cell_geometry` and in cellview's `bake.generate`, after cuts.
+
+Floor pins and welds do not preserve a hand fix. On `SchattenrufMinePart05`
+(Nehrim.esm; 14 `del_tri`, 9 `snap_vert`, 6 `move_vert`, 3 `add_tri`),
+rebuilding with the pins and welds Pin edits used to write left floor at 12 of
+the 14 deleted places and 0 of 3 added triangles, and moved no vertex. Its
+corner pins actually PROTECTED 9 of the 14 deleted triangles, because a corner
+lies on every triangle around it.
+
+A frozen patch is the door-reservation idea applied to a hand edit (see
+[door reservation](#door-reservation-hardening-2026-08-02)): keep the triangle
+out of the generator and attach it last, instead of protecting it in each pass.
+
+* **frozen**: every result triangle using a vertex the edits moved, welded or
+  created, as world positions.
+* **voids**: every on-screen triangle the edits deleted or that used such a
+  vertex. This is the ground the human took over. Voids with nothing frozen
+  over them stay holes.
+
+After the build, every generated triangle overlapping the patch on the same
+storey (plane heights within `STOREY_BAND` 60u at the overlap) is removed. A
+generated triangle whose corners ARE a void's is removed whatever its size,
+since a weld-collapsed sliver is too thin for the overlap test. Then the frozen
+triangles go in. Each edge-connected group of removed triangles is refilled as
+ONE polygon (its union minus the patch, constrained-Delaunay), so the refill
+uses only the generator's own vertices and the patch corners. Refilling each
+removed triangle separately put a vertex wherever a generated edge crossed a
+frozen edge; the T-junction split then broke the frozen triangles apart
+(lattice: 19 of 50 survived, and 3 edges had 3+ owners).
+
+Patch corners snap onto the generated vertex they already are (0.5u in plan,
+1u in height), so an unchanged generator reproduces the edit exactly. Measured
+on SchattenrufMinePart05: 1,092 triangles, none extra or missing against the
+saved result, and the same edge counts (1,324 shared, 628 open). Over the
+lattice generator's unrelated 3,342-triangle mesh, all 50 frozen triangles
+survive and no edge has more than two owners; the seam adds 15 open edges to
+the lattice's own 1,888.
+
+`FROZEN_VERSION` enters `digest()`, so a change to `apply_frozen` re-caches
+only patched cells. Not yet carried: door flags and ledge links authored inside
+a patch; a ledge naming a removed triangle is dropped.
+
 ### <a id="pin-ab-toggle"></a>The pinned-edits toggle is a RE-BAKE
 
 Cellview's **pinned edits** checkbox re-fetches `/mesh?pinned=0|1` rather than
@@ -4618,6 +4666,31 @@ Current mesh has it at `(-61.63, 1175.06)` with the crack open, Saved result at
 `(-80.96, 1147.73)` welded. With the cell's pins committed, Current mesh drops
 to 170 triangles as the weld collapses one.
 
+
+### <a id="editing-a-saved-result"></a>Editing, pinning and shipping a saved result
+
+**Code:** `meshedit.rebase_ops` / `result_marks`, `cellview.bake.edit_basis`.
+
+On **Saved result**, Overwrite, Save new, To ESM and Pin edits act on the
+correction itself, not on the generator. The server replays the correction's
+stored `base` with its own ops, followed by the session's edits. Pinning a
+saved result therefore freezes exactly what was saved, however far the
+generator has moved since.
+
+Edits made over the result can be appended to the saved ops because replay
+never compacts VERTICES: result vertex *i* is replay vertex *i*. Only triangle
+indices move. Result triangle *j* is the *j*-th surviving replay triangle, and a
+triangle the session adds follows the replay's own list, so `rebase_ops`
+rewrites only the `tri`/`up`/`down` fields.
+
+A correction stores no base doors or links. `result_marks` maps the result's
+doors and links back through the survivors. Door and link ops only set or
+clear, so the last one on a triangle decides, and replay reproduces the saved
+result's doors and links exactly.
+
+Switching the mesh dropdown drops pending edits, since they index the mesh they
+were made on. Overwriting the correction on screen re-reads it, so the folded-in
+edits never apply twice.
 
 ### <a id="the-tag-hashes-geometry-only"></a>The cache tag hashes the GEOMETRY code, not the whole folder
 

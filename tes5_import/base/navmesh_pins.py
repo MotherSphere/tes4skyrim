@@ -20,8 +20,19 @@ See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
 import json
 import os
 
+from tes5_import.base.navmesh_frozen import (
+    FROZEN_VERSION, SNAP_TOL, STOREY_BAND, apply_frozen, drop_unused_verts,
+    plane_z,
+)
+
 #: Committable pin files, one per source plugin.
 PINS = 'navmesh_pins'
+
+#: Every section of a pin file, each `{cell key: [row, ...]}`.
+PARTS = ('cells', 'welds', 'cuts', 'frozen', 'voids')
+
+#: Floats per row of the sections whose rows have a fixed width.
+ROW_WIDTH = {'cells': 3, 'welds': 6, 'frozen': 9, 'voids': 9}
 
 #: Parsed pin files, keyed by plugin; a missing file caches as {}.
 _CACHE = {}
@@ -41,7 +52,7 @@ def _read(plugin):
     A malformed or absent file answers empty: a pin is an optimisation of
     human intent, never a thing whose absence may abort a conversion.
     """
-    out = {'cells': {}, 'welds': {}, 'cuts': {}}
+    out = {part: {} for part in PARTS}
     try:
         with open(pins_path(plugin), encoding='utf-8') as fh:
             got = json.load(fh)
@@ -49,7 +60,7 @@ def _read(plugin):
         return out
     if not isinstance(got, dict):
         return out
-    for part in ('cells', 'welds', 'cuts'):
+    for part in PARTS:
         section = got.get(part)
         if isinstance(section, dict):
             out[part] = {k: v for k, v in section.items()
@@ -142,6 +153,34 @@ def cuts_for(plugin, key):
     return out
 
 
+def tris_for(plugin, part, key):
+    """`[((x,y,z), (x,y,z), (x,y,z)), ...]` of one cell's `frozen` or `voids` rows.
+
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    return [tuple(tuple(float(c) for c in r[k:k + 3]) for k in (0, 3, 6))
+            for r in _section(plugin, part, key) if len(r) >= 9]
+
+
+def hand_edits_for(plugin, key):
+    """Every correction a human committed for one cell, by section name."""
+    return {'pins': pins_for(plugin, key), 'welds': welds_for(plugin, key),
+            'cuts': cuts_for(plugin, key),
+            'frozen': tris_for(plugin, 'frozen', key),
+            'voids': tris_for(plugin, 'voids', key)}
+
+
+def apply_hand_edits(verts, tris, ledges, edits):
+    """(verts, tris, ledges) after the post-build corrections: cuts, then frozen patches.
+
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    edits = edits or {}
+    verts, tris, ledges = apply_cuts(verts, tris, ledges, edits.get('cuts'))
+    return apply_frozen(verts, tris, ledges, edits.get('frozen') or [],
+                        edits.get('voids') or [])
+
+
 def _inside(x, y, poly):
     """True when (x, y) lies inside the polygon (even-odd rule)."""
     hit = False
@@ -170,14 +209,11 @@ def apply_cuts(verts, tris, ledges, cuts):
     if len(keep) == len(tris):
         return verts, tris, ledges
     tri_map = {old: new for new, old in enumerate(keep)}
-    used = sorted({v for i in keep for v in tris[i][:3]})
-    vert_map = {old: new for new, old in enumerate(used)}
-    new_tris = [tuple(vert_map[v] for v in tris[i][:3]) + tuple(tris[i][3:])
-                for i in keep]
     new_ledges = [(tri_map[u], tri_map[l]) + tuple(rest)
                   for (u, l, *rest) in ledges or ()
                   if u in tri_map and l in tri_map]
-    return [verts[v] for v in used], new_tris, new_ledges
+    new_verts, new_tris = drop_unused_verts(verts, [tris[i] for i in keep])
+    return new_verts, new_tris, new_ledges
 
 
 def digest(plugin, key):
@@ -192,6 +228,11 @@ def digest(plugin, key):
     parts += ['C%.2f,%.2f:' % (zmin, zmax)
               + ';'.join('%.2f,%.2f' % p for p in poly)
               for (zmin, zmax, poly) in cuts_for(plugin, key)]
+    for part in ('frozen', 'voids'):
+        parts += [part[0].upper() + ';'.join('%.2f,%.2f,%.2f' % p for p in t)
+                  for t in tris_for(plugin, part, key)]
+    if any(tris_for(plugin, part, key) for part in ('frozen', 'voids')):
+        parts.append('V%d' % FROZEN_VERSION)
     return '|'.join(parts)
 
 
@@ -201,32 +242,109 @@ def _rounded(rows, width):
             for r in rows or () if len(r) >= width]
 
 
-def save(plugin, key, points, welds=()):
-    """Replace one cell's pins and welds, creating the file on first use.
+def _flat(points):
+    """A sequence of (x, y, z) points as one flat row."""
+    return [float(c) for p in points for c in p[:3]]
 
-    Returns `(path, pin count, weld count)`.  Values are rounded to 0.01u: a
-    pin is a place, and float noise would churn a committed file's diff.
-    """
+
+def _write(plugin, doc):
+    """Write one plugin's whole pin document and drop its cached read."""
     if not os.path.isdir(PINS):
         os.makedirs(PINS)
+    path = pins_path(plugin)
+    body = {'plugin': plugin}
+    body.update({part: doc[part] for part in PARTS})
+    with open(path, 'w', encoding='utf-8') as fh:
+        json.dump(body, fh, indent=1, sort_keys=True)
+        fh.write('\n')
+    _CACHE.pop(plugin, None)
+    return path
+
+
+def save(plugin, key, points=None, welds=None, frozen=None, voids=None):
+    """Replace the given sections of one cell, creating the file on first use.
+
+    A section passed as None is left alone; an empty one clears the cell from
+    it.  `welds` are `(from, to)` pairs, `frozen`/`voids` triangles of three
+    points.  Values round to 0.01u so float noise never churns the diff.
+    Returns `(path, {section: rows now stored})`.
+    """
     doc = _read(plugin)
-    for (part, rows, width) in (('cells', points, 3),
-                                ('welds', _flat_welds(welds), 6)):
-        got = _rounded(rows, width)
+    given = {'cells': points,
+             'welds': None if welds is None else [_flat(w) for w in welds],
+             'frozen': None if frozen is None else [_flat(t) for t in frozen],
+             'voids': None if voids is None else [_flat(t) for t in voids]}
+    for part, rows in given.items():
+        if rows is None:
+            continue
+        got = _rounded(rows, ROW_WIDTH[part])
         if got:
             doc[part][key] = got
         else:
             doc[part].pop(key, None)
-    path = pins_path(plugin)
-    with open(path, 'w', encoding='utf-8') as fh:
-        json.dump({'plugin': plugin, 'cells': doc['cells'],
-                   'welds': doc['welds'], 'cuts': doc['cuts']},
-                  fh, indent=1, sort_keys=True)
-        fh.write('\n')
-    _CACHE.pop(plugin, None)
-    return path, len(doc['cells'].get(key, ())), len(doc['welds'].get(key, ()))
+    path = _write(plugin, doc)
+    return path, {part: len(doc[part].get(key, ())) for part in PARTS}
 
 
-def _flat_welds(welds):
-    """`[(from, to)]` pairs as flat 6-value rows."""
-    return [list(a[:3]) + list(b[:3]) for (a, b) in welds or ()]
+def _touches(a, b):
+    """True when two patch triangles share a corner (to 0.5u in plan, same storey)."""
+    return any((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 <= SNAP_TOL ** 2
+               and abs(p[2] - q[2]) <= STOREY_BAND for p in a for q in b)
+
+
+def _holds(tri, point):
+    """True when `point` is inside `tri` in plan at its storey, or on one of its corners."""
+    x, y, z = point[:3]
+    if any((p[0] - x) ** 2 + (p[1] - y) ** 2 <= 4.0 and abs(p[2] - z) <= STOREY_BAND
+           for p in tri):
+        return True
+    return (_inside(x, y, [p[:2] for p in tri])
+            and abs(plane_z(tri, x, y) - z) <= STOREY_BAND)
+
+
+def _corner_buckets(rows):
+    """`{1u plan bucket: {row index}}` over every corner of every row."""
+    out = {}
+    for i, t in enumerate(rows):
+        for p in t:
+            out.setdefault((int(p[0] // 1.0), int(p[1] // 1.0)), set()).add(i)
+    return out
+
+
+def _rows_near(buckets, p):
+    """Row indices with a corner in the 3x3 buckets around point `p`."""
+    bx, by = int(p[0] // 1.0), int(p[1] // 1.0)
+    return {j for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+            for j in buckets.get((bx + dx, by + dy), ())}
+
+
+def patch_at(rows, point):
+    """Indices of `rows` in the patch holding `point`: every triangle joined to it by corners."""
+    buckets = _corner_buckets(rows)
+    todo = [i for i, t in enumerate(rows) if _holds(t, point)]
+    seen = set(todo)
+    while todo:
+        i = todo.pop()
+        near = set().union(*(_rows_near(buckets, p) for p in rows[i]))
+        for j in near - seen:
+            if _touches(rows[i], rows[j]):
+                seen.add(j)
+                todo.append(j)
+    return seen
+
+
+def remove_patch(plugin, key, point=None):
+    """Unpin the frozen patch holding `point`, or every patch in the cell when None.
+
+    Returns `(path, frozen rows removed, void rows removed)`.
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    frozen = tris_for(plugin, 'frozen', key)
+    voids = tris_for(plugin, 'voids', key)
+    nf = len(frozen)
+    gone = (set(range(nf + len(voids))) if point is None
+            else patch_at(frozen + voids, point))
+    keep_f = [t for i, t in enumerate(frozen) if i not in gone]
+    keep_v = [t for i, t in enumerate(voids) if i + nf not in gone]
+    path, _n = save(plugin, key, frozen=keep_f, voids=keep_v)
+    return path, nf - len(keep_f), len(voids) - len(keep_v)

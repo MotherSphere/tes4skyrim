@@ -1151,7 +1151,7 @@ def _drop_attach_scraps(verts, tris, door_xy):
     return [t for ti, t in enumerate(tris) if ti not in drop]
 
 
-def _ccw_in_plan(verts, tris):
+def ccw_in_plan(verts, tris):
     """Flip any triangle wound CW in plan; the mesh is a heightfield.
 
     See: docs/commentary/tes5_import_navmesh.md#winding-must-be-ccw-in-plan
@@ -1342,7 +1342,7 @@ def build_corridors(refr_recs, base_model_by_fid, get_collision, nodes, edges,
     tris = [tuple(int(i) for i in t) for t in tris]
     tris = _drop_attach_scraps(verts, tris, door_xy)
     tris = corridor_clean._drop_degenerate_guarded(verts, tris)
-    tris = _ccw_in_plan(verts, tris)
+    tris = ccw_in_plan(verts, tris)
 
     ledges = corridor_clean._resolve_ledges(verts, tris, ledge_marks)
     return (verts, tris,

@@ -93,9 +93,8 @@ import pickle
 import struct
 import logging
 
-from ..base.navmesh_pins import (WELD_TOLERANCE, apply_cuts, cell_key,
-                                 cuts_for, digest, pins_for, plugin_of,
-                                 welds_for)
+from ..base.navmesh_pins import (WELD_TOLERANCE, apply_hand_edits, cell_key,
+                                 digest, hand_edits_for, plugin_of)
 from ..base.text_reader import get_int, get_float, get_str, get_formid
 from .lookup_grid import build_navmesh_grid
 from .world import base_fid
@@ -936,7 +935,7 @@ def _cell_graph(rec, cell_rec):
 
 
 def cell_pins(rec, cell_rec, geom_cache):
-    """(pin points, welds, digest, cuts) a human recorded for this cell.
+    """(hand edits by section, digest) a human recorded for this cell.
 
     Both the hash and the build read pins through here, so the value that
     invalidates a cached cell is exactly the value the build then honors.
@@ -944,19 +943,18 @@ def cell_pins(rec, cell_rec, geom_cache):
     See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
     """
     if geom_cache is None:
-        return [], [], '', []
+        return {}, ''
     plugin = plugin_of(geom_cache[0])
     if not plugin:
-        return [], [], '', []
+        return {}, ''
     grid = None
     wrld_fid = get_formid(rec, 'ParentWRLD')
     if wrld_fid and cell_rec is not None:
         grid = (get_int(cell_rec, 'XCLC.X', 0), get_int(cell_rec, 'XCLC.Y', 0))
     key = cell_key(cell_rec, wrld_fid, grid)
     if not key:
-        return [], [], '', []
-    return (pins_for(plugin, key), welds_for(plugin, key),
-            digest(plugin, key), cuts_for(plugin, key))
+        return {}, ''
+    return hand_edits_for(plugin, key), digest(plugin, key)
 
 
 def cell_geom_key(rec, land_rec, cell_rec, refr_recs, base_model_by_fid,
@@ -985,7 +983,7 @@ def cell_geom_key(rec, land_rec, cell_rec, refr_recs, base_model_by_fid,
     return geom_hash(geom_cache[1], points, edges, refr_recs,
                      base_model_by_fid, doors,
                      land_rec if is_exterior else None, origin_x, origin_y,
-                     pin_digest=cell_pins(rec, cell_rec, geom_cache)[2])
+                     pin_digest=cell_pins(rec, cell_rec, geom_cache)[1])
 
 
 def cached_geometry(geom_cache, cell_fid, pgrd_fid):
@@ -1063,7 +1061,7 @@ def _cell_geometry(rec, cell_fid, points, edges, origin_x, origin_y,
     geom_key = cache_path = None
     verts3d = tris = None
     ledges = []
-    pins, welds, pin_digest, cuts = cell_pins(rec, cell_rec, geom_cache)
+    edits, pin_digest = cell_pins(rec, cell_rec, geom_cache)
     if geom_cache is not None:
         cache_dir, tag = geom_cache
         geom_key = geom_hash(tag, points, edges, refr_recs,
@@ -1088,14 +1086,15 @@ def _cell_geometry(rec, cell_fid, points, edges, origin_x, origin_y,
         origin_x=origin_x, origin_y=origin_y,
         doors=[(x, y, z, r, tp, w) for (x, y, z, r, _f, tp, w) in doors],
         ledges_out=ledges,
-        pins=pins, welds=welds, weld_tol=WELD_TOLERANCE,
+        pins=edits.get('pins'), welds=edits.get('welds'),
+        weld_tol=WELD_TOLERANCE,
         door_bases=(set(door_fids.keys())
                     if isinstance(door_fids, dict)
                     else set(door_fids or ())))
     if verts3d:
         verts3d = [tuple(v) for v in
                    np.asarray(verts3d, dtype=np.float32).tolist()]
-        verts3d, tris, ledges = apply_cuts(verts3d, tris, ledges, cuts)
+        verts3d, tris, ledges = apply_hand_edits(verts3d, tris, ledges, edits)
     if cache_path is not None:
         _geom_cache_store(cache_path, geom_key, verts3d, tris, ledges)
     return verts3d, tris, ledges, False, geom_key
