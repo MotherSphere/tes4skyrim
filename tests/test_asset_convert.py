@@ -1297,6 +1297,50 @@ class TestParticleSystemConversion:
             assert su > 0 and sv > 0, \
                 f'effect shader block[{i}] UV Scale ({su},{sv}) — zero = invisible'
 
+
+def _rotation_rows(node):
+    """A node's rotation as rounded row tuples."""
+    r = node.rotation
+    return tuple(round(v, 3) + 0.0 for v in (r.m_11, r.m_12, r.m_13, r.m_21, r.m_22,
+                                             r.m_23, r.m_31, r.m_32, r.m_33))
+
+
+class TestSunbeamBillboard:
+    """sky/sunbeam*.nif: a placed FX billboard, not sky geometry.
+
+    See: docs/commentary/asset_convert_nif.md#billboard-axis-fix
+    """
+
+    @pytest.mark.skipif(not EXPORT_MESHES.exists(), reason='Export meshes not available')
+    def test_sunbeam_keeps_authored_frame_and_fx_shader(self, tmp_path):
+        """The authored billboard rotation survives and the beam takes the FX shader.
+
+        Both engines spin a mode-1 billboard about its own local +Y, so the
+        authored -90°X is what hangs the beam vertically; the sky shader made
+        it show through walls.
+        """
+        src = EXPORT_MESHES / 'sky' / 'sunbeam01.nif'
+        if not src.exists():
+            pytest.skip(f'{src} not found')
+        dst = tmp_path / 'meshes' / 'sky' / 'sunbeam01.nif'
+        dst.parent.mkdir(parents=True)
+        assert convert_nif(str(src), str(dst)).get('converted')
+
+        def billboard(blocks):
+            return next(b for b in blocks if isinstance(b, NifFormat.NiBillboardNode))
+        out_blocks = read_nif(dst)[1].blocks
+        assert (_rotation_rows(billboard(out_blocks))
+                == _rotation_rows(billboard(read_nif(src)[1].blocks)))
+        types = {type(b).__name__ for b in out_blocks}
+        assert 'BSSkyShaderProperty' not in types
+        shader = next(b for b in out_blocks
+                      if isinstance(b, NifFormat.BSEffectShaderProperty))
+        assert shader.shader_flags_1.slsf_1_z_buffer_test
+        assert not shader.shader_flags_2.slsf_2_z_buffer_write
+        assert shader.shader_flags_2.slsf_2_double_sided
+        assert 'NiAlphaProperty' in types
+
+
 class TestFlameNodeConversion:
     """FlameNode markers → grafted CONVERTED Oblivion flame subtree.
 
