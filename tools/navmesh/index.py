@@ -23,7 +23,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from asset_convert.collision import collision_extract as ce
 from asset_convert.game_paths import namespace_for, set_namespace
-from tes5_import.base.navmesh_pins import WELD_TOLERANCE
 from tes5_import.navmesh import corridor
 from tes5_import.navmesh.lattice.build import build_lattice
 from tes5_import.navmesh.from_pgrd import (
@@ -106,33 +105,29 @@ class CellCtx(object):
     def has_pathgrid(self):
         return bool(self.nodes)
 
-    def build(self, ledges_out=None, pins=None, welds=None, lattice=False):
-        """Regenerate this cell's navmesh exactly as the pipeline would.
+    def build(self, ledges_out=None, lattice=False):
+        """Regenerate this cell's RAW navmesh exactly as the pipeline's generator would.
 
         `ledges_out` collects `(upper_tri, lower_tri, drop)` drop-down links,
         which production returns out-of-band so `(verts, tris)` stays intact.
-        `pins`/`welds` are the committed hand corrections; passing none renders
-        the RAW generator, which is the other half of cellview's A/B.
+        Hand corrections apply after this (`navmesh_pins.apply_hand_edits`).
         `lattice` picks the lattice generator, else the corridor one, whatever
         the pipeline's setting.
-
-        See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
         """
         if lattice:
-            return self._build_lattice(ledges_out, pins)
+            return self._build_lattice(ledges_out)
         verts, tris, ledges = corridor.build_corridors(
             self.refrs, self.index.base_model, ce.get_collision,
             self.nodes, self.edges, land_rec=self.land,
             origin_x=self.origin_x, origin_y=self.origin_y,
             doors=[(x, y, z, r, tp, w)
                    for (x, y, z, r, _f, tp, w) in self.doors],
-            door_bases=set(self.index.door_fids.keys()),
-            pins=pins, welds=welds, weld_tol=WELD_TOLERANCE)
+            door_bases=set(self.index.door_fids.keys()))
         if ledges_out is not None:
             ledges_out.extend(ledges)
         return verts, [tuple(int(i) for i in tri[:3]) for tri in tris]
 
-    def _build_lattice(self, ledges_out, pins):
+    def _build_lattice(self, ledges_out):
         """This cell through the prototype lattice generator, same return shape."""
         verts, tris, ledges = build_lattice(
             self.refrs, self.index.base_model, ce.get_collision,
@@ -140,7 +135,7 @@ class CellCtx(object):
             origin_x=self.origin_x, origin_y=self.origin_y,
             doors=[(x, y, z, r, tp, w)
                    for (x, y, z, r, _f, tp, w) in self.doors],
-            door_bases=set(self.index.door_fids.keys()), pins=pins,
+            door_bases=set(self.index.door_fids.keys()),
             activators=self.index.activator_fids)
         if ledges_out is not None:
             ledges_out.extend(ledges)

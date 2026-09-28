@@ -168,17 +168,16 @@ def snap_nodes(spans, nodes):
     return out
 
 
-def seed_lines(spans, nodes, edges, doors, pins):
-    """(seed span ids, anchor lines, forced links) from pathgrid, doors and pins.
+def seed_lines(spans, nodes, edges, doors):
+    """(seed span ids, anchor lines, forced links) from pathgrid and doors.
 
-    Anchor lines are the pathgrid and pin seeds, one span list per line: kept
-    floor must be reachable from one.  A door seeds its own doorway, inventing
+    Anchor lines are the pathgrid seeds, one span list per line: kept floor
+    must be reachable from one.  A door seeds its own doorway, inventing
     floor only in the threshold's own column, but anchors nothing, so a door
     with no walked floor near it makes no island.  A teleport door seeds only
     its inside half (see door_inside).
     """
     anchored = [_seed_segment(spans, nodes[i], nodes[j], lambda t: True) for (i, j) in edges]
-    anchored += [_seed_segment(spans, p, p, lambda t: True) for p in pins]
     lines = list(anchored)
     for door in doors:
         x, y, z, rz = door[:4]
@@ -494,13 +493,13 @@ def _solve(spans, arms, seeds, lanes, forced, reach):
     return col, z, kept, seed, links
 
 
-def build_graph(grid, walkable, blocking, nodes, edges, doors, pins, reach):
+def build_graph(grid, walkable, blocking, nodes, edges, doors, reach):
     """(column, z, kept mask, seed mask, links) for one cell's floors."""
     blocking = np.concatenate([np.asarray(blocking, float).reshape(-1, 3, 3),
                                door_barriers(doors, nodes)])
     spans = Spans(grid, walkable, blocking)
     snapped = snap_nodes(spans, nodes)
-    seeds, lines, forced = seed_lines(spans, snapped, edges, doors, pins)
+    seeds, lines, forced = seed_lines(spans, snapped, edges, doors)
     arms = Arms(blocking, grid)
     lanes = band(spans, arms, lines, BAND_COLS)
     col, z, kept, seed, links = _solve(spans, arms, seeds, lanes, forced, reach)

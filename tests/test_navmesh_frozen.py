@@ -189,14 +189,6 @@ def test_patches_round_trip_and_restage_the_cell(tmp_path, monkeypatch):
     assert pins.digest('Nehrim.esm', 'Cell')
 
 
-def test_saving_a_patch_keeps_the_older_pins(tmp_path, monkeypatch):
-    """A section left out of a save is left alone."""
-    _store(tmp_path, monkeypatch)
-    pins.save('Nehrim.esm', 'Cell', [(1.0, 2.0, 3.0)])
-    pins.save('Nehrim.esm', 'Cell', frozen=FLIPPED, voids=REPLACED)
-    assert pins.pins_for('Nehrim.esm', 'Cell') == [(1.0, 2.0, 3.0)]
-
-
 def test_unpinning_removes_only_the_patch_at_the_point(tmp_path, monkeypatch):
     """The joined patch under the point goes; a separate patch stays."""
     _store(tmp_path, monkeypatch)

@@ -161,10 +161,10 @@ def open_activators(refr_recs, base_model_by_fid, get_collision, nodes, edges, a
 
 def build_lattice(refr_recs, base_model_by_fid, get_collision, nodes, edges,
                   land_rec=None, origin_x=0.0, origin_y=0.0, doors=None,
-                  door_bases=None, pins=None, activators=None):
+                  door_bases=None, activators=None):
     """(verts, tris, ledges) for one cell, or three empty lists.
 
-    doors: [(x, y, z, rot_z, is_teleport, width), ...]; pins: walkable (x, y, z).
+    doors: [(x, y, z, rot_z, is_teleport, width), ...].
     activators: ACTI base FormIDs (see open_activators); None uses set_activators'.
     ledges: [(upper_tri, lower_tri, drop), ...] drop-down links.
     """
@@ -179,8 +179,7 @@ def build_lattice(refr_recs, base_model_by_fid, get_collision, nodes, edges,
         origin_x=origin_x, origin_y=origin_y, skip_bases=door_bases)
     grid, reach = _domain(walkable, nodes, land_rec, origin_x, origin_y)
     col, z, kept, seed, links = build_graph(
-        grid, walkable, blocking, nodes, edges, list(doors or ()),
-        [tuple(p) for p in (pins or ())], reach)
+        grid, walkable, blocking, nodes, edges, list(doors or ()), reach)
     verts, tris, owner, corner = lattice(grid, col, z, kept, links)
     if not tris:
         return [], [], []

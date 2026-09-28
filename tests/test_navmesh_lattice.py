@@ -28,7 +28,7 @@ def _kept_x(gap):
     walk = np.array(_floor(0, 0, 512, 256), float)
     block = np.array(_wall(256.5, 0, 128 - gap / 2) + _wall(256.5, 128 + gap / 2, 256), float)
     nodes, edges = [(64.0, 64.0, 0.0), (64.0, 192.0, 0.0)], [(0, 1)]
-    col, _z, kept, _seed, _links = build_graph(grid, walk, block, nodes, edges, [], [], 1024.0)
+    col, _z, kept, _seed, _links = build_graph(grid, walk, block, nodes, edges, [], 1024.0)
     return max(grid.x0 + (int(c) % grid.nx + 0.5) * grid.cs for c in col[kept])
 
 
@@ -47,7 +47,7 @@ def _open_floor(cs, reach=1024.0):
     grid = Grid.over((0.0, 0.0), (512.0, 512.0), cs)
     walk = np.array(_floor(0, 0, 512, 512), float)
     nodes, edges = [(40.0, 40.0, 0.0), (470.0, 470.0, 0.0), (40.0, 470.0, 0.0)], [(0, 1), (1, 2)]
-    graph = build_graph(grid, walk, np.zeros((0, 3, 3)), nodes, edges, [], [], reach)
+    graph = build_graph(grid, walk, np.zeros((0, 3, 3)), nodes, edges, [], reach)
     return grid, graph, lattice(grid, graph[0], graph[1], graph[2], graph[4]), nodes
 
 

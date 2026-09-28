@@ -93,8 +93,8 @@ import pickle
 import struct
 import logging
 
-from ..base.navmesh_pins import (WELD_TOLERANCE, apply_hand_edits, cell_key,
-                                 digest, hand_edits_for, plugin_of)
+from ..base.navmesh_pins import (apply_hand_edits, cell_key, digest,
+                                 hand_edits_for, plugin_of)
 from ..base.text_reader import get_int, get_float, get_str, get_formid
 from .lookup_grid import build_navmesh_grid
 from .world import base_fid
@@ -1086,8 +1086,6 @@ def _cell_geometry(rec, cell_fid, points, edges, origin_x, origin_y,
         origin_x=origin_x, origin_y=origin_y,
         doors=[(x, y, z, r, tp, w) for (x, y, z, r, _f, tp, w) in doors],
         ledges_out=ledges,
-        pins=edits.get('pins'), welds=edits.get('welds'),
-        weld_tol=WELD_TOLERANCE,
         door_bases=(set(door_fids.keys())
                     if isinstance(door_fids, dict)
                     else set(door_fids or ())))

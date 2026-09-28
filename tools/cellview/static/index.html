@@ -1426,14 +1426,12 @@ function pinTxt() {
   /* A snapshot is frozen geometry the pins never touched, so claiming they
      are APPLIED or DISABLED there would describe a mesh nobody is looking at. */
   if (showSaved()) return '';
-  const n = (M.pin_tris || 0) + (M.pin_welds || 0) +
-            (M.pin_frozen || 0) + (M.pin_voids || 0);
+  const n = (M.pin_cuts || 0) + (M.pin_frozen || 0) + (M.pin_voids || 0);
   if (!n) return ' · <span class="warn">no pins committed</span>';
   const parts = [];
   if (M.pin_frozen || M.pin_voids)
     parts.push(`${M.pin_frozen} frozen tris over ${M.pin_voids} replaced`);
-  if (M.pin_tris) parts.push(`${M.pin_tris} pinned tris`);
-  if (M.pin_welds) parts.push(`${M.pin_welds} weld` + (M.pin_welds > 1 ? 's' : ''));
+  if (M.pin_cuts) parts.push(`${M.pin_cuts} cut` + (M.pin_cuts > 1 ? 's' : ''));
   const what = parts.join(', ');
   return M.pinned ? ` · ${what} APPLIED`
                   : ` · <span class="warn">${what} DISABLED</span>`;

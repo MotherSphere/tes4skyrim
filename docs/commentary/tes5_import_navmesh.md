@@ -4431,10 +4431,10 @@ the output's master list is the TES4 one with new masters prepended, so the
 difference in their lengths IS the shift every FormID's index byte took.
 
 
-## <a id="pinned-navmesh-floor"></a>Pinned navmesh floor: a correction that survives the generator
+## <a id="pinned-navmesh-floor"></a>Pinned navmesh corrections: edits that survive the generator
 
 **Code:** `tes5_import/base/navmesh_pins.py`, written by cellview's **Pin edits**
-button, consumed in `from_pgrd._cell_geometry` and `corridor.build_corridors`.
+button, applied in `from_pgrd._cell_geometry` after the build.
 
 A correction in `tests/navmesh_fixed/` records triangle and vertex INDICES, so
 it is meaningless the moment the generator renumbers anything — `is_stale`
@@ -4444,29 +4444,17 @@ directly: of five corrections on disk, three (`ImperialDungeon01/02/03`) have
 The files are also gitignored, so nothing a human decided ever reaches another
 machine.
 
-A pin is the durable half of the same intent. It stores the **world positions**
-a human declared walkable — not indices — so it survives any retriangulation,
-and it is small enough to commit and read in a diff.
+The pin file is the durable half of the same intent. It stores **world
+positions**, not indices, so it survives any retriangulation, and it is small
+enough to commit and read in a diff. It holds two kinds of entry, both applied
+after the generator: [cuts](#cut-pins) and [frozen patches](#frozen-navmesh-patches).
 
-**Pins ride a mechanism that already existed.** `corridor_clean.finalize` takes
-`pin_xy`, a list of `(x, y, z)` points, and `_covers_any_sample` keeps any
-triangle containing one at its own height. Every destructive stage already
-consults it: `_make_manifold` (three times), `cull_boundary_slivers` (twice),
-`cull_open_flaps` and `_drop_unreachable_islands`. Pathgrid samples and doors
-already ride it, and the docs record that a walked line "outranks every other
-candidate on an edge." A hand pin is one more point in that list.
-
-**Pins go to `pin_xy`, never to `_pins`.** The decimator's own pin list is
-deliberately limited to doors and nodes — `finalize`'s comment states that
-pinning all of `pin_xy` there would disable decimation everywhere. A pinned
-triangle is therefore protected from being CUT, while the mesh over it may
-still be re-triangulated. That is the intended reading: the human declared the
-space walkable, not the tessellation sacred.
-
-**What a pin cannot do.** It protects floor that the generator produces; it does
-not make the generator REACH ground it never grew. Forcing coverage is the
-`build_union_mesh(extra_strips=...)` path that door footprints already use, and
-it is deliberately not part of this.
+**Floor pins and welds were removed.** The first design fed hand points into
+`finalize`'s `pin_xy` (so the cleanup passes would not cut that floor) and
+re-found hand welds inside `finalize` ([weld pins](#weld-pins)). Neither kept a
+real hand fix; the measurements are under frozen patches. Once every pinned
+cell had been re-pinned as a frozen patch, the pinned points, the welds, and
+the `pins`/`welds` parameters of both generators were deleted.
 
 **The key is plugin plus cell name.** One committable file per source plugin,
 `navmesh_pins/<plugin>.json`, keyed by cell EditorID — or, for an exterior cell,
@@ -4490,13 +4478,13 @@ unpinned cell's hash is byte-identical to what it was before pins existed.
 
 **Code:** `navmesh_pins.cuts_for` / `apply_cuts`, applied in
 `from_pgrd._cell_geometry` right after the build and before the geometry cache
-stores it. A pin protects floor and a weld joins it; neither can remove floor
-the generator should not have made, so a cut is the third entry kind:
+stores it. A cut removes floor the generator should not have made, in a region
+no hand edit draws triangle by triangle:
 `"cuts": {"<cell key>": [[zmin, zmax, x1, y1, x2, y2, x3, y3, ...]]}` — a
 world-XY polygon plus a height band. Every generated triangle whose centroid
 lies inside the polygon and band is removed, unused vertices are compacted,
-and ledge links naming a removed triangle go with it. Like pins, a cut is a
-position, so it survives any retriangulation, and it enters the cell's
+and ledge links naming a removed triangle go with it. A cut is a position, so
+it survives any retriangulation, and it enters the cell's
 `digest()` so only a cut cell's cache entry goes stale.
 
 First use, `XPGardensExterior` (SETheFringe −13, 0): Oblivion's own pathgrid
@@ -4525,46 +4513,24 @@ cells, so the same rows are keyed under `SEPassWallExterior02`,
 triangles. Adding both cuts changed 10 of 8,239 navmeshes (the 4 cut cells and
 6 seam neighbours whose edge links name renumbered triangles).
 
-### <a id="weld-pins"></a>Weld pins: the crack a position pin cannot express
-
-**Code:** `corridor_clean.apply_welds`, stored in the `welds` section of
-`navmesh_pins/<plugin>.json`.
-
-A floor pin protects a PLACE, and that covers most hand corrections. It cannot
-express the commonest one of all. Measured on the two real corrections that
-carry any ops at all, both are welds: `Imperial Prison Ship` is one
-`move_vert` plus one `snap_vert`, and `imperialdungeon01.2` is one move plus
-two snaps.
+### <a id="weld-pins"></a>Weld pins (removed): why a crack needed more than a position
 
 A crack is not missing floor. Two triangles can meet at identical coordinates
 and still leave a crack, because the engine joins them only when they **share a
 vertex index** — the reason `meshedit._snap_vert` rewrites indices rather than
-just moving a vertex. Nothing about that is a position to protect, so a floor
-pin is silently a no-op: rebuilding the Imperial Prison Ship with and without
-its floor pins gave byte-identical results, 145 verts and 171 tris either way,
-with the crack still open (v95 and v124 sitting 33u apart, one triangle each).
+just moving a vertex. A floor pin was therefore silently a no-op on a crack:
+rebuilding the Imperial Prison Ship with and without its floor pins gave
+byte-identical results, 145 verts and 171 tris either way, with the crack
+still open (v95 and v124 sitting 33u apart).
 
-A weld pin therefore stores the two PLACES whose vertices must become one.
-`apply_welds` re-finds each endpoint as the nearest generated vertex within
-`WELD_TOLERANCE`, points the first at the second, and drops any triangle the
-merge leaves degenerate — the same three steps `_snap_vert` performs, but keyed
-on geometry that survives regeneration instead of indices that do not.
-
-**8 units is unambiguous.** Measured on the Imperial Prison Ship, the closest
-two generated vertices sit 17u apart, the 10th percentile at 32u and the median
-at 64u; no vertex has a neighbour within 8u. An endpoint therefore cannot match
-the wrong vertex, and a weld whose endpoint has drifted further than that
-matches nothing and is skipped rather than guessed at.
-
-It runs inside `finalize`, immediately after `_weld_coincident` and before
-anything reads adjacency — `_make_manifold`, the decimator and the cull passes
-all reason about shared edges, so a weld applied later would be invisible to
-every one of them.
-
-A weld is applied ONCE, at the position it was recorded. If a later generator
-moves that floor wholesale the weld simply stops matching; it never drags
-unrelated geometry together, because both endpoints must independently land
-within tolerance.
+Weld pins stored the two PLACES whose vertices had to become one and re-found
+them inside `finalize`, before adjacency was read. They matched within 8u
+(the Prison Ship's closest generated vertices sit 17u apart). But the
+endpoints were recorded from the FINISHED mesh and applied BEFORE decimation,
+where those vertices need not exist yet. On SchattenrufMinePart05 at least 2 of
+9 targets were more than 8u from where the weld looked for them. A frozen patch
+keeps the welded triangles themselves, sharing one index, so the crack stays
+closed without re-finding anything.
 
 
 ### <a id="frozen-navmesh-patches"></a>Frozen patches: hand-edited triangles kept verbatim
@@ -4575,10 +4541,11 @@ within tolerance.
 (`navmesh_pins.remove_patch`). Applied after the generator in
 `from_pgrd._cell_geometry` and in cellview's `bake.generate`, after cuts.
 
-Floor pins and welds do not preserve a hand fix. On `SchattenrufMinePart05`
-(Nehrim.esm; 14 `del_tri`, 9 `snap_vert`, 6 `move_vert`, 3 `add_tri`),
-rebuilding with the pins and welds Pin edits used to write left floor at 12 of
-the 14 deleted places and 0 of 3 added triangles, and moved no vertex. Its
+The floor pins and welds this replaced did not preserve a hand fix. On
+`SchattenrufMinePart05` (Nehrim.esm; 14 `del_tri`, 9 `snap_vert`, 6
+`move_vert`, 3 `add_tri`), rebuilding with the pins and welds Pin edits used to
+write left floor at 12 of the 14 deleted places and 0 of 3 added triangles,
+and moved no vertex. Its
 corner pins actually PROTECTED 9 of the 14 deleted triangles, because a corner
 lies on every triangle around it.
 
@@ -4618,9 +4585,9 @@ a patch; a ledge naming a removed triangle is dropped.
 ### <a id="pin-ab-toggle"></a>The pinned-edits toggle is a RE-BAKE
 
 Cellview's **pinned edits** checkbox re-fetches `/mesh?pinned=0|1` rather than
-hiding a layer. Pins change what the generator PRODUCES, so there is no
+hiding a layer. Pinned edits change the mesh the build PRODUCES, so there is no
 pinned-vs-unpinned geometry sitting in the page to show or hide — the only
-honest A/B is to run the generator both ways. The bake cache is keyed on the
+honest A/B is to build the cell both ways. The bake cache is keyed on the
 flag so flipping back is instant, and both variants are dropped whenever the
 pin file is written, or the first bake after pinning would serve the mesh from
 before the pin.
@@ -4631,9 +4598,8 @@ silently disagreed with the build it claims to mirror.
 
 **An unpinned cell says so.** Both halves of the A/B are identical when nothing
 is committed, which reads exactly like a broken switch, so the status line
-distinguishes "no pins committed" from "2 pinned tris, 1 weld APPLIED" and
-"… DISABLED". Measured on the Imperial Prison Ship: 171 tris / 145 verts with
-pins disabled, 170 / 143 with them applied.
+distinguishes "no pins committed" from "50 frozen tris over 65 replaced
+APPLIED" and "… DISABLED".
 
 Edits in progress are dropped on a flip, because their triangle and vertex
 indices address the mesh being replaced.

@@ -1,15 +1,14 @@
-"""Hand-pinned navmesh floor: triangles the generator must never cut away.
+"""Hand navmesh corrections that survive the generator: frozen patches and cuts.
 
 A correction in `tests/navmesh_fixed/` is a snapshot keyed by triangle INDEX,
-so it decays the moment the generator moves and it is gitignored.  A pin is the
-durable half of the same intent: the WORLD POSITIONS a human declared walkable,
-which survive any retriangulation and are small enough to commit and review.
+so it decays the moment the generator moves and it is gitignored.  The pin
+file is the durable half of the same intent, stored as WORLD POSITIONS: a
+frozen patch (`frozen` + `voids`) keeps a human's triangles verbatim, and a
+cut removes floor inside a polygon and height band.  Both apply after the
+build (`apply_hand_edits`), so neither depends on how the generator works.
 
-    from tes5_import.base.navmesh_pins import pins_for
-    pts = pins_for('Oblivion.esm', 'ImperialDungeon02')
-
-Pins ride `corridor_clean.finalize`'s existing `pin_xy` mechanism.  They protect
-existing floor; they do not make the generator REACH ground it never grew.
+    from tes5_import.base.navmesh_pins import hand_edits_for
+    edits = hand_edits_for('Nehrim.esm', 'SchattenrufMinePart05')
 
 This module lives OUTSIDE `tes5_import/navmesh/` on purpose: that folder's
 bytes are the navmesh cache tag.
@@ -31,16 +30,13 @@ PINS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), 'navmesh_pins')
 
 #: Every section of a pin file, each `{cell key: [row, ...]}`.
-PARTS = ('cells', 'welds', 'cuts', 'frozen', 'voids')
+PARTS = ('cuts', 'frozen', 'voids')
 
-#: Floats per row of the sections whose rows have a fixed width.
-ROW_WIDTH = {'cells': 3, 'welds': 6, 'frozen': 9, 'voids': 9}
+#: Floats per `frozen` / `voids` row: three corners of (x, y, z).
+TRI_WIDTH = 9
 
 #: Parsed pin files, keyed by plugin; a missing file caches as {}.
 _CACHE = {}
-
-#: How near a generated vertex must be to a weld endpoint to BE that endpoint.
-WELD_TOLERANCE = 8.0
 
 
 def user_dir():
@@ -150,29 +146,6 @@ def cell_key(cell_rec, wrld_fid=0, grid=None):
     return 'wrld:%06X %d %d' % (wrld_fid & 0x00FFFFFF, grid[0], grid[1])
 
 
-def pins_for(plugin, key):
-    """`[(x, y, z), ...]` of floor pinned walkable in one cell, or `[]`."""
-    return [tuple(float(c) for c in p[:3])
-            for p in _section(plugin, 'cells', key) if len(p) >= 3]
-
-
-def welds_for(plugin, key):
-    """`[((x,y,z) from, (x,y,z) to), ...]` cracks to close in one cell.
-
-    A crack closes only when two triangles SHARE a vertex index, so a weld
-    names the two PLACES whose vertices must become one -- a position pair
-    survives regeneration where the editor's index pair cannot.
-
-    See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
-    """
-    out = []
-    for w in _section(plugin, 'welds', key):
-        if len(w) >= 6:
-            out.append((tuple(float(c) for c in w[:3]),
-                        tuple(float(c) for c in w[3:6])))
-    return out
-
-
 def cuts_for(plugin, key):
     """`[(zmin, zmax, [(x, y), ...]), ...]` regions to strip from one cell's navmesh.
 
@@ -194,13 +167,12 @@ def tris_for(plugin, part, key):
     See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
     """
     return [tuple(tuple(float(c) for c in r[k:k + 3]) for k in (0, 3, 6))
-            for r in _section(plugin, part, key) if len(r) >= 9]
+            for r in _section(plugin, part, key) if len(r) >= TRI_WIDTH]
 
 
 def hand_edits_for(plugin, key):
     """Every correction a human committed for one cell, by section name."""
-    return {'pins': pins_for(plugin, key), 'welds': welds_for(plugin, key),
-            'cuts': cuts_for(plugin, key),
+    return {'cuts': cuts_for(plugin, key),
             'frozen': tris_for(plugin, 'frozen', key),
             'voids': tris_for(plugin, 'voids', key)}
 
@@ -254,13 +226,10 @@ def apply_cuts(verts, tris, ledges, cuts):
 def digest(plugin, key):
     """A stable string for `geom_hash`, so pinning one cell restages only it.
 
-    Empty when the cell has no pins, welds or cuts, which keeps every
-    unpinned cell's hash exactly what it was before pins existed.
+    Empty when the cell has no cuts or patches, which keeps every unpinned
+    cell's hash exactly what it was before pins existed.
     """
-    parts = ['%.2f,%.2f,%.2f' % p for p in pins_for(plugin, key)]
-    parts += ['W%.2f,%.2f,%.2f>%.2f,%.2f,%.2f' % (a + b)
-              for (a, b) in welds_for(plugin, key)]
-    parts += ['C%.2f,%.2f:' % (zmin, zmax)
+    parts = ['C%.2f,%.2f:' % (zmin, zmax)
               + ';'.join('%.2f,%.2f' % p for p in poly)
               for (zmin, zmax, poly) in cuts_for(plugin, key)]
     for part in ('frozen', 'voids'):
@@ -296,26 +265,22 @@ def _write(plugin, doc, folder):
     return path
 
 
-def save(plugin, key, points=None, welds=None, frozen=None, voids=None):
-    """Replace the given sections of one cell in the save folder's file.
+def save(plugin, key, frozen=None, voids=None):
+    """Replace one cell's frozen patch in the save folder's file.
 
     A section passed as None is left alone; an empty one clears the cell from
-    it (kept as an empty override where a shipped pin exists).  `welds` are
-    `(from, to)` pairs, `frozen`/`voids` triangles of three points.  Values
-    round to 0.01u so float noise never churns the diff.
+    it (kept as an empty override where a shipped pin exists).  `frozen` and
+    `voids` are triangles of three points.  Values round to 0.01u so float
+    noise never churns the diff.
     Returns `(path, {section: rows now in effect})`.
     """
     folder = save_dir()
     doc = _read_file(pins_path(plugin, folder))
     shipped = _read_file(pins_path(plugin)) if folder != PINS else None
-    given = {'cells': points,
-             'welds': None if welds is None else [_flat(w) for w in welds],
-             'frozen': None if frozen is None else [_flat(t) for t in frozen],
-             'voids': None if voids is None else [_flat(t) for t in voids]}
-    for part, rows in given.items():
+    for part, rows in (('frozen', frozen), ('voids', voids)):
         if rows is None:
             continue
-        got = _rounded(rows, ROW_WIDTH[part])
+        got = _rounded([_flat(t) for t in rows], TRI_WIDTH)
         if got or (shipped is not None and key in shipped[part]):
             doc[part][key] = got
         else:

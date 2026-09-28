@@ -237,16 +237,15 @@ def cell_grid(src):
 def generate(src, lattice, ledges=None, edits=None):
     """This cell's `(verts, tris)` with the committed `edits`; empty with no pathgrid.
 
-    Pins and welds steer the build; cuts and frozen patches apply after it,
-    exactly as `from_pgrd._cell_geometry` does.
+    Cuts and frozen patches apply after the build, exactly as
+    `from_pgrd._cell_geometry` does.
     See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
     """
     if not src.has_pathgrid:
         return [], []
     edits = edits or {}
     raw = []
-    verts, tris = src.build(ledges_out=raw, pins=edits.get('pins'),
-                            welds=edits.get('welds'), lattice=lattice)
+    verts, tris = src.build(ledges_out=raw, lattice=lattice)
     verts, tris, got = apply_hand_edits(
         [tuple(float(c) for c in v[:3]) for v in verts], tris, raw, edits)
     if ledges is not None:
@@ -455,8 +454,7 @@ def mesh_bake(plugin, cell, job='', pinned=True, lattice=False):
         'pinned': bool(pinned),
         'lattice': bool(lattice),
         'pin_key': pin_key,
-        'pin_tris': len(edits.get('pins', ())) // 3,
-        'pin_welds': len(edits.get('welds', ())),
+        'pin_cuts': len(edits.get('cuts', ())),
         'pin_frozen': len(edits.get('frozen', ())),
         'pin_voids': len(edits.get('voids', ())),
         'frozen_tris': (frozen_indices(verts, tris, edits.get('frozen', ()))
