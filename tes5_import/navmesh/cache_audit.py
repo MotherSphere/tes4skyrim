@@ -200,13 +200,39 @@ def prove_cache(jobs: list, geom_cache, sample: int, rebuild=None):
     return checked, bad
 
 
-def _rekey_one(path: str, want: str) -> bool:
-    """Rewrite one entry's stored hash in place.  True when it changed."""
+def _job_key(job: dict, geom_cache) -> str:
+    """One job's cache hash under `geom_cache`'s tag, from its inputs alone."""
+    from . import worker as navm_worker
+    from .from_pgrd import cell_geom_key
+    return cell_geom_key(job['pgrd_rec'], job['land_rec'], job['cell_rec'],
+                         job['refr_recs'], navm_worker._BASE_MODEL_BY_FID,
+                         navm_worker._DOOR_FIDS, geom_cache,
+                         job.get('extra_door_refrs'))
+
+
+def _pins_since(job: dict, geom_cache, old_tag: str) -> str:
+    """The hash a pinned cell's entry must carry for its pins to be unchanged; '' if unpinned.
+
+    A re-key proves only that the CODE did not move the geometry, so a pinned
+    cell keeps its entry only when the old tag with today's pins reproduces
+    the stored hash.  See: docs/commentary/tes5_import_navmesh.md#adopt-and-pins
+    """
+    from .from_pgrd import cell_pins
+    if not cell_pins(job['pgrd_rec'], job['cell_rec'], geom_cache)[1]:
+        return ''
+    return _job_key(job, (geom_cache[0], old_tag)) if old_tag else '-'
+
+
+def rekey_entry(path: str, want: str, was: str = '') -> bool:
+    """Rewrite one entry's stored hash in place.  True when it changed.
+
+    A non-empty `was` must equal the stored hash, else the entry is left stale.
+    """
     import pickle
     try:
         with open(path, 'rb') as fh:
             blob = pickle.load(fh)
-        if blob.get('hash') == want:
+        if blob.get('hash') == want or (was and blob.get('hash') != was):
             return False
         blob['hash'] = want
         tmp = '%s.tmp%d' % (path, os.getpid())
@@ -218,13 +244,12 @@ def _rekey_one(path: str, want: str) -> bool:
         return False
 
 
-def rekey_cache(jobs: list, geom_cache) -> tuple:
+def rekey_cache(jobs: list, geom_cache, old_tag: str = '') -> tuple:
     """Re-key every entry that has a job to the CURRENT tag.  (done, skipped).
 
-    Hashes come from `cell_geom_key`, so no geometry is built.
+    Hashes come from `cell_geom_key`, so no geometry is built.  A pinned cell
+    is re-keyed only when its pins are what `old_tag`'s build applied.
     """
-    from . import worker as navm_worker
-    from .from_pgrd import cell_geom_key
     cache_dir = geom_cache[0]
     by_key = {j['key']: j for j in jobs}
     done = skipped = 0
@@ -240,14 +265,11 @@ def rekey_cache(jobs: list, geom_cache) -> tuple:
         if job is None:
             skipped += 1
             continue
-        fresh = cell_geom_key(job['pgrd_rec'], job['land_rec'],
-                              job['cell_rec'], job['refr_recs'],
-                              navm_worker._BASE_MODEL_BY_FID,
-                              navm_worker._DOOR_FIDS, geom_cache,
-                              job.get('extra_door_refrs'))
+        fresh = _job_key(job, geom_cache)
         if not fresh:
             skipped += 1
-        elif _rekey_one(os.path.join(cache_dir, name), fresh):
+        elif rekey_entry(os.path.join(cache_dir, name), fresh,
+                        _pins_since(job, geom_cache, old_tag)):
             done += 1
     return done, skipped
 
@@ -270,12 +292,14 @@ def adopt_if_unchanged(jobs: list, geom_cache, sample: int = None,
     if budget <= 0:
         return False
     cache_dir, tag = geom_cache
+    old_tag = ''
     try:
         with open(os.path.join(cache_dir, 'CACHE_TAG')) as fh:
-            if fh.read().strip() == tag:
-                return False
+            old_tag = fh.read().strip()
     except OSError:
         pass
+    if old_tag == tag:
+        return False
     if not any(n.endswith('.pkl') for n in os.listdir(cache_dir)):
         return False
     print('  Navmesh cache: built by different navmesh code -- checking '
@@ -289,7 +313,7 @@ def adopt_if_unchanged(jobs: list, geom_cache, sample: int = None,
         print('    cell %08X differs after %d compared -- a real geometry '
               'change; regenerating.' % (bad[0][0], checked), flush=True)
         return False
-    done, _skipped = rekey_cache(jobs, geom_cache)
+    done, _skipped = rekey_cache(jobs, geom_cache, old_tag)
     try:
         with open(os.path.join(cache_dir, 'CACHE_TAG'), 'w') as fh:
             fh.write(tag)

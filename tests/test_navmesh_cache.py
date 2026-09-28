@@ -1241,13 +1241,37 @@ def test_rekey_rewrites_only_the_hash(tmp_path):
             'tris': np.zeros((1, 3), dtype=np.int32), 'ledges': [(1, 2)]}
     with open(path, 'wb') as fh:
         pickle.dump(blob, fh)
-    assert adopt.rekey(str(path), 'new') is True
+    assert navm_verify.rekey_entry(str(path), 'new') is True
     got = pickle.load(open(path, 'rb'))
     assert got['hash'] == 'new'
     assert np.array_equal(got['verts'], blob['verts'])
     assert np.array_equal(got['tris'], blob['tris'])
     assert got['ledges'] == [(1, 2)]
-    assert adopt.rekey(str(path), 'new') is False
+    assert navm_verify.rekey_entry(str(path), 'new') is False
+
+
+def test_rekey_keeps_a_cell_whose_pins_changed_stale(tmp_path, monkeypatch):
+    """A re-key stamps new pins' hash only onto geometry built with those pins.
+
+    See: docs/commentary/tes5_import_navmesh.md#adopt-and-pins
+    """
+    from tes5_import.navmesh import from_pgrd
+    monkeypatch.setattr(navm_verify, '_job_key',
+                        lambda job, gc: '%s|%s' % (gc[1], job['pins']))
+    monkeypatch.setattr(from_pgrd, 'cell_pins',
+                        lambda rec, cell, gc: ({}, rec['pins']))
+    stored = {1: 'T0|', 2: 'T0|p1', 3: 'T0|'}
+    pins = {1: '', 2: 'p1', 3: 'p2'}
+    jobs = []
+    for n, was in stored.items():
+        with open(tmp_path / ('%08X_%08X.pkl' % (n, n)), 'wb') as fh:
+            pickle.dump({'hash': was}, fh)
+        jobs.append({'key': (n, n), 'pins': pins[n], 'cell_rec': {},
+                     'pgrd_rec': {'pins': pins[n]}})
+    navm_verify.rekey_cache(jobs, (str(tmp_path), 'T1'), 'T0')
+    got = {n: pickle.load(open(tmp_path / ('%08X_%08X.pkl' % (n, n)), 'rb'))['hash']
+           for n in stored}
+    assert got == {1: 'T1|', 2: 'T1|p1', 3: 'T0|'}
 
 
 def test_environment_records_what_the_tag_cannot_see():
