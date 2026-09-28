@@ -889,3 +889,26 @@ Morrowind `AIEscort` — and falls back to vanilla `Escort` only when no root is
 installed (a master built before this change). Adding the root moved no
 FormID (1,187,406 records before, the same plus one after). Test:
 `tests/test_escort_when_near.py`.
+
+## Every placed copy gets its quest package
+<a id="every-placed-copy-gets-its-quest-package"></a>
+
+Oblivion runs a base actor's AI packages on every copy placed from it. A
+quest-gated package reaches a Skyrim actor only through a quest alias, and an
+alias fills one reference, so `PackagePlan._build_base_to_refs`
+(`packages/aliases.py`) maps each base to **all** its placements and each one
+gets its own alias carrying the package. It used to keep only the first
+placement, so the other copies never ran the package.
+
+Nehrim's mine-exit trolls are the visible case: `MQ00TrollTravel`, the march
+into the fire at MQ00 stage 35, is authored on the shared base
+`MQ00troll01Ausgang` placed twelve times, and only `MQ00TrollA01` got it
+(MQ00 went from 13 to 24 aliases). The same fix reached 15 Nehrim quests (the
+largest, the tower-defense wave quest NQ15W02, gained 177 aliases) and 20
+Oblivion quests (DASheogorath's sheep, SE08Xed's knights, Charactergen's
+ambush assassins). Confirmed in game on the Nehrim exit and Charactergen.
+
+A script's `AddScriptPackage` on a BASE still goes to its first placement.
+Quests that gained aliases renumber existing ones, so a save made midway
+through one may hold a stale alias fill. Test:
+`tests/test_packages.py::test_every_placed_copy_gets_its_quest_package`.
