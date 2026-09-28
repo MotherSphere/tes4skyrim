@@ -81,6 +81,25 @@ def test_a_moved_generator_is_refilled_around_the_frozen_triangles():
     assert _max_edge_owners(tris) == 2
 
 
+def test_a_frozen_edge_the_new_floor_edge_crosses_is_split_and_joined():
+    """Where the generator's floor ends part-way along a frozen edge, the patch still links.
+
+    The refill leaves a vertex at (10, 5) on the frozen edge x=10; stitching
+    splits that edge there, so the stretch with floor beside it is shared and
+    the frozen surface is unchanged.
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    band = [(0.0, 5.0, 0.0), (20.0, 5.0, 0.0), (20.0, 15.0, 0.0), (0.0, 15.0, 0.0)]
+    verts, tris, _l = apply_frozen(band, [(0, 1, 2), (0, 2, 3)], [],
+                                   FLIPPED, REPLACED)
+    edges = Counter(frozenset((verts[t[k]], verts[t[(k + 1) % 3]]))
+                    for t in tris for k in range(3))
+    assert edges[frozenset(((10.0, 5.0, 0.0), (10.0, 10.0, 0.0)))] == 2
+    assert edges[frozenset(((0.0, 10.0, 0.0), (10.0, 10.0, 0.0)))] == 2
+    assert abs(_area(verts, tris) - 250.0) < 1e-6
+    assert _max_edge_owners(tris) == 2
+
+
 def test_a_patch_never_removes_another_storey():
     """A deck 200u above the patch keeps every triangle."""
     deck = [(x, y, 200.0) for (x, y, _z) in GRID]

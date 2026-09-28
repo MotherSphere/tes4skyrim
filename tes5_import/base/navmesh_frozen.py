@@ -20,7 +20,7 @@ from shapely.ops import unary_union
 from tes5_import.navmesh.corridor import ccw_in_plan
 
 #: Bump when `apply_frozen` builds differently, so every patched cell re-caches.
-FROZEN_VERSION = 1
+FROZEN_VERSION = 2
 
 #: Plan area (u^2) below which an overlap or a refill piece is float noise.
 AREA_EPS = 1.0
@@ -60,6 +60,25 @@ def _footprint(p):
 def _region(tris_pts):
     """`[(points, footprint)]` for every non-degenerate patch triangle."""
     return [(p, _footprint(p)) for p in tris_pts if plan_area(p) > AREA_EPS]
+
+
+def covered_by(tris_pts):
+    """`f((x, y, z)) -> bool`: does the point lie inside one of `tris_pts`, on its plane?
+
+    A frozen triangle may be split along an edge when it is stitched, so this
+    is how its pieces are recognised -- a piece's centroid lies inside it.
+    """
+    region = _region(list(tris_pts))
+    tree = STRtree([foot for _pts, foot in region]) if region else None
+
+    def inside(p):
+        """True when `p` is on a frozen triangle's surface (within 1u)."""
+        at = Point(p[0], p[1])
+        return tree is not None and any(
+            region[int(j)][1].covers(at)
+            and abs(plane_z(region[int(j)][0], p[0], p[1]) - p[2]) <= FROZEN_Z_TOL
+            for j in tree.query(at))
+    return inside
 
 
 def _owners(corners, region, tree):
@@ -253,6 +272,72 @@ def _claims(pool, tris, frozen, voids):
     return out
 
 
+def _edge_counts(tris):
+    """`{frozenset(a, b): owners}` over every triangle edge."""
+    out = {}
+    for t in tris:
+        for k in range(3):
+            e = frozenset((t[k], t[(k + 1) % 3]))
+            out[e] = out.get(e, 0) + 1
+    return out
+
+
+def _hanging(verts, a, b, movable):
+    """`[(s, v, (x, y, z))]` movable vertices within SNAP_TOL of edge ab, ordered along it.
+
+    The position given is the point ON the edge, at the edge's own height.
+    """
+    pa, pb = verts[a], verts[b]
+    dx, dy, dz = pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]
+    span2 = dx * dx + dy * dy
+    hits = []
+    for v in (movable if span2 > 1e-9 else ()):
+        p = verts[v]
+        s = ((p[0] - pa[0]) * dx + (p[1] - pa[1]) * dy) / span2
+        q = (pa[0] + s * dx, pa[1] + s * dy, pa[2] + s * dz)
+        if (1e-6 < s < 1 - 1e-6 and abs(p[2] - q[2]) <= STOREY_BAND
+                and (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 <= SNAP_TOL ** 2):
+            hits.append((s, v, q))
+    return sorted(hits)
+
+
+def _split_open_edge(verts, t, counts, movable):
+    """Frozen triangle `t` fanned at the refill vertices on one of its open edges, else `[t]`."""
+    for k in range(3):
+        a, b, opp = t[k], t[(k + 1) % 3], t[(k + 2) % 3]
+        if counts.get(frozenset((a, b))) != 1:
+            continue
+        hits = _hanging(verts, a, b, movable)
+        if hits:
+            for _s, v, q in hits:
+                verts[v] = q
+            seq = [a] + [v for _s, v, _q in hits] + [b]
+            return [(seq[m], seq[m + 1], opp) for m in range(len(seq) - 1)]
+    return [t]
+
+
+def _stitch(verts, frozen_t, kept_t, refill_t):
+    """Frozen triangles with each open edge split where a refill vertex lies on it.
+
+    The refill cuts the patch out of the removed floor, so where the new
+    generator's floor edge crosses a frozen edge it leaves a vertex part-way
+    along it -- a T-junction the engine will not link across.  Only vertices
+    the refill alone uses are moved, onto the edge at its own height, so
+    neither the frozen surface nor any kept generated triangle moves.
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    used = {v for t in kept_t + frozen_t for v in t}
+    movable = sorted({v for t in refill_t for v in t} - used)
+    for _round in range(3):
+        counts = _edge_counts(kept_t + frozen_t + refill_t)
+        out = [p for t in frozen_t
+               for p in _split_open_edge(verts, t, counts, movable)]
+        if len(out) == len(frozen_t):
+            return out
+        frozen_t = out
+    return frozen_t
+
+
 def apply_frozen(verts, tris, ledges, frozen, voids):
     """(verts, tris, ledges) with each frozen patch put back verbatim.
 
@@ -269,10 +354,10 @@ def apply_frozen(verts, tris, ledges, frozen, voids):
         refill += _refill(sheet, [f for i in group for f in claimed[i]])
     keep = {i: n for n, i in enumerate(
         i for i in range(len(tris)) if i not in claimed)}
-    placed = _place(frozen, pool.frozen_corner)
-    placed += _place(refill, pool.refill_corner)
-    out = ([tuple(int(k) for k in tris[i][:3]) for i in keep]
-           + ccw_in_plan(pool.verts, placed))
+    kept_t = [tuple(int(k) for k in tris[i][:3]) for i in keep]
+    frozen_t = ccw_in_plan(pool.verts, _place(frozen, pool.frozen_corner))
+    refill_t = ccw_in_plan(pool.verts, _place(refill, pool.refill_corner))
+    out = kept_t + _stitch(pool.verts, frozen_t, kept_t, refill_t) + refill_t
     ledges = [(keep[u], keep[l]) + tuple(rest) for (u, l, *rest) in ledges or ()
               if u in keep and l in keep]
     new_verts, new_tris = drop_unused_verts(pool.verts, out)

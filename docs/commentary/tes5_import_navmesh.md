@@ -4573,10 +4573,25 @@ frozen edge; the T-junction split then broke the frozen triangles apart
 Patch corners snap onto the generated vertex they already are (0.5u in plan,
 1u in height), so an unchanged generator reproduces the edit exactly. Measured
 on SchattenrufMinePart05: 1,092 triangles, none extra or missing against the
-saved result, and the same edge counts (1,324 shared, 628 open). Over the
-lattice generator's unrelated 3,342-triangle mesh, all 50 frozen triangles
-survive and no edge has more than two owners; the seam adds 15 open edges to
-the lattice's own 1,888.
+saved result, and the same edge counts (1,324 shared, 628 open).
+
+**Where the new floor's edge crosses a frozen edge, the frozen edge is split**
+(`_stitch`). The refill cuts the patch out of the removed floor, so it leaves a
+vertex part-way along the frozen edge: a T-junction the engine will not link
+across. Only vertices the refill alone uses are moved, onto the edge at its own
+height, and the frozen triangle is fanned at them. The frozen SURFACE is
+unchanged; its tessellation gains a vertex. This is the door attach's own
+answer to the same problem (`_stitch_isolated_tri` splits a door triangle's
+side edge). On the lattice run all 11 such vertices came from the refill,
+0.9-46u off the frozen edge's height, none from a kept lattice triangle.
+
+Measured against the lattice generator's unrelated 3,342-triangle mesh: of the
+136 frozen edges that join floor in the saved result, 132 did before the stitch
+(4 T-junctions); after it, 133 join along their whole length. The other 3 join
+for 51-93% of their length, and the rest has no floor beside it in the RAW
+lattice mesh either, so there is nothing to join to. The frozen area is kept
+exactly (234,128.6 u²), in 62 pieces, all in one component with the lattice
+floor, and no edge has more than two owners.
 
 `FROZEN_VERSION` enters `digest()`, so a change to `apply_frozen` re-caches
 only patched cells. Not yet carried: door flags and ledge links authored inside
@@ -4786,3 +4801,24 @@ crack-open vertex still present, while calling `build_navmesh` directly with
 the same pins gave 143 / 170. Same code, same inputs, different answer — which
 located the difference in how the pins were fetched, not in how they were
 applied.
+
+### <a id="adopt-and-pins"></a>An adopt must not re-key a cell whose pins changed
+
+**Code:** `cache_audit.rekey_cache`, `_pins_since`.
+
+Pins are baked into the stored geometry at build time; a cache hit returns it
+without applying them again. The pin digest is part of the cell's hash, so a
+changed pin misses normally. But adoption (a navmesh source edit moved the tag,
+a sample reproduced) re-keys EVERY entry to the hash `cell_geom_key` computes
+now, pin digest included, so a cell pinned since the cache was built got
+today's pinned hash stamped onto its unpinned geometry and was never rebuilt.
+Seen on Nehrim: three freshly pinned SchattenrufMine cells adopted, not rebuilt.
+
+The re-key now proves a pinned cell's pins are unchanged: the OLD tag (read from
+`CACHE_TAG` before it is overwritten) with today's pins must reproduce the
+stored hash. If it doesn't, or there was no `CACHE_TAG`, the entry is left
+stale and the cell rebuilds. Only pinned cells pay the second hash, so the cost
+grows with the pin count, not the cache size, and unchanged pins stay adopted.
+
+Gap: a cell UNPINNED since the cache was built has an empty digest now, so it is
+treated as unpinned and keeps its pinned geometry through an adopt.

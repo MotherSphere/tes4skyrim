@@ -15,6 +15,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from tes5_import.base.navmesh_frozen import covered_by
 from tes5_import.base.navmesh_pins import (
     apply_hand_edits, cell_key, hand_edits_for, remove_patch, save as save_pins,
 )
@@ -397,9 +398,9 @@ def same_triangle_as(tris_pts):
 
 
 def frozen_indices(verts, tris, frozen):
-    """Indices of `tris` that ARE a frozen patch triangle."""
-    match = same_triangle_as(frozen)
-    return [i for i, t in enumerate(tris) if match([verts[k] for k in t])]
+    """Indices of `tris` that are a frozen patch triangle or a stitched piece of one."""
+    inside = covered_by(frozen)
+    return [i for i, t in enumerate(tris) if inside(_centroid([verts[k] for k in t]))]
 
 
 def mesh_bake(plugin, cell, job='', pinned=True, lattice=False):
