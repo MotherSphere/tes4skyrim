@@ -631,6 +631,9 @@ FORCE_GREET_QUEST = 'TES4ForceGreets'
 #: The importer's flee alias quest, which ForceFlee's Quest property names.
 FORCE_FLEE_QUEST = 'TES4ForceFlees'
 
+#: The importer's combat-approach alias quest, which StartCombat and StopCombat's Quest property names.
+COMBAT_APPROACH_QUEST = 'TES4CombatApproaches'
+
 #: The importer's fall-damage spell, which ResetFallDamageTimer's Spell property names.
 FALL_DAMAGE_SPELL = 'TES4NoFallDamage'
 

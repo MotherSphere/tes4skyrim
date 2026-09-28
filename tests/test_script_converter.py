@@ -3041,7 +3041,8 @@ class TestZeroArgRefReceiver:
     def test_stopcombat_comma_argument_is_discarded(self, converter):
         """Oblivion compiles `StopCombat, Player` as a bare StopCombat on Self."""
         out = conv_line(converter, 'StopCombat, Player', 'ObjectReference')
-        assert out == 'TES4Polyfill.EndCombat((Self as Actor), TES4ForceCombatAttackers)'
+        assert out == ('TES4Polyfill.EndCombatApproach((Self as Actor), TES4ForceCombatAttackers, '
+                       'TES4CombatApproaches)')
 
     def test_isincombat_comma_receiver_in_comparison(self, converter):
         out = conv_expr(converter, 'IsInCombat, Player == 1', 'ObjectReference')
@@ -3375,8 +3376,8 @@ class TestStartCombatIsForced:
         src = ('scn T\n\nbegin gamemode\n'
                '\tCGAssassinFinal.startcombat UrielSeptimRef\nend\n')
         out = converter.convert_standalone('T', src, 'Quest', 'T')
-        assert ('TES4Polyfill.ForceCombat(' in out
-                and 'TES4ForceCombatAttackers, TES4ForceCombatVictims)' in out)
+        assert ('TES4Polyfill.ForceCombatApproach(' in out
+                and 'TES4ForceCombatAttackers, TES4ForceCombatVictims, TES4CombatApproaches)' in out)
         assert '.StartCombat(' not in out
         # faction properties minted for VMAD binding to the import's records
         assert 'Faction Property TES4ForceCombatAttackers Auto' in out
@@ -3388,7 +3389,7 @@ class TestStartCombatIsForced:
         src = ('scn T\n\nbegin gamemode\n'
                '\tplayer.startcombat BanditRef\nend\n')
         out = converter.convert_standalone('T', src, 'Quest', 'T')
-        assert 'TES4Polyfill.ForceCombat(' not in out
+        assert 'TES4Polyfill.ForceCombatApproach(' not in out
         assert '.StartCombat(' in out
 
     def test_bare_startcombat_in_a_non_actor_script_casts_self(self, converter):
@@ -3400,10 +3401,10 @@ class TestStartCombatIsForced:
         src = ('scn T\n\nbegin gamemode\n'
                '\tStartCombat, Player\nend\n')
         out = converter.convert_standalone('T', src, 'ObjectReference', 'T')
-        assert 'TES4Polyfill.ForceCombat((Self as Actor), Game.GetPlayer()' in out
+        assert 'TES4Polyfill.ForceCombatApproach((Self as Actor), Game.GetPlayer()' in out
         # An actor script keeps the plain Self
         out = converter.convert_standalone('T', src, 'Actor', 'T')
-        assert 'TES4Polyfill.ForceCombat(Self, Game.GetPlayer()' in out
+        assert 'TES4Polyfill.ForceCombatApproach(Self, Game.GetPlayer()' in out
 
     def test_moddisposition_hostile_idiom_is_forced_too(self, converter):
         """`ModDisposition <target> -100` is the same "attack now" idiom and
@@ -3411,7 +3412,7 @@ class TestStartCombatIsForced:
         src = ('scn T\n\nbegin gamemode\n'
                '\tUngolimRef.ModDisposition player -100\nend\n')
         out = converter.convert_standalone('T', src, 'Quest', 'T')
-        assert 'TES4Polyfill.ForceCombat(' in out
+        assert 'TES4Polyfill.ForceCombatApproach(' in out
 
     def test_forcecombat_retargets_an_actor_already_fighting(self):
         """TES4 StartCombat steers an actor already in combat onto the new
@@ -3422,13 +3423,27 @@ class TestStartCombatIsForced:
         See: docs/commentary/script_convert.md#startcombat-retargets"""
         src = open('script_convert/static_scripts/TES4Polyfill.psc',
                    encoding='utf-8').read()
-        body = src[src.index('Function ForceCombat('):]
+        body = src[src.index('Function ForceCombatApproach('):]
         body = body[:body.index('EndFunction')]
         assert 'GetCombatTarget() != akTarget' in body
         assert body.index('StandDown(akAttacker)') < body.index('StartCombat(akTarget)')
         stand = src[src.index('Function StandDown('):]
         stand = stand[:stand.index('EndFunction')]
         assert stand.index('StopCombat()') < stand.index('While akActor.IsInCombat()')
+
+    def test_startcombat_pairs_after_the_native_and_stopcombat_unpairs(self):
+        """Dead actors are skipped; the pool pair is filled after StartCombat and emptied by StopCombat.
+
+        See: docs/commentary/script_convert.md#startcombat-approaches-an-undetected-target
+        """
+        src = open('script_convert/static_scripts/TES4Polyfill.psc', encoding='utf-8').read()
+        body = src[src.index('Function ForceCombatApproach('):]
+        body = body[:body.index('EndFunction')]
+        assert 'akAttacker.IsDead() || akTarget.IsDead()' in body.split('\n')[1]
+        assert body.index('StartCombat(akTarget)') < body.index('HoldCombatPair(akPool, akAttacker, akTarget)')
+        end = src[src.index('Function EndCombatApproach('):]
+        end = end[:end.index('EndFunction')]
+        assert end.index('slot.Clear()') < end.index('EndCombat(akActor, akAttackers)')
 
     def test_forcecombat_never_puts_the_player_in_the_shared_pair(self):
         """A player in TES4ForceCombatVictims makes every forced Attacker (Nehrim's
@@ -3437,7 +3452,7 @@ class TestStartCombatIsForced:
         See: docs/commentary/script_convert.md#forcecombat-player-faction"""
         src = open('script_convert/static_scripts/TES4Polyfill.psc',
                    encoding='utf-8').read()
-        body = src[src.index('Function ForceCombat('):]
+        body = src[src.index('Function ForceCombatApproach('):]
         body = body[:body.index('EndFunction')]
         assert 'GetFormFromFile(0x06E02D, "Skyrim.esm")' in body
         assert 'player.RemoveFromFaction(akVictims)' in body

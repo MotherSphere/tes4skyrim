@@ -833,16 +833,17 @@ def convert_script_var_ctda(raw: bytes, script_vars: dict, offset: int,
 
 def build_ctda(func_idx: int, param1: int = 0, param2: int = 0,
                comp_value: float = 1.0, operator: int = 0x00,
-               is_or: bool = False) -> bytes:
+               is_or: bool = False, run_on: int = 0, param3: int = -1) -> bytes:
     """Build a 32-byte TES5 CTDA. operator is the high-nibble comparison
-    (0x00 ==, 0x60 >=, etc.); is_or sets the OR flag for chaining."""
+    (0x00 ==, 0x60 >=, etc.); is_or sets the OR flag for chaining; run_on 5
+    runs it on the quest alias whose id is param3."""
     type_byte = operator | (CTDA_OR if is_or else 0)
     comp_raw = struct.unpack('<I', struct.pack('<f', comp_value))[0]
-    return struct.pack('<B3xIHHIIII I',
+    return struct.pack('<B3xIHHIIIIi',
                        type_byte, comp_raw,
                        func_idx, 0,
                        param1, param2,
-                       0, 0, 0xFFFFFFFF)
+                       run_on, 0, param3)
 
 
 def build_or_chain(func_idx: int, param1_fids: list, comp_value: float = 1.0,

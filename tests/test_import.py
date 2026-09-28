@@ -6761,6 +6761,61 @@ class TestCombatStyleConversion:
         assert default and actor_combat_style({'AIDT.Confidence': '50'}) == default
 
 
+class TestCombatApproachPool:
+    """StartCombat's pool: each attacker alias carries a combat override that pulls it
+    toward its target alias only while out of reach, then leaves the fight to Skyrim.
+
+    See: docs/commentary/script_convert.md#startcombat-approaches-an-undetected-target
+    """
+
+    @staticmethod
+    def _records() -> dict:
+        """{signature: [(FormID, [(sub, payload)])]} the generator writes."""
+        from tes5_import.actors.combat_approach import create_combat_approach
+        writer = TestCombatStyleConversion._Writer()
+        create_combat_approach(writer)
+        out = {}
+        for sig, data in writer.records:
+            size = struct.unpack_from('<I', data, 4)[0]
+            body, pos, subs = data[24:24 + size], 0, []
+            while pos < len(body):
+                ln = struct.unpack_from('<H', body, pos + 4)[0]
+                subs.append((body[pos:pos + 4], body[pos + 6:pos + 6 + ln]))
+                pos += 6 + ln
+            out.setdefault(sig, []).append((struct.unpack_from('<I', data, 12)[0], subs))
+        return out
+
+    def test_only_attacker_aliases_carry_the_override(self):
+        """64 aliases; even (attacker) ones name a package list, odd (target) ones none."""
+        from tes5_import.actors.combat_approach import PAIRS
+        (_fid, subs), = self._records()['QUST']
+        aliases, current = [], None
+        for tag, data in subs:
+            if tag == b'ALST':
+                current = []
+            elif tag == b'ALED':
+                aliases.append(current)
+            elif current is not None:
+                current.append(tag)
+        assert len(aliases) == 2 * PAIRS
+        assert all((b'ECOR' in a) == (i % 2 == 0) for i, a in enumerate(aliases))
+
+    def test_override_applies_only_out_of_reach(self):
+        """Melee: travel-512 template, GetDistance(alias 1) > 512; ranged: 1024. Weapon drawn."""
+        packs = {}
+        for _fid, subs in self._records()['PACK']:
+            edid = next(d for t, d in subs if t == b'EDID').rstrip(b'\0').decode()
+            packs[edid] = dict((t, d) for t, d in subs if t != b'CTDA'), [d for t, d in subs if t == b'CTDA']
+        for edid, template, reach in (('TES4CombatApproach0Melee', 0x0002A85F, 512.0),
+                                      ('TES4CombatApproach0Ranged', 0x0010FAAF, 1024.0)):
+            single, ctdas = packs[edid]
+            assert struct.unpack_from('<I', single[b'PKCU'], 4)[0] == template
+            assert struct.unpack_from('<I', single[b'PKDT'])[0] & 0x00800000, 'weapon drawn'
+            gate = [c for c in ctdas if struct.unpack_from('<H', c, 8)[0] == 1]
+            assert len(gate) == 1 and gate[0][0] == 0x42, 'GetDistance > , alias parameter'
+            assert struct.unpack_from('<fHHI', gate[0], 4) == (reach, 1, 0, 1)
+
+
 class TestAggressionTierTargeting:
     """Aggression is "which reaction tier do I attack", not "how nasty am I".
 

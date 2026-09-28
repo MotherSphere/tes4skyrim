@@ -270,6 +270,15 @@ HOLD_POSITION = Template(
     slots={'location': 0},
 )
 
+#: HoldPositionWithTravel<N>: Travel while farther than N from slot 3, then HoldPosition; slot 3 repeats slot 0's ref.
+_HOLD_WITH_TRAVEL = dict(xnam=13, version=7, index_list=(0, 9, 11, 12),
+                         inputs=(T_LOCATION, T_BOOL, T_BOOL, T_SINGLEREF),
+                         defaults={1: 0, 2: 1}, slots={'location': 0, 'center': 3})
+#: HoldPositionWithTravel512 (0002A85F).
+HOLD_POSITION_TRAVEL_512 = Template(formid=0x0002A85F, edid='HoldPositionWithTravel512', **_HOLD_WITH_TRAVEL)
+#: HoldPositionWithTravel1024 (0010FAAF).
+HOLD_POSITION_TRAVEL_1024 = Template(formid=0x0010FAAF, edid='HoldPositionWithTravel1024', **_HOLD_WITH_TRAVEL)
+
 # --- Activate (00019B2D) -------------------------------------------------
 # "Walk to this reference and ACTIVATE it" — pulling a lever, opening a door,
 # throwing a switch.  TES4's UseItemAt (PKDT.Type 8) with a specific target is

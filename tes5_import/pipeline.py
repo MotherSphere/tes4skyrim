@@ -47,6 +47,7 @@ from .record_types.crime import plan_crime
 from .record_types.spell_tomes import create_spell_tomes
 from .record_types.spell_tomes_morrowind import chain_tables
 from .record_types.world_falloutnv import is_fallout_export
+from .actors.combat_approach import create_combat_approach
 from .actors.combat_style import create_combat_styles
 from .actors.confidence import create_confidence_records
 from script_convert.constants import FORCE_FLEE_QUEST, FORCE_GREET_QUEST
@@ -292,6 +293,7 @@ def _prescan_special_records(by_type: dict, ctx, writer, export_dir: str, _step_
         writer, getattr(ctx, 'master_index', None), wanted=tes4_source))
     create_combat_styles(writer, by_type, getattr(ctx, 'master_export', None),
                          getattr(ctx, 'master_index', None), wanted=tes4_source)
+    WELL_KNOWN_PROPERTIES.update(create_combat_approach(writer, getattr(ctx, 'master_index', None)))
     set_whole_day_global(create_day_clock(writer, by_type, ctx))
     _step_done('vtyp/special records')
 

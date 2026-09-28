@@ -7,7 +7,7 @@ from script_convert.emit import script as _script
 from script_convert.tes4 import nodes as _tes4_nodes
 from script_convert.blocks import BLOCK_FILTER_PARAM
 from script_convert.constants import (
-    FALL_DAMAGE_SPELL, KNOWN_GLOBALS, LAST_ACTIVATOR_VAR, LOOSE_OPS, UDF_RESULT_VAR, PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS,
+    COMBAT_APPROACH_QUEST, FALL_DAMAGE_SPELL, KNOWN_GLOBALS, LAST_ACTIVATOR_VAR, LOOSE_OPS, UDF_RESULT_VAR, PAPYRUS_BOOL_FUNCTIONS, PLACED_REF_SIGS,
     PLAYER_ALIAS_EXTENDS, RETURN_TYPES, SELF_NAMES, TYPE_MAP, _REF_TYPES,
     _canonical_global, digit_stripped_formid, _record_type_to_base_papyrus,
     generated_script_stem, is_generated_script_type, safe_property_name, papyrus_script_name,
@@ -1823,13 +1823,19 @@ class ScriptConverter:
         return f'{f1}.SetAlly({f2}, true, true)' + _mirror(2)
 
     def _force_combat_call(self, ref: str, target: str) -> str:
-        """Emit TES4Polyfill.ForceCombat with the conversion-owned faction pair."""
+        """Emit TES4Polyfill.ForceCombatApproach with the factions and the pool."""
         factions = self._combat_factions('TES4ForceCombatAttackers', 'TES4ForceCombatVictims')
-        return f'TES4Polyfill.ForceCombat({ref}, {target}, {factions})'
+        return f'TES4Polyfill.ForceCombatApproach({ref}, {target}, {factions}, {self._approach_pool()})'
 
     def _end_combat_call(self, ref: str) -> str:
-        """Emit TES4Polyfill.EndCombat: StopCombat, leaving ForceCombat's attacker side."""
-        return f'TES4Polyfill.EndCombat({ref}, {self._combat_factions("TES4ForceCombatAttackers")})'
+        """Emit TES4Polyfill.EndCombatApproach: StopCombat, leaving the pair."""
+        factions = self._combat_factions('TES4ForceCombatAttackers')
+        return f'TES4Polyfill.EndCombatApproach({ref}, {factions}, {self._approach_pool()})'
+
+    def _approach_pool(self) -> str:
+        """Register the combat-approach pool Quest property; return its name."""
+        self.sc.property_refs[COMBAT_APPROACH_QUEST] = 'Quest'
+        return COMBAT_APPROACH_QUEST
 
     def _combat_factions(self, *names: str) -> str:
         """Register ForceCombat faction properties; return them as arguments.

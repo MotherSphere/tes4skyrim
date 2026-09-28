@@ -2654,6 +2654,73 @@ removes the player from both pair factions, which repairs saves made after the o
 behavior. The 4-argument signature is unchanged, so already-compiled callers from
 other plugins keep working.
 
+## StartCombat closes on its target through a combat override package (confirmed in game: Nehrim mine exit, Charactergen)
+<a id="startcombat-approaches-an-undetected-target"></a>
+
+**Code:** `TES4Polyfill.ForceCombatApproach` / `CombatPair` / `HoldCombatPair` /
+`EndCombatApproach`, `tes5_import/actors/combat_approach.py`.
+
+**Symptom:** at the Shadowshriek Mine exit the twelve 1-HP trolls hang back and
+retreat instead of charging through Merzul's fire (their script kills any troll
+within 300 units of a fire marker), and Merzul walks through the fire after
+troll A05.
+
+**Oblivion's rule** (Oblivion.exe CombatController, vtable 0xa70a14, update
+0x6245b0): a melee attacker out of reach ADVANCEs (0x61d320, re-plans every 3 s);
+a path failure puts it in MELEE_ALERT (0x622d40), standing weapon out and
+retrying every 3 s. It never hides or searches. A ranged attacker that loses its
+target enters RANGED_ALERT (0x622bd0), which keeps it inside its attack band
+(0x6142d0: optimal 1000, max 2000; `fArrowOptimalDistance`/`fArrowMaxDistance`
+are the same) and returns to ADVANCE once the target is reachable. `StartCombat`
+(0x514660) needs no detection.
+
+**Skyrim's** (1.6.1170): the combat movement tree (0x8ad390) adds Search, Hide
+and Fallback. Hide (condition 0x841ef0) fires on an "unreachable" flag or when
+the target, over `fCombatRangedDistance` (1024) away, faces the attacker within
+30° (`fCombatHideCheckViewConeDistanceMin/Max` 1024-4096); Backoff is a flat
+`fCombatBackoffChance` 0.25. No combat style field reaches either, and a game
+setting would change every actor in the game.
+
+**Fix:** the importer writes a start-game quest `TES4CombatApproaches` with 32
+attacker/target alias pairs (attacker alias 2n, target 2n+1). Each attacker
+alias carries a combat override package list (ECOR; vanilla puts 218 on quest
+aliases, e.g. CWFinale, MQ104, followers) of two instances of vanilla's
+HoldPositionWithTravel templates aimed at the target alias (PLDT type 8 /
+PTDA type 4):
+
+| | ranged (bow, staff, spell or crossbow in either hand) | melee |
+|---|---|---|
+| template | HoldPositionWithTravel1024 (0010FAAF) | HoldPositionWithTravel512 (0002A85F) |
+| applies while `GetDistance(target alias)` > | 1024 | 512 |
+| hold radius | 2000 | 512 |
+
+Both also require `GetDead(target alias) == 0`, and carry the PKDT of vanilla
+`CWFinaleEnemyHoldPositionNearPlayer` (Weapon Drawn, combat interrupt override,
+run). A converted `StartCombat` sets up the factions as before, starts combat,
+then fills a pair (`HoldCombatPair`; an empty pair, one whose actors are dead,
+else pair 0). `StopCombat` empties the attacker's pair (`EndCombatApproach`). A
+dead attacker or target is skipped, as TES4 does nothing there. The 4-argument
+`ForceCombat` stays for scripts compiled before this and never approaches.
+
+**Reverted attempts, each measured in game:**
+- A Papyrus watcher spell that walked a hiding or searching attacker to its target
+  out of combat (`PathToReference`, aggression 0): the actor's own package
+  interrupted the walk (the trolls' `MQ00TrollTravel`), the latent path blocked
+  the watcher for minutes, and Merzul marched out of combat ignoring every troll.
+- Plain HoldPosition (000503D0) has no travel step: an actor outside the radius
+  was never moved, so no troll charged.
+- HoldPositionWithTravel16 with no distance gate: the Travel step never ended
+  (two actors cannot come within 16 units), so a pooled attacker walked up and
+  never attacked. Charactergen's ambush assassin `CGAssassin04Ref` stood beside
+  Renault, and the Blades, only fighting back once hit, stood too.
+
+The distance gate is what makes it work for both: far out, the override pulls
+the attacker in; inside its travel stop, Skyrim's own combat fights. `GetDistance`
+with the CTDA "use aliases" flag (0x02) is vanilla's (230 uses, 13 in PACK);
+`GetWithinPackageLocation` was rejected because it reads a thread-local package
+context (0x336880) that only the procedure tree sets. Tests:
+`tests/test_import.py::TestCombatApproachPool`, `tests/test_script_converter.py::TestStartCombatIsForced`.
+
 ## A SetStage that starts a quest keeps its variables (2026-09-25, unconfirmed in game)
 <a id="setstage-start-keeps-variables"></a>
 
