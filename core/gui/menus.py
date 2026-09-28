@@ -36,6 +36,7 @@ from core.gui.config import (
     PACKING_STEPS,
     REPO_ROOT,
     LOD_DETAIL_CONFIG_KEY,
+    NAVMESH_GENERATOR_CONFIG_KEY,
     WINDING_AUTO,
     WINDING_CONFIG_KEY,
     WINDING_OFF,
@@ -50,6 +51,7 @@ from core.gui.menubar_behavior import (add_tipped_command, enable_hover_switch,
                                        enable_tips)
 from core.gui.morrowind import add_source_menu
 from core.gui.selection import runnable
+from core.navmesh_options import CORRIDOR, LATTICE
 from core.gui.widgets import open_url
 from core.subprocess_flags import POPEN_FLAGS
 from core.worker_budget import worker_count
@@ -140,6 +142,22 @@ def _add_winding_menu(app, settings_menu, menu_opts) -> None:
                               menu=winding_menu)
 
 
+def _add_navmesh_menu(app, settings_menu, menu_opts) -> None:
+    """Settings > Navmesh generator: Corridor / Lattice, applied on the next import.
+
+    See: docs/plans/navmesh_lattice.md#measured-against-the-corridor-generator
+    """
+    def _changed():
+        """Persist the chosen generator."""
+        save_setting(NAVMESH_GENERATOR_CONFIG_KEY, app.navmesh_gen_var.get())
+
+    gen_menu = tk.Menu(settings_menu, **menu_opts)
+    for name, label in ((CORRIDOR, "Corridor  (default)"), (LATTICE, "Lattice  (experimental)")):
+        gen_menu.add_radiobutton(label=label, value=name,
+                                 variable=app.navmesh_gen_var, command=_changed)
+    settings_menu.add_cascade(label="Navmesh generator", menu=gen_menu)
+
+
 def _add_lod_detail_menu(app, settings_menu, menu_opts) -> None:
     """Settings > Distant LOD detail: a radio group over the detail presets.
 
@@ -161,12 +179,13 @@ def _add_lod_detail_menu(app, settings_menu, menu_opts) -> None:
 
 
 def _build_settings_menu(app, menubutton, menu_opts) -> None:
-    """Settings: workers, cache download, packing, winding, LOD and Morrowind."""
+    """Settings: workers, cache download, packing, winding, navmesh, LOD and Morrowind."""
     settings_menu = menubutton("Settings")
     _add_workers_menu(app, settings_menu, menu_opts)
     _add_cache_download(app, settings_menu)
     _add_pack_default(app, settings_menu)
     _add_winding_menu(app, settings_menu, menu_opts)
+    _add_navmesh_menu(app, settings_menu, menu_opts)
     _add_lod_detail_menu(app, settings_menu, menu_opts)
     add_source_menu(settings_menu, menu_opts, app.cfg, load_config,
                     save_config, EXPORT_DIR, app.out_root)

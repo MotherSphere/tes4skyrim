@@ -313,9 +313,7 @@ comes from what actually solved 46 recent bugs
   built and any failures verbatim; if a stage can't be run, say which and why.
 - <a id="blast-radius"></a>**After the build, measure the change's blast radius
   and read it for regressions before reporting.** Count every site the change
-  touches in each plugin it ships to — Oblivion.esm at least, not only the
-  plugin the bug came from — and read each one that now behaves differently. A
-  fix that is right for the bug's script is often wrong elsewhere. Report the counts and any regression, and fix it.
+  touches in at least the file you are working on (or its master if examples are few) and read each one that now behaves differently. A fix that is right for the bug's script is often wrong elsewhere. Report the counts and any regression, and fix it.
 - 🛑 **`-f` takes the plugin's filename, never the mod or folder name:**
   `-f TR_Mainland.esm`, not `-f "Tamriel Rebuilt 25.08.12"`. A wrong name
   builds a phantom plugin whose sidecar breaks the real one in game
@@ -500,7 +498,9 @@ python tools/navmesh/navmesh_cache_hook.py --run                      # publish 
 - Never put mtime, absolute paths, or worker counts in a cache key — they're
   machine-local, so every downloader misses.
 - **The cache tag is a SHA-1 over the bytes of every `tes5_import/navmesh/*.py`**
-  (`navmesh/pool.py:navmesh_geom_cache`). Any edit there, whitespace included,
+  (`navmesh/pool.py:navmesh_geom_cache`). The experimental `lattice/` package
+  feeds only its own local `navmesh_geom_cache_lattice/` and never gates a push.
+  Any edit to a top-level navmesh file, whitespace included,
   invalidates everyone's cache — republish when you touch it.
   `NAVMESH_PATHS`/`NAVMESH_FUNCS` in `navmesh_cache_hook.py` gate the push; a
   function added directly below a gated one reads as a navmesh change (git's `-U0`

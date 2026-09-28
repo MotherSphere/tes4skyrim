@@ -81,6 +81,7 @@ from core.subprocess_flags import (POPEN_FLAGS as _POPEN_FLAGS,
 from core.process_job import create_pool_job, describe_limit
 from core.heavy_lock import SUPERVISED_ENV_VAR, hold_heavy_lock
 from core.collision_options import WINDING_FIX_ENV_VAR, default_for_plugin
+from core.navmesh_options import set_navmesh_generator
 
 # multiprocessing.Pool workers (nif/lod conversion) must also inherit a hidden
 # console — configure before any pool is created.
@@ -1017,6 +1018,7 @@ def phase_pack_zip(file_name: str, config: dict, output_dir: str = None):
 def _run_pipeline():
     """Parse the command line, then run each selected step over every plugin."""
     args = build_parser().parse_args()
+    set_navmesh_generator(args.navmesh_generator)
     config = load_config(args.config)
     apply_config_overrides(args, config)
     tes4_data, tes5_data = get_paths(config)

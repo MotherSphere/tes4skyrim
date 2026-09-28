@@ -19,6 +19,7 @@ import time
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 
+from core.navmesh_options import CORRIDOR, navmesh_generator
 from core.worker_budget import worker_count
 from . import cache_audit as navm_verify, worker as navm_worker
 from .world import base_fid
@@ -189,6 +190,11 @@ def build_door_fid_set(by_type: dict, master_export: dict = None) -> dict:
         model = rec.get('Model.MODL') or rec.get('MODL')
         out[fid] = model_key(model) if model else None
     return out
+
+
+def build_activator_fid_set(by_type: dict, master_export: dict = None) -> frozenset:
+    """ACTI base FormIDs (index byte included), masters' too: moving parts."""
+    return frozenset(fid for fid, _rec in _records_of(by_type, master_export, ('ACTI',)))
 
 
 def build_teleport_grid(by_type: dict, master_export: dict = None):
@@ -591,24 +597,36 @@ def collision_cache_chain(export_dir: str) -> tuple:
     return asset_cache_chain(export_dir, 'collision_cache.bin')
 
 
+def tag_sources() -> list:
+    """The Python sources the current generator's tag hashes.
+
+    The corridor's (the published cache, gated on push) are the top-level
+    navmesh modules only; the lattice adds its own package, which never
+    moves the corridor's tag.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    srcs = glob.glob(os.path.join(here, '*.py'))
+    if navmesh_generator() != CORRIDOR:
+        srcs += glob.glob(os.path.join(here, 'lattice', '*.py'))
+    return sorted(s for s in srcs if os.path.basename(s) not in _TAG_EXCLUDE)
+
+
 def navmesh_geom_cache(collision_cache: str):
     """(cache_dir, tag) for the on-disk navmesh geometry cache, or None.
 
-    The tag hashes the navmesh generator SOURCES, so editing any navmesh code
-    (params and the native march included) invalidates every entry
-    automatically.  Collision enters per-cell via `from_pgrd._geom_hash`, never
-    here.  Newlines are normalized to LF so the tag is a property of the
-    CONTENT, not of the checkout's line-ending mode.
+    The tag hashes `tag_sources` and the native march, so editing navmesh
+    code misses every entry.  Each generator has its own folder (the
+    corridor's is the published one), so switching never overwrites the
+    other's entries.  Collision enters per-cell via `from_pgrd._geom_hash`.
+    Sources are hashed with LF newlines.
 
     See: docs/commentary/tes5_import_navmesh.md#pool-orchestration
     """
     if not collision_cache or not os.path.exists(collision_cache):
         return None
-    h = hashlib.sha1()
-    here = os.path.dirname(os.path.abspath(__file__))
-    srcs = sorted(s for s in glob.glob(os.path.join(here, '*.py'))
-                  if os.path.basename(s) not in _TAG_EXCLUDE)
-    for src in srcs:
+    lattice = navmesh_generator() != CORRIDOR
+    h = hashlib.sha1(b'lattice' if lattice else b'')
+    for src in tag_sources():
         try:
             with open(src, 'rb') as fh:
                 h.update(fh.read().replace(b'\r\n', b'\n'))
@@ -616,8 +634,8 @@ def navmesh_geom_cache(collision_cache: str):
             return None
     for body in _native_tag_sources():
         h.update(body)
-    cache_dir = os.path.join(os.path.dirname(collision_cache),
-                             'navmesh_geom_cache')
+    folder = 'navmesh_geom_cache' + ('_lattice' if lattice else '')
+    cache_dir = os.path.join(os.path.dirname(collision_cache), folder)
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir, h.hexdigest()
 
@@ -752,7 +770,8 @@ def _adopt_master_navm_fids(jobs: list, master_index) -> int:
 
 def precompute_navmeshes(by_type: dict, writer, base_model_by_fid: dict,
                          door_fids: set, collision_cache: str = '',
-                         master_index=None, master_export: dict = None) -> dict:
+                         master_index=None, master_export: dict = None,
+                         activator_fids: frozenset = frozenset()) -> dict:
     """Run every PGRD->NAVM conversion in parallel; return {key: (bytes, meta)}.
 
     FormIDs are pre-allocated serially in builder-visit order, so results are
@@ -785,15 +804,15 @@ def precompute_navmeshes(by_type: dict, writer, base_model_by_fid: dict,
     geom_cache = navmesh_geom_cache(own_cache)
     door_centers = navm_verify.door_centers_cache_path(collision_cache)
     initargs = (base_model_by_fid, door_fids, collision_cache, formid_offset,
-                geom_cache, get_injected_formids(), True, door_centers)
+                geom_cache, get_injected_formids(), True, door_centers, activator_fids)
     navm_verify.init_context(base_model_by_fid, door_fids, collision_cache,
                              formid_offset, geom_cache,
                              get_injected_formids(), door_centers)
     navm_verify.prepare(jobs, geom_cache,
                         pooled_prover(initargs, n_workers))
 
-    print(f"  Generating {len(jobs)} navmeshes (PGRD->NAVM) "
-          f"across {n_workers} processes...")
+    print(f"  Generating {len(jobs)} navmeshes (PGRD->NAVM, {navmesh_generator()} "
+          f"generator) across {n_workers} processes...")
     t0 = time.time()
     if len(jobs) == 1 or n_workers == 1:
         cache = _run_inline(jobs)

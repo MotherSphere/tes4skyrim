@@ -98,6 +98,9 @@
       <label class="chk meshOnly"
              title="Rebuild honoring navmesh_pins/ — uncheck for the RAW generator">
         <input type="checkbox" id="cPin" checked>pinned edits</label>
+      <label class="chk meshOnly"
+             title="Build with the experimental lattice generator instead of the corridor one (the pipeline default)">
+        <input type="checkbox" id="cLat">lattice generator</label>
       <label class="chk corpusOnly"><input type="checkbox" id="cNav" checked>authored</label>
       <label class="chk corpusOnly"><input type="checkbox" id="cGen">ours</label>
     </div>
@@ -840,7 +843,7 @@ async function loadMesh(plugin, cell, keepCamera) {
   try {
     d = await (await fetch('/mesh?plugin=' + encodeURIComponent(plugin) +
                            '&cell=' + encodeURIComponent(cell) +
-                           '&pinned=' + ($('cPin').checked ? '1' : '0') +
+                           '&pinned=' + ($('cPin').checked ? '1' : '0') + latQ() +
                            '&job=' + encodeURIComponent(job))).json();
   } finally { stopPoll(); }
   if (d.error) { showError(d.error); return; }
@@ -886,7 +889,7 @@ async function loadSeams(plugin, cell) {
   let d;
   try {
     d = await (await fetch('/seams?plugin=' + encodeURIComponent(plugin) +
-                           '&cell=' + encodeURIComponent(cell) +
+                           '&cell=' + encodeURIComponent(cell) + latQ() +
                            '&job=' + encodeURIComponent(job))).json();
   } catch (e) { return; }
   if (!M || M.cell !== cell || d.error) { status(); return; }
@@ -982,7 +985,7 @@ async function meshSave(mode) {
   $('busy').textContent = 'saving mesh …';
   try {
     const r = await fetch('/mesh_save?plugin=' + encodeURIComponent(M.plugin) +
-                          '&cell=' + encodeURIComponent(M.cell), {
+                          '&cell=' + encodeURIComponent(M.cell) + latQ(), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ops: mOps, mode: mode })
     });
@@ -1009,7 +1012,7 @@ async function meshToEsm() {
   let d;
   try {
     d = await (await fetch('/esm_patch?plugin=' + encodeURIComponent(M.plugin) +
-                           '&cell=' + encodeURIComponent(M.cell) +
+                           '&cell=' + encodeURIComponent(M.cell) + latQ() +
                            '&job=' + encodeURIComponent(job), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ops: mOps })
@@ -1033,7 +1036,7 @@ async function meshPin() {
   let d;
   try {
     d = await (await fetch('/pin_save?plugin=' + encodeURIComponent(M.plugin) +
-                           '&cell=' + encodeURIComponent(M.cell) +
+                           '&cell=' + encodeURIComponent(M.cell) + latQ() +
                            '&job=' + encodeURIComponent(job), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ops: mOps })
@@ -1399,6 +1402,7 @@ function meshStatus() {
     (mOps.length ? `<b>${mOps.length} ops</b>` : 'no edits') +
     (M.stale ? ' · <span class="warn">saved correction is STALE</span>' : '') +
     pinTxt() +
+    (viewing ? '' : M.lattice ? ' · <b>LATTICE generator</b>' : ' · <b>CORRIDOR generator</b>') +
     (viewing ? ' · <span class="warn">viewing SAVED result</span>' : '');
   $('save').disabled = mOps.length === 0 || viewing;
   $('saveNew').disabled = mOps.length === 0 || viewing;
@@ -1655,6 +1659,10 @@ $('cPin').onchange = () => {
   $('meshSrc').value = 'live';
   if (mode === 'tri' && M) loadMesh(M.plugin, M.cell, true);
 };
+/* The generator A/B re-bakes the same spot, like the pins toggle; every
+   later save, pin or To ESM acts on the generator on screen. */
+$('cLat').onchange = $('cPin').onchange;
+function latQ() { return '&lattice=' + ($('cLat').checked ? '1' : '0'); }
 $('cell').onchange = e => { if (e.target.value) loadCell(e.target.value, false); };
 for (const id of ['cWall', 'cFloor', 'cNav', 'cGen', 'cPath', 'cTri', 'cSeam',
                   'cNbr'])

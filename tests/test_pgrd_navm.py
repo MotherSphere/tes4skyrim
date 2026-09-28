@@ -65,6 +65,18 @@ def test_vhgt_offset_is_scaled_like_the_deltas():
     assert grid.max() == pytest.approx(offset * 8.0)
 
 
+def test_wall_face_rotated_flat_becomes_floor():
+    """A cached wall face that the placement lays flat is walkable (Nehrim cave rocks)."""
+    import math
+    from tes5_import.navmesh.world import gather_cell_geometry
+    wall = [0, 0, 0, 100, 0, 0, 0, 0, 100]
+    refr = {'NAME': '00000ABC', 'PosX': '0', 'PosY': '0', 'PosZ': '0',
+            'RotX': str(math.pi / 2), 'RotY': '0', 'RotZ': '0'}
+    walk, block = gather_cell_geometry([refr], {0xABC: 'rock'},
+                                       lambda _k: {'w': [], 'b': wall})
+    assert len(walk) == 1 and len(block) == 0
+
+
 def test_vhgt_constant_slope_accumulates_linearly():
     from tes5_import.navmesh.world import decode_vhgt
     deltas = bytes([1]) * (33 * 33)          # +1 per step on both axes

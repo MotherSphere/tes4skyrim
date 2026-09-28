@@ -17,6 +17,7 @@ an empty world and emit no navmesh at all.
 """
 
 from .from_pgrd import cached_geometry, convert_PGRD, geom_equal
+from .lattice.build import set_activators
 
 # Per-worker read-only carving context, populated by _init in each child.
 _BASE_MODEL_BY_FID: dict = {}
@@ -27,7 +28,7 @@ _GEOM_CACHE: tuple = None
 def init_worker(base_model_by_fid: dict, door_fids: set, collision_cache: str,
                 formid_offset: int = 0, geom_cache: tuple = None,
                 injected_formids: dict = None, disable_gc: bool = True,
-                door_centers_cache: str = None):
+                door_centers_cache: str = None, activator_fids: frozenset = None):
     """ProcessPool initializer: stash context; load the collision cache.
 
     Runs once per worker process.  A spawned child inherits no module-global
@@ -53,6 +54,8 @@ def init_worker(base_model_by_fid: dict, door_fids: set, collision_cache: str,
     if door_centers_cache:
         from .from_pgrd import load_door_centroids
         load_door_centroids(door_centers_cache, quiet=True)
+    if activator_fids is not None:
+        set_activators(activator_fids)
 
     # Generational GC is pure overhead in this worker and costs ~2x wall-clock.
     #

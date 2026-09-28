@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from output_layout import plugin_esm
 from tes5_import.base.tes5_reader import walk
 from tes5_import.navmesh.edge_links import DOOR_TRI_SIZE, NavMeshView
+from tes5_import.navmesh.from_pgrd import compute_adjacency, pack_nvnm
 from tes5_import.navmesh.lookup_grid import build_navmesh_grid
 from tools.navmesh.authored import cell_editor_ids
 from tools.navmesh.index import NavIndex
@@ -366,7 +367,11 @@ def samples(nav, ti):
 
 
 def open_floor_past(solid, a, b, inward):
-    """The largest SHORT_PROBES distance past edge a-b that is open, walkable floor, else 0."""
+    """The largest SHORT_PROBES distance past edge a-b that is open, walkable floor, else 0.
+
+    Open means no wall on the way and no collision overhead within HEADROOM,
+    so floor running on under a bed or a table does not count.
+    """
     mid = (a + b) / 2.0
     d = np.array([b[1] - a[1], a[0] - b[0], 0.0])
     d /= max(np.linalg.norm(d), 1e-9)
@@ -378,7 +383,8 @@ def open_floor_past(solid, a, b, inward):
     for dist in SHORT_PROBES:
         p = mid + d * dist
         floor = floor_at(solid, p[0], p[1], mid[2])
-        if dist < reach and floor is not None and floor >= FLOOR_NZ:
+        clear = solid.cast((p[0], p[1], mid[2] + STEP_UP), UP, HEADROOM - STEP_UP)[0] is None
+        if dist < reach and floor is not None and floor >= FLOOR_NZ and clear:
             best = dist
     return best
 
@@ -491,6 +497,17 @@ def check_cell(name, navs, ctx):
 # Driver
 # ---------------------------------------------------------------------------
 
+def built_nav(ctx, lattice):
+    """`[Nav]` for a cell generated now, packed by the importer's own NVNM writer."""
+    ledges = []
+    verts, tris = ctx.build(ledges_out=ledges, lattice=lattice)
+    if not tris:
+        return []
+    blob = pack_nvnm(verts, tris, compute_adjacency(tris), [0] * len(tris),
+                     0, int(ctx.fid, 16), 0, 0, False, ledges=ledges)
+    return [Nav(0, blob)]
+
+
 def load_navs(esm, names):
     """`{EditorID: [Nav]}` for the named cells of a built ESM."""
     want = {n.lower(): n for n in names}
@@ -524,6 +541,8 @@ def main():
     ap.add_argument('--export', help='export dir (default export/<plugin>)')
     ap.add_argument('--prefix', help='every cell whose EditorID starts with this')
     ap.add_argument('--dump', help='write every finding with coordinates here')
+    ap.add_argument('--build', choices=('corridor', 'lattice'),
+                    help='check a mesh this generator makes now, not the built ESM')
     a = ap.parse_args()
     export = a.export or os.path.join('export', a.plugin)
     esm = str(plugin_esm('output', a.plugin, export))
@@ -533,7 +552,12 @@ def main():
                         if e.lower().startswith(a.prefix.lower()))
     idx = NavIndex(export)
     rows = []
-    for name, navs in load_navs(esm, names).items():
+    if a.build:
+        cells = {n: built_nav(idx.cell(n), a.build == 'lattice') if idx.cell(n) else []
+                 for n in names}
+    else:
+        cells = load_navs(esm, names)
+    for name, navs in cells.items():
         ctx = idx.cell(name)
         if not navs or ctx is None:
             print('%s: %s' % (name, 'no navmesh in %s' % esm if ctx else 'not in export'))

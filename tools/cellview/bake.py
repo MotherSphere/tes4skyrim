@@ -243,7 +243,14 @@ def cell_grid(src):
     return _grid(src.rec)
 
 
-def neighbour_builder(plugin, wfid, tick=None):
+def generate(src, lattice, ledges=None, pins=None, welds=None):
+    """This cell's `(verts, tris)` from the chosen generator; empty with no pathgrid."""
+    if not src.has_pathgrid:
+        return [], []
+    return src.build(ledges_out=ledges, pins=pins, welds=welds, lattice=lattice)
+
+
+def neighbour_builder(plugin, wfid, tick=None, lattice=False):
     """`f(gx, gy) -> (verts, tris) | None` for seam matching.
 
     Each neighbour costs a full navmesh generation, so results are cached for
@@ -253,11 +260,11 @@ def neighbour_builder(plugin, wfid, tick=None):
 
     def build(gx, gy):
         """That neighbour's geometry, generated on first request."""
-        key = ('nb', plugin, wfid, gx, gy)
+        key = ('nb', plugin, wfid, gx, gy, lattice)
         if key not in CACHE:
             rec = grid_of(plugin, wfid).get((gx, gy))
             ctx = index_of(plugin).cell(rec['FormID']) if rec else None
-            CACHE[key] = (ctx.build() if ctx is not None and ctx.has_pathgrid
+            CACHE[key] = (generate(ctx, lattice) if ctx is not None and ctx.has_pathgrid
                           else None)
         state['n'] += 1
         if tick is not None:
@@ -266,14 +273,14 @@ def neighbour_builder(plugin, wfid, tick=None):
     return build
 
 
-def seams_for(plugin, cell, job=''):
+def seams_for(plugin, cell, job='', lattice=False):
     """The seam report for one exterior cell, built on demand.
 
     Separate from `mesh_bake` because each of the four neighbours costs a full
     navmesh generation: measured, 44s for the cell alone against 178s with its
     seams.  The cell draws first; the seams arrive after.
     """
-    ck = ('seams', plugin, cell)
+    ck = ('seams', plugin, cell, lattice)
     if ck in CACHE:
         return CACHE[ck]
     src, why = resolve_cell(plugin, cell)
@@ -283,7 +290,7 @@ def seams_for(plugin, cell, job=''):
     wfid = (src.rec.get('ParentWRLD') or '').upper()
     if grid is None or not wfid or not src.has_pathgrid:
         return {'grid': list(grid) if grid else None, 'seams': []}
-    verts, tris = src.build()
+    verts, tris = generate(src, lattice)
     total = len(seams.NEIGHBOURS)
 
     def tick(done):
@@ -291,13 +298,13 @@ def seams_for(plugin, cell, job=''):
         progress.step(job, 0, float(done) / total)
 
     out = seams.seam_report(verts, tris, grid,
-                            neighbour_builder(plugin, wfid, tick))
-    out['neighbours'] = neighbour_meshes(plugin, wfid, grid)
+                            neighbour_builder(plugin, wfid, tick, lattice))
+    out['neighbours'] = neighbour_meshes(plugin, wfid, grid, lattice)
     CACHE[ck] = out
     return out
 
 
-def neighbour_meshes(plugin, wfid, grid):
+def neighbour_meshes(plugin, wfid, grid, lattice=False):
     """Flat triangles of each adjacent cell's mesh, for context.
 
     They are generated for seam matching anyway, so drawing them costs only
@@ -306,7 +313,7 @@ def neighbour_meshes(plugin, wfid, grid):
     """
     out = []
     for (side, dx, dy, _axis) in seams.NEIGHBOURS:
-        got = CACHE.get(('nb', plugin, wfid, grid[0] + dx, grid[1] + dy))
+        got = CACHE.get(('nb', plugin, wfid, grid[0] + dx, grid[1] + dy, lattice))
         if not got:
             continue
         nverts, ntris = got
@@ -329,20 +336,21 @@ def cell_corrections(plugin, src, cell):
     return pins_for(plugin, key), welds_for(plugin, key), key
 
 
-def mesh_bake(plugin, cell, job='', pinned=True):
+def mesh_bake(plugin, cell, job='', pinned=True, lattice=False):
     """Our mesh, its collision and any saved correction, in the CELL's frame.
 
     Refuses a plugin whose collision cache is missing: the cell would open
     with a pathgrid and no walls at all, which reads as a generation bug.
     `pinned` false rebuilds WITHOUT the committed corrections, which is how
-    the page shows what they actually changed.
+    the page shows what they actually changed.  `lattice` builds with the
+    prototype lattice generator.
 
     See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
     """
     why = plugins.preconditions(plugin)
     if why:
         return {'error': why}
-    ck = ('mesh', plugin, cell, bool(pinned))
+    ck = ('mesh', plugin, cell, bool(pinned), bool(lattice))
     if ck in CACHE:
         return CACHE[ck]
     progress.step(job, 0)
@@ -354,10 +362,8 @@ def mesh_bake(plugin, cell, job='', pinned=True):
     progress.step(job, 2)
     ledges = []
     pins, welds, pin_key = cell_corrections(plugin, src, cell)
-    verts, tris = (src.build(ledges_out=ledges,
-                             pins=pins if pinned else None,
-                             welds=welds if pinned else None)
-                   if src.has_pathgrid else ([], []))
+    verts, tris = generate(src, lattice, ledges, pins if pinned else None,
+                           welds if pinned else None)
     walk, block = src.collision()
     progress.step(job, 3)
     fix = load_fix(plugin, cell)
@@ -381,6 +387,7 @@ def mesh_bake(plugin, cell, job='', pinned=True):
         'saved': (fix or {}).get('result'),
         'grid': cell_grid(src),
         'pinned': bool(pinned),
+        'lattice': bool(lattice),
         'pin_key': pin_key,
         'pin_tris': len(pins) // 3,
         'pin_welds': len(welds),
@@ -389,7 +396,7 @@ def mesh_bake(plugin, cell, job='', pinned=True):
     return out
 
 
-def mesh_save(plugin, cell, payload):
+def mesh_save(plugin, cell, payload, lattice=False):
     """Commit a correction's ops, re-baking `result` from the live mesh.
 
     `mode` "new" writes a numbered sibling rather than replacing the existing
@@ -399,8 +406,7 @@ def mesh_save(plugin, cell, payload):
     if src is None:
         return {'error': why}
     ledges = []
-    verts, tris = (src.build(ledges_out=ledges) if src.has_pathgrid
-                   else ([], []))
+    verts, tris = generate(src, lattice, ledges)
     ops = payload.get('ops') or []
     target = (free_cell_name(plugin, cell)
               if payload.get('mode') == 'new' else cell)
@@ -408,13 +414,19 @@ def mesh_save(plugin, cell, payload):
                        our_doors(src, verts, tris),
                        [(int(a), int(b)) for (a, b, _d) in ledges])
     path = save_fix(plugin, target, entry)
-    for variant in (True, False):
-        CACHE.pop(('mesh', plugin, cell, variant), None)
+    _forget(plugin, cell)
     return {'saved': path, 'ops': len(ops), 'cell': target,
             'tris': len(entry['result']['tris'])}
 
 
-def mesh_to_esm(plugin, cell, payload):
+def _forget(plugin, cell):
+    """Drop every cached bake of this cell, pinned or not, from either generator."""
+    for pinned in (True, False):
+        for lattice in (True, False):
+            CACHE.pop(('mesh', plugin, cell, pinned, lattice), None)
+
+
+def mesh_to_esm(plugin, cell, payload, lattice=False):
     """Apply the page's ops to the live mesh and patch it into the built ESM.
 
     Replays against a FRESH build rather than the saved correction's result, so
@@ -428,8 +440,7 @@ def mesh_to_esm(plugin, cell, payload):
     if src is None:
         return {'error': why}
     ledges = []
-    verts, tris = (src.build(ledges_out=ledges) if src.has_pathgrid
-                   else ([], []))
+    verts, tris = generate(src, lattice, ledges)
     if not tris:
         return {'error': '%s has no generated navmesh to patch' % cell}
     rv, rt, rd, rl = replay(verts, tris, payload.get('ops') or [],
@@ -496,7 +507,7 @@ def weld_pairs(verts, ops):
     return out
 
 
-def mesh_pin(plugin, cell, payload):
+def mesh_pin(plugin, cell, payload, lattice=False):
     """Pin the edited triangles of this cell to the committable pin file.
 
     See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
@@ -505,8 +516,7 @@ def mesh_pin(plugin, cell, payload):
     if src is None:
         return {'error': why}
     ledges = []
-    verts, tris = (src.build(ledges_out=ledges) if src.has_pathgrid
-                   else ([], []))
+    verts, tris = generate(src, lattice, ledges)
     if not tris:
         return {'error': '%s has no generated navmesh to pin' % cell}
     ops = payload.get('ops') or []
@@ -520,7 +530,6 @@ def mesh_pin(plugin, cell, payload):
     if not key:
         return {'error': 'cannot name %s for the pin file' % cell}
     path, n, nw = save_pins(plugin, key, pts, welds)
-    for variant in (True, False):
-        CACHE.pop(('mesh', plugin, cell, variant), None)
+    _forget(plugin, cell)
     return {'pinned': path, 'key': key, 'points': n, 'welds': nw,
             'tris': n // 3, 'ops': len(ops)}

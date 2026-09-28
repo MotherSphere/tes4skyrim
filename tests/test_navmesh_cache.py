@@ -74,6 +74,34 @@ def test_tag_ignores_collision_mtime(tmp_path, monkeypatch):
     assert navm_pool.navmesh_geom_cache(str(col))[1] == first[1]
 
 
+def test_each_generator_keeps_its_own_cache_folder(tmp_path, monkeypatch):
+    """The lattice never writes over the corridor's (published) cache folder, and its tag differs."""
+    from core.navmesh_options import NAVMESH_GENERATOR_ENV_VAR
+    col = tmp_path / 'collision_cache.bin'
+    col.write_bytes(b'x')
+    monkeypatch.setenv(NAVMESH_GENERATOR_ENV_VAR, 'corridor')
+    corridor = navm_pool.navmesh_geom_cache(str(col))
+    monkeypatch.setenv(NAVMESH_GENERATOR_ENV_VAR, 'lattice')
+    lattice = navm_pool.navmesh_geom_cache(str(col))
+    assert os.path.basename(corridor[0]) == 'navmesh_geom_cache'
+    assert lattice[0] != corridor[0] and lattice[1] != corridor[1]
+
+
+def _hashes_lattice():
+    """True when the current generator's tag hashes any lattice/ source."""
+    return any(os.sep + 'lattice' + os.sep in s for s in navm_pool.tag_sources())
+
+
+def test_lattice_sources_never_feed_the_published_tag(monkeypatch):
+    """Only a lattice run hashes lattice/, so editing it neither misses the corridor cache nor gates a push."""
+    from core.navmesh_options import NAVMESH_GENERATOR_ENV_VAR
+    monkeypatch.setenv(NAVMESH_GENERATOR_ENV_VAR, 'corridor')
+    assert not _hashes_lattice()
+    monkeypatch.setenv(NAVMESH_GENERATOR_ENV_VAR, 'lattice')
+    assert _hashes_lattice()
+    assert hook.touches_navmesh(['tes5_import/navmesh/lattice/simplify.py']) == []
+
+
 def test_tag_tracks_navmesh_sources(tmp_path):
     """Editing a navmesh source must change the tag (self-invalidation)."""
     col = tmp_path / 'collision_cache.bin'

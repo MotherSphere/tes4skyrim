@@ -1637,7 +1637,7 @@ exterior cells regenerate automatically.
 
 <a id="vhgt-offset-scales-too"></a>**BOTH the VHGT offset and its accumulated deltas scale by `_VHGT_UNIT`** (`decode_vhgt`). The layout is a float offset then a 33x33 grid of SIGNED int8 gradients -- the first column of each row is a delta from the previous row's first column, and within a row each column is a delta from the previous. The old converter did `offset / 8` going in and `* 8` coming out, which cancels for the deltas but silently ANNIHILATES the offset's contribution, so every exterior cell's terrain came out at the wrong absolute height. For **Tamriel (47,6) that put terrain at z=829..3213 while the cell's own pathgrid and REFRs sat at z=18288..19776, a ~16,700u error**; with the offset scaled correctly the terrain lands at 17608..19992, under the objects standing on it.
 
-<a id="placements-are-slope-resplit"></a>**The walkable/blocking split is re-derived from PLACED normals** (`gather_cell_geometry`). Rotating a static can turn a floor triangle into a wall and vice versa, so the cache's local-space classification cannot be trusted once a rotation is applied.
+<a id="placements-are-slope-resplit"></a>**The walkable/blocking split is re-derived from PLACED normals** (`gather_cell_geometry`). Rotating a static can turn a floor triangle into a wall and vice versa, so the cache's local-space classification cannot be trusted once a rotation is applied. Both classes are re-split: the extractor classifies by slope alone, so a cached wall face that the placement lays flat is floor. Re-splitting only the walkable class left **4,743 of 60,125 placed wall faces in Nehrim's SchattenrufMinePart04 flatter than the walk limit** — rotated cave rocks (`crock02`/`crock03`) whose tops the pathgrid walks on. As walls they covered the floor beneath them (2,378 of 2,978 floor columns on the climb past the bridge) and left only the pathgrid's protected strip standing.
 
 <a id="door-panels-are-never-blocking"></a>**A door panel contributes no BLOCKING collision, but keeps its FLAT faces** (`gather_cell_geometry`, `skip_bases`). A door is a thing an actor OPENS, never a wall: vanilla navmesh runs under every door, and treating the panel as blocking walls off the corridor wherever the panel happens to be parked -- measured on **Pinarus's upstairs ANIMATED door, whose at-rest panel sits 47u from its threshold ACROSS the passage**, pinching the ribbon to nothing and making the doorway unwalkable. The walkable faces stay because a trapdoor or platform door IS the floor the pathgrid walks on -- measured on **ImperialDungeon01 nodes 243-248, whose whole junction stands on a flat door piece**; excluding it wholesale deleted the floor. Gates are authored upright and laid flat by rotation, so the classification comes from the placed slope, and steep door faces are DISCARDED rather than demoted to blocking (a vertical panel's edge sliver would wall the doorway right back up).
 
@@ -4161,7 +4161,10 @@ to the child's byte, matching masters by export directory
 (`master_export_dir`). A byte the child does not declare (Oblivion, seen from TR)
 is dropped. `CellIndex` rebases the masters' `base_model` and `door_fids` keys,
 and the REFR `NAME`s of master-owned cells, so everything is in the child's
-numbering. `NavIndex.collision_caches` now loads the whole master chain, deepest
+numbering. `NavIndex.activator_fids`, read from each export's `ACTI.txt`
+for the lattice generator, is rebased the same way. Measured over TR_Mainland's
+13,756 own cells, activator REFRs recognized went from 8,146 to 20,986.
+`NavIndex.collision_caches` now loads the whole master chain, deepest
 first, because a Morrowind_ob base can use an Oblivion (`tes4/`) mesh whose
 collision lives only in Oblivion's cache.
 

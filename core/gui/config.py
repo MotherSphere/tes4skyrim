@@ -126,6 +126,9 @@ WINDING_MODES = (WINDING_AUTO, WINDING_ON, WINDING_OFF)
 #: conversion_config.json key for the object-LOD detail preset index.
 LOD_DETAIL_CONFIG_KEY = "lodDetail"
 
+#: conversion_config.json key for the navmesh generator (core.navmesh_options.GENERATORS).
+NAVMESH_GENERATOR_CONFIG_KEY = "navmeshGenerator"
+
 
 def lod_detail_labels() -> tuple:
     """One menu label per detail preset: its distant-LOD triangle multiplier.

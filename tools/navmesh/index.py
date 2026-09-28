@@ -24,13 +24,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from asset_convert.collision import collision_extract as ce
 from asset_convert.game_paths import namespace_for, set_namespace
 from tes5_import.base.navmesh_pins import WELD_TOLERANCE
-from tes5_import.navmesh import build
+from tes5_import.navmesh import corridor
+from tes5_import.navmesh.lattice.build import build_lattice
 from tes5_import.navmesh.from_pgrd import (
     _cell_graph, collect_doors, load_door_centroids,
 )
-from tes5_import.base.text_reader import parse_export_file
+from tes5_import.base.text_reader import get_formid, parse_export_file
 from tes5_import.record_types.items import load_furniture_models
 from tools.navmesh.audit import cell_index, master_dirs
+from tools.navmesh.cell_index import index_map, shift_fid
 from tes5_import.overrides.nested import (
     export_master_names, export_root, master_export_dir,
 )
@@ -62,6 +64,14 @@ def load_origin_shifts(export, quiet=True):
                                  quiet=quiet)
 
 
+def _acti_fids(export):
+    """ACTI FormIDs in one export's own numbering, from its ACTI.txt."""
+    path = os.path.join(export, 'ACTI.txt')
+    if not os.path.isfile(path):
+        return []
+    return [get_formid(r, 'FormID') for r in parse_export_file(path)]
+
+
 class CellCtx(object):
     """One cell, ready to regenerate."""
 
@@ -82,25 +92,44 @@ class CellCtx(object):
     def has_pathgrid(self):
         return bool(self.nodes)
 
-    def build(self, ledges_out=None, pins=None, welds=None):
+    def build(self, ledges_out=None, pins=None, welds=None, lattice=False):
         """Regenerate this cell's navmesh exactly as the pipeline would.
 
         `ledges_out` collects `(upper_tri, lower_tri, drop)` drop-down links,
         which production returns out-of-band so `(verts, tris)` stays intact.
         `pins`/`welds` are the committed hand corrections; passing none renders
         the RAW generator, which is the other half of cellview's A/B.
+        `lattice` picks the lattice generator, else the corridor one, whatever
+        the pipeline's setting.
 
         See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
         """
-        verts, tris = build.build_navmesh(
+        if lattice:
+            return self._build_lattice(ledges_out, pins)
+        verts, tris, ledges = corridor.build_corridors(
             self.refrs, self.index.base_model, ce.get_collision,
             self.nodes, self.edges, land_rec=self.land,
             origin_x=self.origin_x, origin_y=self.origin_y,
             doors=[(x, y, z, r, tp, w)
                    for (x, y, z, r, _f, tp, w) in self.doors],
             door_bases=set(self.index.door_fids.keys()),
-            ledges_out=ledges_out, pins=pins, welds=welds,
-            weld_tol=WELD_TOLERANCE)
+            pins=pins, welds=welds, weld_tol=WELD_TOLERANCE)
+        if ledges_out is not None:
+            ledges_out.extend(ledges)
+        return verts, [tuple(int(i) for i in tri[:3]) for tri in tris]
+
+    def _build_lattice(self, ledges_out, pins):
+        """This cell through the prototype lattice generator, same return shape."""
+        verts, tris, ledges = build_lattice(
+            self.refrs, self.index.base_model, ce.get_collision,
+            self.nodes, self.edges, land_rec=self.land,
+            origin_x=self.origin_x, origin_y=self.origin_y,
+            doors=[(x, y, z, r, tp, w)
+                   for (x, y, z, r, _f, tp, w) in self.doors],
+            door_bases=set(self.index.door_fids.keys()), pins=pins,
+            activators=self.index.activator_fids)
+        if ledges_out is not None:
+            ledges_out.extend(ledges)
         return verts, [tuple(int(i) for i in tri[:3]) for tri in tris]
 
     def collision(self):
@@ -166,6 +195,7 @@ class NavIndex(object):
         self.arm()
         self._idx = cell_index(export)
         self._lookup = None
+        self._acti = None
 
     @property
     def base_model(self):
@@ -181,6 +211,20 @@ class NavIndex(object):
     def cells(self):
         """Every CELL record, across the master chain."""
         return self._idx.cells
+
+    @property
+    def activator_fids(self):
+        """ACTI base FormIDs across the master chain, in THIS plugin's numbering.
+
+        See: docs/commentary/tes5_import_navmesh.md#cellview-master-numbering
+        """
+        if self._acti is None:
+            self._acti = set(_acti_fids(self.export))
+            for d in master_dirs(self.export):
+                imap = index_map(self.export, d)
+                self._acti.update(shift_fid(f, imap) for f in _acti_fids(d))
+            self._acti.discard(None)
+        return self._acti
 
     def _lookups(self):
         """`(by EditorID, by FormID)` over the chain's cells, built once.

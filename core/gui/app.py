@@ -35,6 +35,7 @@ from core.gui.config import (
     STEPS,
     WINDING_AUTO,
     LOD_DETAIL_CONFIG_KEY,
+    NAVMESH_GENERATOR_CONFIG_KEY,
     WINDING_CONFIG_KEY,
     WINDING_MODES,
     default_on_steps,
@@ -45,6 +46,7 @@ from core.gui.config import (
     winding_enabled_for,
 )
 from core.gui.menus import build_menubar
+from core.navmesh_options import DEFAULT_GENERATOR, GENERATORS
 from core.worker_budget import cpu_total, worker_count
 from output_layout import configured_output, output_setting
 from preflight import RC_MISSING_DEP
@@ -248,7 +250,7 @@ class GuiApp:
         self.status_var = self.timer_var = None
         self.cache_dl_var = self.pack_default_var = None
         self.winding_mode_var = self.parallax_var = self.tex_only_var = None
-        self.lod_detail_var = None
+        self.lod_detail_var = self.navmesh_gen_var = None
         self.step_vars = {}
         self.mesh_subdir_vars = []
         self.all_plugins = []
@@ -486,6 +488,9 @@ def build_state(root, cfg: dict) -> GuiApp:
         value=cfg.get(PACK_DEFAULT_CONFIG_KEY) is not False)
     app.winding_mode_var = tk.StringVar(value=_initial_winding(cfg))
     app.lod_detail_var = tk.IntVar(value=_initial_lod_detail(cfg))
+    saved_gen = cfg.get(NAVMESH_GENERATOR_CONFIG_KEY)
+    app.navmesh_gen_var = tk.StringVar(
+        value=saved_gen if saved_gen in GENERATORS else DEFAULT_GENERATOR)
     app.parallax_var = tk.BooleanVar(value=False)
     app.tex_only_var = tk.BooleanVar(value=False)
 

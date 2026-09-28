@@ -105,7 +105,7 @@ stops short of its walls leaves no room to detour and smoothing fails.
 | MISLOCATE | a point on triangle T resolves to another triangle; `SPLIT` = another component | the point lookup |
 | PG_OFF / PG_SPLIT | pathgrid node with no exact hit / edge whose ends resolve into different components | lookup + neighbour slots |
 | INSIDE / NO_FLOOR / HEADROOM | an actor cannot stand on the triangle | engine trusts every triangle |
-| SHORT32 / SHORT64 | open edge with walkable, unobstructed floor that far past it | clearance for obstacles |
+| SHORT32 / SHORT64 | open edge with walkable floor that far past it, no wall on the way and nothing overhead within actor height (floor under a bed or table does not count) | clearance for obstacles |
 
 INSIDE uses collision winding: a point is inside a solid when at least 5 of 8
 horizontal waist-height probes hit a face from behind. The vertical probes

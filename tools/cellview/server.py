@@ -63,6 +63,11 @@ def index_plugin(params):
     return {'ok': True, 'plugin': plugin}
 
 
+def lattice_of(params):
+    """True when the page asks for the prototype lattice generator."""
+    return params.get('lattice', '0') == '1'
+
+
 def mesh_job(params):
     """Bake one cell, publishing progress under the page's job id."""
     job = params.get('job', '')
@@ -71,7 +76,8 @@ def mesh_job(params):
     try:
         out = mesh_bake(params.get('plugin', DEFAULT_PLUGIN),
                         params.get('cell', ''), job=job,
-                        pinned=params.get('pinned', '1') != '0')
+                        pinned=params.get('pinned', '1') != '0',
+                        lattice=lattice_of(params))
         error = out.get('error', '')
         return out
     finally:
@@ -84,7 +90,7 @@ def seams_job(params):
     progress.start(job, 'seams')
     try:
         return seams_for(params.get('plugin', DEFAULT_PLUGIN),
-                         params.get('cell', ''), job=job)
+                         params.get('cell', ''), job=job, lattice=lattice_of(params))
     finally:
         progress.finish(job)
 
@@ -100,7 +106,7 @@ def esm_patch_job(params, payload):
     error = ''
     try:
         out = mesh_to_esm(params.get('plugin', DEFAULT_PLUGIN),
-                          params.get('cell', ''), payload)
+                          params.get('cell', ''), payload, lattice_of(params))
         error = out.get('error', '')
         return out
     finally:
@@ -118,7 +124,7 @@ def pin_job(params, payload):
     error = ''
     try:
         out = mesh_pin(params.get('plugin', DEFAULT_PLUGIN),
-                       params.get('cell', ''), payload)
+                       params.get('cell', ''), payload, lattice_of(params))
         error = out.get('error', '')
         return out
     finally:
@@ -143,7 +149,7 @@ def _routes():
         '/save': lambda q, p: corpus.apply_edits(q.get('cell', ''), p),
         '/score': lambda q, p: corpus.score(q.get('cell', ''), p),
         '/mesh_save': lambda q, p: mesh_save(q.get('plugin', DEFAULT_PLUGIN),
-                                             q.get('cell', ''), p),
+                                             q.get('cell', ''), p, lattice_of(q)),
         '/esm_patch': lambda q, p: esm_patch_job(q, p),
         '/pin_save': lambda q, p: pin_job(q, p),
     }
