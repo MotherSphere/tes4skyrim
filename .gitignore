@@ -39,6 +39,8 @@ native/dist/*.obj
 # Navmesh cache drop-in: keep the folder and its README, ignore the zips.
 navmesh_cache/*
 !navmesh_cache/README.md
+# A user's own navmesh pins (the GUI editor's default save folder).
+my_navmesh_pins/
 
 # Per-install record of which version last ran each pipeline step.  Local
 # history, not source: committing it would ship one machine's conversion state

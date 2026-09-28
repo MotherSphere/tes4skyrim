@@ -20,13 +20,15 @@ See: docs/commentary/tes5_import_navmesh.md#pinned-navmesh-floor
 import json
 import os
 
+from core.navmesh_options import navmesh_pins_dir
 from tes5_import.base.navmesh_frozen import (
     FROZEN_VERSION, SNAP_TOL, STOREY_BAND, apply_frozen, drop_unused_verts,
     plane_z,
 )
 
-#: Committable pin files, one per source plugin.
-PINS = 'navmesh_pins'
+#: Shipped, committable pin files, one per source plugin; a user folder reads over them.
+PINS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), 'navmesh_pins')
 
 #: Every section of a pin file, each `{cell key: [row, ...]}`.
 PARTS = ('cells', 'welds', 'cuts', 'frozen', 'voids')
@@ -41,20 +43,53 @@ _CACHE = {}
 WELD_TOLERANCE = 8.0
 
 
-def pins_path(plugin):
-    """Path of the pin file for one source plugin."""
-    return os.path.join(PINS, '%s.json' % plugin)
+def user_dir():
+    """The user's pin folder, or '' when none is set or it IS the shipped one.
+
+    See: docs/commentary/tes5_import_navmesh.md#user-pin-folder
+    """
+    got = navmesh_pins_dir()
+    if not got or (os.path.normcase(os.path.abspath(got))
+                   == os.path.normcase(os.path.abspath(PINS))):
+        return ''
+    return got
+
+
+def save_dir():
+    """The folder new pins are written to: the user's, else the shipped one."""
+    return user_dir() or PINS
+
+
+def pins_path(plugin, folder=None):
+    """Path of one source plugin's pin file in `folder` (the shipped one by default)."""
+    return os.path.join(folder or PINS, '%s.json' % plugin)
 
 
 def _read(plugin):
-    """The parsed pin document on disk, or an empty one.
+    """Shipped pins with the user's folder read over them.
+
+    A cell the user's file carries in a section replaces the shipped cell in
+    that section -- an empty list included, which is how a user unpins a
+    shipped patch without editing a file an update would overwrite.
+    See: docs/commentary/tes5_import_navmesh.md#user-pin-folder
+    """
+    doc = _read_file(pins_path(plugin))
+    user = user_dir()
+    if user:
+        for part, cells in _read_file(pins_path(plugin, user)).items():
+            doc[part].update(cells)
+    return doc
+
+
+def _read_file(path):
+    """One parsed pin file, or an empty document.
 
     A malformed or absent file answers empty: a pin is an optimisation of
     human intent, never a thing whose absence may abort a conversion.
     """
     out = {part: {} for part in PARTS}
     try:
-        with open(pins_path(plugin), encoding='utf-8') as fh:
+        with open(path, encoding='utf-8') as fh:
             got = json.load(fh)
     except (OSError, ValueError):
         return out
@@ -247,11 +282,11 @@ def _flat(points):
     return [float(c) for p in points for c in p[:3]]
 
 
-def _write(plugin, doc):
-    """Write one plugin's whole pin document and drop its cached read."""
-    if not os.path.isdir(PINS):
-        os.makedirs(PINS)
-    path = pins_path(plugin)
+def _write(plugin, doc, folder):
+    """Write one plugin's pin document into `folder` and drop its cached read."""
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    path = pins_path(plugin, folder)
     body = {'plugin': plugin}
     body.update({part: doc[part] for part in PARTS})
     with open(path, 'w', encoding='utf-8') as fh:
@@ -262,14 +297,17 @@ def _write(plugin, doc):
 
 
 def save(plugin, key, points=None, welds=None, frozen=None, voids=None):
-    """Replace the given sections of one cell, creating the file on first use.
+    """Replace the given sections of one cell in the save folder's file.
 
     A section passed as None is left alone; an empty one clears the cell from
-    it.  `welds` are `(from, to)` pairs, `frozen`/`voids` triangles of three
-    points.  Values round to 0.01u so float noise never churns the diff.
-    Returns `(path, {section: rows now stored})`.
+    it (kept as an empty override where a shipped pin exists).  `welds` are
+    `(from, to)` pairs, `frozen`/`voids` triangles of three points.  Values
+    round to 0.01u so float noise never churns the diff.
+    Returns `(path, {section: rows now in effect})`.
     """
-    doc = _read(plugin)
+    folder = save_dir()
+    doc = _read_file(pins_path(plugin, folder))
+    shipped = _read_file(pins_path(plugin)) if folder != PINS else None
     given = {'cells': points,
              'welds': None if welds is None else [_flat(w) for w in welds],
              'frozen': None if frozen is None else [_flat(t) for t in frozen],
@@ -278,12 +316,12 @@ def save(plugin, key, points=None, welds=None, frozen=None, voids=None):
         if rows is None:
             continue
         got = _rounded(rows, ROW_WIDTH[part])
-        if got:
+        if got or (shipped is not None and key in shipped[part]):
             doc[part][key] = got
         else:
             doc[part].pop(key, None)
-    path = _write(plugin, doc)
-    return path, {part: len(doc[part].get(key, ())) for part in PARTS}
+    path = _write(plugin, doc, folder)
+    return path, {part: len(_section(plugin, part, key)) for part in PARTS}
 
 
 def _touches(a, b):

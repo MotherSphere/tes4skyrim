@@ -528,7 +528,7 @@ TESConversion/
     subprocess_flags.py   # POPEN_FLAGS, windows_cmd, run_streamed
     process_job.py        # Win32 Job Object containment
     collision_options.py  # collision winding-repair toggle
-    navmesh_options.py    # lattice/corridor navmesh generator (--navmesh-generator)
+    navmesh_options.py    # navmesh generator (--navmesh-generator), user pin folder (--navmesh-pins)
     plugin_masters.py     # master lists from binary headers
 
     gui/                  # the converter window

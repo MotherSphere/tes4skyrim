@@ -318,6 +318,11 @@ class NavIndex(object):
         load_origin_shifts(self.export, quiet=self._quiet)
         NavIndex._armed = key
 
+    @classmethod
+    def disarm(cls):
+        """Forget which export's tables are live, so the next `arm` reloads them from disk."""
+        cls._armed = None
+
     def collision_caches(self):
         """Every collision cache this export needs, MASTERS FIRST, whole chain.
 

@@ -66,6 +66,7 @@ from core.gui.config import (
     STEPS,
     default_on_steps,
     load_config,
+    navmesh_pins_dir,
     run_process,
     step_names,
 )
@@ -549,8 +550,9 @@ def winding_flag(app) -> str:
 
 
 def navmesh_flags(app) -> list:
-    """The navmesh-generator flag matching the setting."""
-    return ["--navmesh-generator", app.navmesh_gen_var.get()]
+    """The navmesh-generator and pin-folder flags matching the settings."""
+    return ["--navmesh-generator", app.navmesh_gen_var.get(),
+            "--navmesh-pins", navmesh_pins_dir()]
 
 
 def _mesh_flags(app, selected_subdirs) -> list:

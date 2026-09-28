@@ -6,6 +6,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.navmesh_options import NAVMESH_PINS_ENV_VAR
 from tes5_import.base import navmesh_pins as pins
 from tes5_import.base.navmesh_frozen import apply_frozen, plan_area
 from tools.cellview.bake import frozen_patch, merge_patches
@@ -145,10 +146,37 @@ def test_a_re_edit_replaces_the_older_frozen_triangle():
 # The store
 # ---------------------------------------------------------------------------
 
-def _store(tmp_path, monkeypatch):
-    """Point the pin store at a temp dir and clear its cache."""
+def _store(tmp_path, monkeypatch, user=None):
+    """Point the shipped pin store at a temp dir, optionally a user folder too."""
     monkeypatch.setattr(pins, 'PINS', str(tmp_path))
     monkeypatch.setattr(pins, '_CACHE', {})
+    monkeypatch.delenv(NAVMESH_PINS_ENV_VAR, raising=False)
+    if user is not None:
+        monkeypatch.setenv(NAVMESH_PINS_ENV_VAR, str(user))
+
+
+def test_a_user_folder_saves_there_and_reads_over_the_shipped_pins(tmp_path, monkeypatch):
+    """Saving writes only the user's file; the user's cell replaces the shipped one.
+
+    See: docs/commentary/tes5_import_navmesh.md#user-pin-folder
+    """
+    _store(tmp_path, monkeypatch)
+    pins.save('Nehrim.esm', 'Cell', frozen=FAR, voids=REPLACED)
+    shipped = (tmp_path / 'Nehrim.esm.json').read_text(encoding='utf-8')
+    _store(tmp_path, monkeypatch, user=tmp_path / 'mine')
+    pins.save('Nehrim.esm', 'Cell', frozen=FLIPPED, voids=REPLACED)
+    assert (tmp_path / 'Nehrim.esm.json').read_text(encoding='utf-8') == shipped
+    assert pins.tris_for('Nehrim.esm', 'frozen', 'Cell') == FLIPPED
+
+
+def test_a_user_unpins_a_shipped_patch_with_an_empty_override(tmp_path, monkeypatch):
+    """Unpinning a shipped patch stores an empty entry, so the shipped one stays off."""
+    _store(tmp_path, monkeypatch)
+    pins.save('Nehrim.esm', 'Cell', frozen=FLIPPED, voids=REPLACED)
+    _store(tmp_path, monkeypatch, user=tmp_path / 'mine')
+    pins.remove_patch('Nehrim.esm', 'Cell')
+    assert pins.tris_for('Nehrim.esm', 'frozen', 'Cell') == []
+    assert pins.digest('Nehrim.esm', 'Cell') == ''
 
 
 def test_patches_round_trip_and_restage_the_cell(tmp_path, monkeypatch):

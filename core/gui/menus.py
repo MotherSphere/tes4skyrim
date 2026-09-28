@@ -1,4 +1,4 @@
-"""The dark top menu bar: Plugins, Settings, Build, Help.
+"""The dark top menu bar: Plugins, Settings, Build, Navmesh, Help.
 
 Windows renders a NATIVE (white) bar for `root.configure(menu=...)` and ignores
 tk colors on it, so the bar is built from dark Menubuttons whose dropdown
@@ -17,9 +17,6 @@ launch would stall startup and do it unasked.
 See: docs/reference/pipeline.md#configuration
 """
 
-import os
-import subprocess
-import sys
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -52,8 +49,8 @@ from core.gui.menubar_behavior import (add_tipped_command, enable_hover_switch,
 from core.gui.morrowind import add_source_menu
 from core.gui.selection import runnable
 from core.navmesh_options import CORRIDOR, LATTICE
-from core.gui.widgets import open_url
-from core.subprocess_flags import POPEN_FLAGS
+from core.gui import navmesh_editor
+from core.gui.widgets import open_folder, open_url
 from core.worker_budget import worker_count
 from tools.navmesh.navmesh_cache import DOWNLOAD_CONFIG_KEY
 
@@ -310,24 +307,6 @@ def _check_dependencies(app) -> None:
     app.info("Check Dependencies", _dependency_report(preflight, ok, bad))
 
 
-def _open_folder(app, path: str, what: str) -> None:
-    """Reveal `path` in the system file manager."""
-    if not path or not os.path.isdir(path):
-        app.info(f"Open {what}",
-                 f"{what} does not exist yet:\n\n{path or '(not set)'}\n\n"
-                 "Run a conversion first.")
-        return
-    try:
-        if sys.platform == "win32":
-            os.startfile(path)
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path], **POPEN_FLAGS)
-        else:
-            subprocess.Popen(["xdg-open", path], **POPEN_FLAGS)
-    except OSError as exc:
-        app.info(f"Open {what}", f"Could not open:\n\n{path}\n\n{exc}")
-
-
 def _add_global_action(app, menu, key: str) -> None:
     """One GLOBAL_ACTIONS entry, resolving `app.run_global_action` at click."""
     _key, label, tip, _short, _row = next(a for a in GLOBAL_ACTIONS
@@ -350,12 +329,12 @@ def _build_plugins_menu(app, menubutton, menu_opts, mods_ui) -> None:
     plugins_menu.add_separator()
     add_tipped_command(
         plugins_menu, "Open Output Folder",
-        lambda: _open_folder(app, app.output_var.get().strip(),
-                             "Output folder"),
+        lambda: open_folder(app, app.output_var.get().strip(),
+                            "Output folder"),
         "Open the folder converted plugins and finished mods are written to")
     add_tipped_command(
         plugins_menu, "Open Logs Folder",
-        lambda: _open_folder(app, str(REPO_ROOT / "logs"), "Logs folder"),
+        lambda: open_folder(app, str(REPO_ROOT / "logs"), "Logs folder"),
         "Open the folder holding each run's log files")
 
 
@@ -507,6 +486,7 @@ def build_menubar(app):
     _build_plugins_menu(app, _menubutton, menu_opts, mods_ui)
     _build_settings_menu(app, _menubutton, menu_opts)
     _build_build_menu(app, _menubutton, menu_opts)
+    navmesh_editor.build_menu(app, _menubutton)
     _build_help_menu(app, _menubutton, menu_opts)
     enable_hover_switch(app.root, bar)
     return mods_ui

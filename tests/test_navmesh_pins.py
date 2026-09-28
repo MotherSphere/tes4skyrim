@@ -20,6 +20,7 @@ def _store(tmp_path, monkeypatch):
     """Point the pin store at a temp dir and clear its cache."""
     monkeypatch.setattr(pins, 'PINS', str(tmp_path))
     monkeypatch.setattr(pins, '_CACHE', {})
+    monkeypatch.delenv('TESCONV_NAVMESH_PINS', raising=False)
 
 
 def test_pins_round_trip_at_hundredths(tmp_path, monkeypatch):

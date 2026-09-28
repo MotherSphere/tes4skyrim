@@ -1616,11 +1616,37 @@ function showError(msg) {
   $('busy').appendChild(box);
 }
 
+/* A plugin with no collision cache would open with no walls, so picking it
+   builds the cache (and its masters') from the converted meshes first.  The
+   scan waits for any running build, since it takes the same machine lock. */
+async function ensureCollision(p) {
+  if (p.collision) return true;
+  const job = newJob();
+  showProgress('Building collision cache for ' + p.name);
+  pollProgress(job);
+  let d;
+  try {
+    d = await (await fetch('/collision?plugin=' + encodeURIComponent(p.name) +
+                           '&job=' + encodeURIComponent(job),
+                           { method: 'POST' })).json();
+  } finally { stopPoll(); }
+  if (d.error) { showError(d.error); return false; }
+  p.collision = true;
+  $('busy').style.display = 'none';
+  return true;
+}
+
 /* An un-indexed export costs ~78s to parse once.  Announce it and build
    BEFORE the bake, or the page looks hung on its first open. */
 async function ensureIndexed(plugin) {
   const p = PLUGINS.find(x => x.name === plugin);
-  if (!p || p.indexed) return true;
+  if (!p) return true;
+  if (!await ensureCollision(p)) return false;
+  if (p.indexed) {
+    $('plugin').innerHTML = PLUGINS.map(pluginOption).join('');
+    $('plugin').value = plugin;
+    return true;
+  }
   const job = newJob();
   showProgress('Indexing ' + plugin);
   pollProgress(job);
@@ -1853,11 +1879,16 @@ function pluginOption(p) {
 
 (async function init() {
   resize();
-  const [names, plugs] = await Promise.all([
+  const [names, plugs, feats] = await Promise.all([
     (await fetch('/cells')).json(),
-    (await fetch('/plugins')).json()
+    (await fetch('/plugins')).json(),
+    (await fetch('/features')).json()
   ]);
   PLUGINS = plugs;
+  /* The transplant corpus needs the Bruma reference data, which only a
+     developer checkout has: the server offers it only with --transplant. */
+  $('corpusBtn').parentElement.style.display = feats.transplant ? '' : 'none';
+  $('pin').title += ' — saved to ' + feats.pins_dir;
   $('cell').innerHTML = '<option value="">corpus cell…</option>' +
     names.map(n => `<option>${n}</option>`).join('');
   $('plugin').innerHTML = plugs.map(pluginOption).join('');

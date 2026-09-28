@@ -23,3 +23,21 @@ def navmesh_generator() -> str:
     """The generator this process should build navmeshes with."""
     raw = os.environ.get(NAVMESH_GENERATOR_ENV_VAR, "").strip().lower()
     return raw if raw in GENERATORS else DEFAULT_GENERATOR
+
+
+#: Carries the user's navmesh pin folder (``--navmesh-pins``) to the pool workers.
+NAVMESH_PINS_ENV_VAR = "TESCONV_NAVMESH_PINS"
+
+
+def set_navmesh_pins_dir(path) -> None:
+    """Set the user's pin folder for this process and its children; None skips."""
+    if path:
+        os.environ[NAVMESH_PINS_ENV_VAR] = os.path.abspath(path)
+
+
+def navmesh_pins_dir() -> str:
+    """The user's pin folder, read over the shipped pins; '' when none is set.
+
+    See: docs/commentary/tes5_import_navmesh.md#user-pin-folder
+    """
+    return os.environ.get(NAVMESH_PINS_ENV_VAR, "").strip()

@@ -4673,6 +4673,55 @@ Current mesh has it at `(-61.63, 1175.06)` with the crack open, Saved result at
 to 170 triangles as the weld collapses one.
 
 
+### <a id="user-pin-folder"></a>A user's pins live in their own folder
+
+**Code:** `navmesh_pins.user_dir` / `_read` / `save`,
+`core.navmesh_options.navmesh_pins_dir`, `convert.py --navmesh-pins`.
+
+`navmesh_pins/` ships with the converter, and an update pastes a new copy over
+it. A user's pins therefore go to a folder of their own: the GUI's
+**Navmesh > Pin Save Location** setting (`navmeshPinsDir`), defaulting to
+`my_navmesh_pins/` beside the app, which no release contains. The GUI passes it
+to every `convert.py` run as `--navmesh-pins`, and to the editor server as
+`--pins`. It travels to the pool workers in `TESCONV_NAVMESH_PINS`, the way
+the generator choice does.
+
+Reading layers the two folders. For each section, a cell present in the user's
+file replaces the shipped cell, including an empty list. An empty list is how
+a user unpins a shipped patch without editing a file an update would replace:
+`save` keeps an empty entry wherever the shipped file has that cell, and
+removes the entry otherwise. Saving always writes to the user's folder. A user
+folder that IS `navmesh_pins/` (the developer's setup) is a single layer, and
+behaves exactly as before.
+
+The shipped folder is found from the module's own location, not the working
+directory, so a process started elsewhere still finds it.
+
+### <a id="navmesh-editor-in-the-gui"></a>The navmesh editor in the GUI
+
+**Code:** `core/gui/navmesh_editor.py`, `tools/cellview/server.py`.
+
+The **Navmesh** bar entry starts cellview's server as a child of the window,
+from the repository folder with `--port 0 --no-browser --pins <save folder>`.
+It then reads the first line, `cellview: <url>`, to learn the port. A status
+card shows Starting / Running / Stopped, the address and the server's latest
+line, and opens the browser once when the server comes up. Closing the card
+leaves the server running. Closing the window stops it through
+`kill_process_tree`, and the GUI's kill-on-close job catches a crash. Changing
+the save folder restarts a running server so it saves to the new one.
+
+The Transplant panel is shown only when the server runs with `--transplant`,
+which the GUI never passes: its Bruma corpus needs `references/` data that only
+a developer checkout has.
+
+Picking a plugin with no current collision cache builds it instead of refusing.
+`plugins.build_collision` runs `rescan_mesh_caches.py` over the plugin's
+masters and then the plugin, from their converted `output/` meshes, and then
+disarms `NavIndex` so the next open reloads the tables. The rescan takes the
+heavy-job lock, so it waits behind a running build. A plugin whose meshes were
+never converted still fails, with the tool's last lines, because collision
+comes from the converted meshes.
+
 ### <a id="editing-a-saved-result"></a>Editing, pinning and shipping a saved result
 
 **Code:** `meshedit.rebase_ops` / `result_marks`, `cellview.bake.edit_basis`.

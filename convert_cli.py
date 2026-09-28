@@ -87,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--navmesh-generator", choices=GENERATORS, default=None,
                         help="Navmesh generator for the import stage. Default: "
                              + DEFAULT_GENERATOR)
+    parser.add_argument("--navmesh-pins", metavar="DIR", default=None,
+                        help="Folder of your own navmesh pins, read over the "
+                             "shipped navmesh_pins/ (the navmesh editor's save "
+                             "location)")
     return parser
 
 
