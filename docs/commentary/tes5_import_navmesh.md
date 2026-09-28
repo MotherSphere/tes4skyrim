@@ -961,6 +961,12 @@ is drawn, at the same grid square, masters included. The child's own LAND is
 only a fallback where the parent has none. Authored FO3/FNV PNAMs without bit 0
 keep the child's own land.
 
+Cellview and every `NavIndex` tool resolve a cell's land through the same
+function (`tools/navmesh/index.py::NavIndex.land_for`). Before that, they read the
+LAND stored under the cell's own FormID, so the Fringe's `XPGardensExterior`
+(−13, 0) opened on the child's `00018EC9` (base 73), not the parent's
+`0000D4EC` (base 253) the pipeline builds on.
+
 Found through Jayred Ice-Veins, who stopped leading the player in SE02 ("Through
 the Fringe of Madness"). SETheFringe is a child of SEWorld (`00009F18`):
 

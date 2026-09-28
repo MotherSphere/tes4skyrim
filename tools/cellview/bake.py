@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from tes5_import.base.navmesh_pins import (
     apply_hand_edits, cell_key, hand_edits_for, remove_patch, save as save_pins,
 )
-from tes5_import.base.text_reader import parse_export_file
 from tes5_import.navmesh import corridor
 from tools.cellview import plugins, progress, seams
 from tools.navmesh.draw import tri_class
@@ -27,7 +26,7 @@ from tools.navmesh.meshedit import (
     result_marks, save_fix,
 )
 from tools.navmesh.navm_patch import patch as navm_patch
-from tools.navmesh.index import master_export_dirs_of
+from tools.navmesh.index import master_export_dirs_of, wrld_records
 from tools.navmesh.transplant import index_for
 
 #: Baked geometry per cell, so switching back is instant.
@@ -64,21 +63,12 @@ def worlds(plugin):
     if export not in _WORLDS:
         out = {}
         for d in master_export_dirs_of(export) + [export]:
-            for rec in _wrld_records(d):
+            for rec in wrld_records(d):
                 if rec.get('EditorID'):
                     out[rec['EditorID'].lower()] = (rec.get('FormID') or
                                                     '').upper()
         _WORLDS[export] = out
     return _WORLDS[export]
-
-
-def _wrld_records(export):
-    """One export's WRLD records, read straight from its WRLD.txt.
-
-    See: docs/commentary/tes5_import_navmesh.md#cellview-open-is-cached
-    """
-    path = os.path.join(export, 'WRLD.txt')
-    return parse_export_file(path) if os.path.isfile(path) else []
 
 
 def parse_coords(text):

@@ -29,7 +29,8 @@ from tes5_import.navmesh.lattice.build import build_lattice
 from tes5_import.navmesh.from_pgrd import (
     _cell_graph, collect_doors, load_door_centroids,
 )
-from tes5_import.base.text_reader import get_formid, parse_export_file
+from tes5_import.base.text_reader import get_formid, get_int, parse_export_file
+from tes5_import.navmesh.pool import navmesh_land_at
 from tes5_import.record_types.items import load_furniture_models
 from tools.navmesh.audit import cell_index, master_dirs
 from tools.navmesh.cell_index import index_map, shift_fid
@@ -39,6 +40,9 @@ from tes5_import.overrides.nested import (
 from output_layout import assets_for
 
 DEFAULT_EXPORT = 'export/Oblivion.esm'
+
+#: RecordFlags bit marking a worldspace's persistent (dummy) cell, which has no land.
+_PERSISTENT_FLAG = 0x400
 
 
 def master_export_dirs_of(export):
@@ -64,6 +68,15 @@ def load_origin_shifts(export, quiet=True):
                                  quiet=quiet)
 
 
+def wrld_records(export):
+    """One export's WRLD records, read straight from its WRLD.txt.
+
+    See: docs/commentary/tes5_import_navmesh.md#cellview-open-is-cached
+    """
+    path = os.path.join(export, 'WRLD.txt')
+    return parse_export_file(path) if os.path.isfile(path) else []
+
+
 def _acti_fids(export):
     """ACTI FormIDs in one export's own numbering, from its ACTI.txt."""
     path = os.path.join(export, 'ACTI.txt')
@@ -76,6 +89,7 @@ class CellCtx(object):
     """One cell, ready to regenerate."""
 
     def __init__(self, index, rec):
+        """`rec`'s refs, pathgrid graph, doors and walked-on land, read from `index`."""
         self.index = index
         self.rec = rec
         self.name = rec.get('EditorID') or ''
@@ -86,7 +100,7 @@ class CellCtx(object):
         nodes, edges, self.origin_x, self.origin_y, self.exterior = graph
         self.nodes, self.edges = nodes or [], edges or []
         self.doors = collect_doors(self.refrs, index.door_fids)
-        self.land = land if self.exterior else None
+        self.land = index.land_for(rec, land) if self.exterior else None
 
     @property
     def has_pathgrid(self):
@@ -190,12 +204,36 @@ class NavIndex(object):
     _armed = None
 
     def __init__(self, export=DEFAULT_EXPORT, quiet=True):
+        """Open `export`'s cell index and arm its collision and door tables."""
         self.export = export
         self._quiet = quiet
         self.arm()
         self._idx = cell_index(export)
         self._lookup = None
         self._acti = None
+        self._land_at = None
+
+    def land_for(self, rec, own):
+        """The LAND the game draws under exterior cell `rec`; `own` is its own LAND.
+
+        A child worldspace drawing its parent's land walks on the parent's LAND
+        at the same square, resolved by the pipeline's own `navmesh_land_at`.
+
+        See: docs/commentary/tes5_import_navmesh.md#child-worldspaces-walk-the-parents-land
+        """
+        if self._land_at is None:
+            dirs = list(reversed(master_dirs(self.export))) + [self.export]
+            stubs = [{'FormID': c.get('FormID'), 'ParentCELL': c.get('FormID')}
+                     for c in self.cells]
+            self._land_at = navmesh_land_at({
+                'WRLD': [w for d in dirs for w in wrld_records(d)],
+                'CELL': self.cells, 'LAND': stubs})
+        got = self._land_at((get_formid(rec, 'ParentWRLD'),
+                             get_int(rec, 'XCLC.X'), get_int(rec, 'XCLC.Y')))
+        if (got is None or got['FormID'] == rec.get('FormID')
+                or get_int(rec, 'RecordFlags') & _PERSISTENT_FLAG):
+            return own
+        return self.of_cell(got['FormID'].upper())[2] or own
 
     @property
     def base_model(self):
