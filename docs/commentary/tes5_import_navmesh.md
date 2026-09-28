@@ -4099,7 +4099,7 @@ its namespace IS `tes4`.
 **`_entry_table_is_intact` accepted `count == 0`** (`collision_extract`), so a
 20-byte `export/Morrowind.esm/collision_cache.bin` -- valid `TESCOL07` magic,
 zero entries, table consuming the blob exactly -- pinned itself as fresh. The
-rescan in `_rescan_mesh_caches` is gated on that check, so it never fired again
+rescan in `rescan_mesh_caches` is gated on that check, so it never fired again
 and the empty cache survived every run. An empty table is now never current;
 the rescan found 4,732 of 6,978 NIFs with collision.
 

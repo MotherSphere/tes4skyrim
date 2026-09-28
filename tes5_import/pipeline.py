@@ -693,13 +693,13 @@ def _prescan_vendor_trainer(by_type: dict, ctx, writer, export_dir: str,
     _step_done('vendor/trainer records')
 
 
-def _rescan_mesh_caches(export_dir, mesh_dir: str) -> bool:
+def rescan_mesh_caches(export_dir, mesh_dir: str, force: bool = False) -> bool:
     """Rebuild one export's bounds+collision caches if stale or behind the mesh stage.
 
     True when either cache was rewritten.  A stale cache (older entry schema)
-    is rescanned in full; a current one still takes the entries a later mesh
-    run left as fragments (a scoped `--mesh-subdirs` rebuild), or the script
-    stage keeps reading old physics flags.
+    or `force` rescans in full; a current one still takes the entries a later
+    mesh run left as fragments (a scoped `--mesh-subdirs` rebuild), or the
+    script stage keeps reading old physics flags.
 
     See: docs/commentary/tes5_import_pipeline.md#phase-0-stale-bounds-cache
     """
@@ -714,7 +714,7 @@ def _rescan_mesh_caches(export_dir, mesh_dir: str) -> bool:
     if not os.path.isdir(mesh_dir):
         return False
     seed_b, seed_c = merge_fragments(assets_dir)
-    current = (bounds_cache_is_current(cache_path)
+    current = (not force and bounds_cache_is_current(cache_path)
                and collision_cache_is_current(col_path))
     if current and not (seed_b or seed_c):
         return False
@@ -755,7 +755,7 @@ def _refresh_master_mesh_caches(export_dir: str) -> None:
     for name in names:
         mdir = master_export_dir(root, name)
         if os.path.isdir(mdir):
-            _rescan_mesh_caches(
+            rescan_mesh_caches(
                 mdir, os.path.join(str(plugin_paths(name).out), 'meshes'))
 
 
@@ -772,7 +772,7 @@ def _prescan_mesh_caches(export_dir: str, plugin_out_dir: str, _step_done):
         load_collision, door_axis_cache_is_current, scan_door_axes)
     axis_path = str(assets_for(export_dir) / 'door_panel_axis_cache.json')
     _refresh_master_mesh_caches(export_dir)
-    _rescan_mesh_caches(export_dir, os.path.join(plugin_out_dir, 'meshes'))
+    rescan_mesh_caches(export_dir, os.path.join(plugin_out_dir, 'meshes'))
     if not door_axis_cache_is_current(axis_path):
         print("  Door threshold cache missing or stale, measuring door "
               "panels...")
