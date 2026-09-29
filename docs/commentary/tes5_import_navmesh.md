@@ -2685,6 +2685,22 @@ produces exactly such border edges — so this is satisfied by construction as
 long as the ribbon is emitted out to the node, and no clamp pulls it inside the
 seam band. Phase 1 verifies this; it writes no new code for cell links.
 
+<a id="seam-edges-run-along-the-seam"></a>**A seam edge must run ALONG the
+seam, not across the band** (`edge_links.border_edges`). The band test alone
+(both ends within `SEAM_BAND`) also accepted short stubs pointing away from
+the boundary, and `match_seam` paired two such stubs from opposite cells
+because their midpoints agreed. The portal then joined two triangles that
+touch at one corner. The engine's straight-line triangle walk (SkyrimSE
+1.6.1170 ID 90416) crosses a portal and re-projects into the neighbour; across
+that false portal it cycled between the two meshes forever, appending one
+8-byte step per hop. At 268,435,456 entries the array grow's 32-bit
+`count x 8` wrapped to 0, and the 2 GB copy faulted in VCRUNTIME140
+(`vmovntdq`). Nehrim (-10,-11)/(-11,-11), triangles 367 and 791, named in the
+crash log's stack. Census of portal edges whose across-seam extent is at least
+their along-seam length: **Skyrim.esm 2 / 190,573 (both under 2u); Nehrim
+157 / 39,038 in 145 meshes, 10-24u**. After requiring along > across: Nehrim
+0 / 38,852, Oblivion 0 / 208,548. Confirmed in game.
+
 ---
 
 ## Phase 1 — corridors + doors + links (a complete, narrow navmesh)
