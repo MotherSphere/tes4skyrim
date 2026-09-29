@@ -4712,6 +4712,23 @@ go in, each stored triangle resolves to its heir by the same `_heir` rule as a
 carried generator ledge. Unpinning a patch drops every link with an end on it,
 and each link enters `digest()`, so pinning one restages only that cell.
 
+**A pin REPLACES the cell's links with the ones on screen** (`bake.pinned_links`):
+every link after the session's ops whose two triangles lie in the merged frozen
+patch. The first version appended, so a link the page no longer showed stayed
+pinned. On SchattenrufMinePart02, five earlier links whose triangles a later
+edit replaced all moved to their heir, one new triangle, which shipped as three
+ledges from it where the page had shown one.
+
+**A pin with no ops is refused**, and the Pin button is disabled without one.
+Pinning reloads the cell and clears the ops, and an empty list used to freeze
+EVERY triangle, so Pin, To ESM, Pin took over the whole cell.
+
+**An abandoned build ring drops its new corners** (`dropRing`). A bare-floor
+corner joins the page's vertex list on click but reaches the ops only when its
+triangle completes, so an `Esc` or `b` mid-ring left an orphan, and every later
+`add_vert` was numbered one higher on the page than in the server's replay:
+the pinned triangle got a different corner than the one placed.
+
 **Both ends need an open edge, or the link cannot be written.** A carrier
 edge's neighbour slot holds the Edge Link index instead of a neighbour
 (xEdit `wbEdgeToStr`), so an edge cannot be both. Vanilla census, Skyrim.esm

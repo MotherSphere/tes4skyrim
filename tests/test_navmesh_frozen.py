@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.navmesh_options import NAVMESH_PINS_ENV_VAR
 from tes5_import.base import navmesh_pins as pins
 from tes5_import.base.navmesh_frozen import apply_frozen, plan_area
-from tools.cellview.bake import frozen_patch, merge_patches
+from tools.cellview.bake import frozen_patch, merge_patches, pinned_links
 
 #: A 3x3 vertex grid over (0..20)^2 at Z 0: four squares, eight triangles.
 GRID = [(float(x), float(y), 0.0) for y in (0, 10, 20) for x in (0, 10, 20)]
@@ -186,25 +186,39 @@ def test_no_patch_leaves_the_mesh_untouched():
 
 def test_a_deletion_only_edit_freezes_nothing():
     """Deleting a triangle voids it; it never freezes the whole mesh."""
-    frozen, voids, _l = frozen_patch(GRID, GRID_TRIS, [{'op': 'del_tri', 'tri': 0}])
+    frozen, voids = frozen_patch(GRID, GRID_TRIS, [{'op': 'del_tri', 'tri': 0}])
     assert frozen == [] and voids == [_pts(GRID, GRID_TRIS[0])]
+
+
+def test_no_edits_freeze_nothing():
+    """A pin with no ops must not take over the whole cell."""
+    assert frozen_patch(GRID, GRID_TRIS, []) == ([], [])
 
 
 def test_a_move_freezes_and_voids_every_triangle_on_that_vertex():
     """The moved corner's triangles are frozen as moved and voided as generated."""
     ops = [{'op': 'move_vert', 'v': 4, 'to': [11.0, 11.0, 0.0]}]
-    frozen, voids, _l = frozen_patch(GRID, GRID_TRIS, ops)
+    frozen, voids = frozen_patch(GRID, GRID_TRIS, ops)
     assert len(frozen) == len(voids) == 6
     assert all((11.0, 11.0, 0.0) in t for t in frozen)
 
 
-def test_an_added_link_freezes_both_triangles_and_keeps_the_link():
-    """Linking two untouched triangles pins exactly them, plus the pair itself."""
-    frozen, voids, links = frozen_patch(GRID, GRID_TRIS,
-                                        [{'op': 'add_link', 'up': 2, 'down': 7}])
+def test_an_added_link_freezes_both_triangles():
+    """Linking two untouched triangles pins exactly those two."""
+    frozen, voids = frozen_patch(GRID, GRID_TRIS, [{'op': 'add_link', 'up': 2, 'down': 7}])
     ends = [_pts(GRID, GRID_TRIS[2]), _pts(GRID, GRID_TRIS[7])]
     assert frozen == voids == ends
-    assert links == [tuple(ends)]
+
+
+def test_pinned_links_are_exactly_the_on_screen_links_in_the_patch():
+    """A link deleted on the page is not pinned; a ledge on unfrozen floor is left alone.
+
+    See: docs/commentary/tes5_import_navmesh.md#pinned-drop-links
+    """
+    ops = [{'op': 'del_link', 'up': 0, 'down': 7}, {'op': 'add_link', 'up': 2, 'down': 7}]
+    frozen = [_pts(GRID, GRID_TRIS[i]) for i in (0, 2, 7)]
+    got = pinned_links((GRID, GRID_TRIS, [], [(0, 7), (3, 5)], ops), frozen)
+    assert got == [(_pts(GRID, GRID_TRIS[2]), _pts(GRID, GRID_TRIS[7]))]
 
 
 def test_a_re_edit_replaces_the_older_frozen_triangle():

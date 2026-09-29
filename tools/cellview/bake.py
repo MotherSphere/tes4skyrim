@@ -549,13 +549,12 @@ def _points(verts, t):
 
 
 def frozen_patch(verts, tris, ops):
-    """`(frozen, voids, links)` world triangles for one session's edits over the mesh on screen.
+    """`(frozen, voids)` world triangles for one session's edits over the mesh on screen.
 
     Frozen: every result triangle using a vertex the ops moved, welded or
     made, plus both triangles of every link the ops added.  Voids: every
     on-screen triangle deleted or using such a vertex, plus the linked ones --
-    the ground the human took over.  No ops at all freezes the whole mesh.
-    Links: each added link as its (upper, lower) triangles.
+    the ground the human took over.  No ops freezes nothing.
     See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
     """
     rv, rt, _d, rl = replay(verts, tris, ops)
@@ -563,12 +562,26 @@ def frozen_patch(verts, tris, ops):
     linked = {i for pair in rl for i in pair}
     dead = {int(op['tri']) for op in ops or () if op.get('op') == 'del_tri'}
     frozen = [_points(rv, t) for i, t in enumerate(rt)
-              if not ops or i in linked or any(v in hot for v in t)]
+              if i in linked or any(v in hot for v in t)]
     voids = [_points(verts, t) for i, t in enumerate(tris)
-             if not ops or i in dead or any(v in hot for v in t)]
+             if i in dead or any(v in hot for v in t)]
     voids += [_points(rv, rt[i]) for i in sorted(linked)]
-    links = [(_points(rv, rt[u]), _points(rv, rt[d])) for u, d in rl]
-    return frozen, voids, links
+    return frozen, voids
+
+
+def pinned_links(basis, frozen):
+    """`[(upper, lower)]` world triangles of every on-screen link inside the frozen patch.
+
+    `basis` is `edit_basis`'s `(verts, tris, doors, links, ops)`.  The result
+    REPLACES the cell's pinned links, so a link the page no longer shows is
+    unpinned; a generator ledge on unfrozen floor is left to the generator.
+    See: docs/commentary/tes5_import_navmesh.md#pinned-drop-links
+    """
+    verts, tris, doors, links, ops = basis
+    rv, rt, _d, rl = replay(verts, tris, ops, doors, links)
+    held = set(frozen_indices(rv, rt, frozen))
+    return [(_points(rv, rt[u]), _points(rv, rt[d])) for u, d in rl
+            if u in held and d in held]
 
 
 def merge_patches(old_frozen, old_voids, frozen, voids):
@@ -606,25 +619,15 @@ def mesh_pin(plugin, cell, payload, lattice=False, pinned=True):
     verts, tris, _doors, _links, ops = basis
     if not tris:
         return {'error': '%s has no generated navmesh to pin' % cell}
-    new_f, new_v, new_l = frozen_patch(verts, tris, ops)
+    if not ops:
+        return {'error': 'no edits to pin in %s' % cell}
     frozen, voids = merge_patches(edits.get('frozen', ()), edits.get('voids', ()),
-                                  new_f, new_v)
-    links = _unique_links(list(edits.get('links', ())) + new_l)
-    path, n = save_pins(plugin, key, frozen=frozen, voids=voids, links=links)
+                                  *frozen_patch(verts, tris, ops))
+    path, n = save_pins(plugin, key, frozen=frozen, voids=voids,
+                        links=pinned_links(basis, frozen))
     _forget(plugin, cell)
     return {'pinned': path, 'key': key, 'tris': n['frozen'],
             'voids': n['voids'], 'links': n['links'], 'ops': len(ops)}
-
-
-def _unique_links(links):
-    """`links` with repeats (both triangles equal at 0.01u) removed, order kept."""
-    seen, out = set(), []
-    for up, down in links:
-        k = tuple(tuple(round(c, 2) for c in centroid(t)) for t in (up, down))
-        if k not in seen:
-            seen.add(k)
-            out.append((up, down))
-    return out
 
 
 def mesh_unpin(plugin, cell, payload):

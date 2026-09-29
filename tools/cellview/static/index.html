@@ -1505,6 +1505,16 @@ function newVertAt(p) {
   return mVerts.length - 1;
 }
 
+/* A corner placed on bare floor joins mVerts at once but reaches the ops only
+   when its triangle completes, so an abandoned ring takes its new corners back
+   out -- otherwise every later new vertex is numbered one higher here than in
+   the server's replay, and a pinned triangle gets the wrong corner. */
+function dropRing() {
+  mRing = [];
+  mVerts.length = (showSaved() ? M.saved.verts : M.verts).length +
+    mOps.filter(o => o.op === 'add_vert').length;
+}
+
 function buildClick(ev) {
   const v = pickVert(ev);
   if (v >= 0) {
@@ -1642,7 +1652,9 @@ function meshStatus() {
   /* Unlike the corpus saves this needs no edits: shipping a freshly generated
      mesh is how you check the generator itself in-game. */
   $('toEsm').disabled = live === 0;
-  $('pin').disabled = live === 0;
+  /* A pin freezes only what the edits touched, so with none there is nothing
+     to pin -- and a reload after pinning clears the edits. */
+  $('pin').disabled = live === 0 || (mOps.length === 0 && !viewing);
   $('mode').textContent = 'Mesh · ' + M.plugin + ' · ' + M.cell +
     (M.nodes.length === 0 ? ' · NO PATHGRID (nothing to generate from)' : '') +
     (mBuild ? ' · BUILD ' + mRing.length + '/3' : '') +
@@ -1968,7 +1980,7 @@ function meshKey(e) {
     return true;
   }
   if (e.key === 'b') {
-    mBuild = !mBuild; mRing = [];
+    mBuild = !mBuild; dropRing();
     el.style.cursor = mBuild ? 'copy' : 'default';
     meshRebuild(); status();
     return true;
@@ -1999,7 +2011,7 @@ function meshKey(e) {
     return true;
   }
   if (e.key === 'Escape') {
-    mSnapFrom = -1; mLinkFrom = -1; mRing = []; mBuild = false; mLinkNote = '';
+    mSnapFrom = -1; mLinkFrom = -1; dropRing(); mBuild = false; mLinkNote = '';
     el.style.cursor = 'default';
     meshRebuild(); status();
     return true;
