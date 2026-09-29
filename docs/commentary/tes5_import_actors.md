@@ -386,6 +386,45 @@ power-attack direction chances, standoff and switch distances, range mults,
 rushing attacks, yield and Do Not Acquire. FO3/FNV and Morrowind sources keep
 the old vanilla fallback.
 
+### <a id="combat-style-stance"></a>Defensive is capped at Offensive (2026-09-29, confirmed in game: Nehrim trolls)
+
+**Symptom:** Nehrim's trolls backed away as the player closed in, before they
+could swing.
+
+**Cause:** Skyrim reads Defensive − Offensive (TESCombatStyle +0x24 − +0x20) as
+a stance. Defensive is read only through the getter 0x8dc050, which has 14
+callers in SkyrimSE 1.6.1170:
+- **On its own** it sets block chance (0x8dce60), block start/stop distance,
+  block time, bash chance and cover search distance.
+- **The stance** sets the advance radii (0x8dc190), cover wait/attack time,
+  `fCombatMaximumOptimalRange*` and `fCombatInventoryDesiredRangeScoreMult*`.
+  Above 0, the inner advance radius grows to `fCombatAdvanceInnerRadiusMax`
+  (512).
+- **The back-up:** 0x870260 walks the actor backward, still facing its target,
+  whenever the target is closer than `fCombatBackoffMinDistanceMult` (0.75) ×
+  (base + inner radius). The flat `fCombatBackoffChance` 0.25 is just a getter
+  (0x8dc580).
+
+Mapping Oblivion's block chance onto Defensive therefore invented a keep-away
+distance Oblivion never had. `TrollStyle` (attack 50 → 0.474, block 30 × 2.0 →
+0.600) stood 65 units off. With Nehrim's troll reach of 32 edge to edge, that
+put the troll outside its own swing.
+
+**Fix:** Defensive = min(Offensive, block) for a style that attacks, so the
+stance is never positive. Attack chance is exact, and block only drops where it
+exceeded attack. A style with Offensive 0 keeps its full Defensive, as vanilla's
+trainers do (`MG01TolfdirWard`, `csHumanMelee_AllD`: 0 / 1.0). Without that,
+Oblivion's `HelviusCeciaTraining` block partner lost all blocking.
+- **Vanilla:** 19 of 145 styles run Defensive > Offensive: tanks, bosses,
+  horses, wisps and the all-defensive ones. `csTroll` is 0.88 / 0.0.
+- **Blast radius:** 26 of 127 Oblivion.esm styles and 10 of 44 Nehrim styles
+  change. The no-style default drops 0.60 → 0.37 and `TrollStyle` 0.60 → 0.47.
+  The largest drops are `CombatKim` 0.80 → 0.37 and `CombatMage` 0.50 → 0.16.
+  An actor without a shield blocks at only `fCombatBlockChanceWeaponMult`
+  (0.25) of that anyway (0x8dce98).
+- **Tests:** `TestCombatStyleConversion::test_defensive_never_exceeds_offensive`,
+  `test_never_attacking_style_keeps_its_block`.
+
 ## <a id="vendor-factions"></a>Vendor factions
 
 TES4 `AIDT.Services` is a bitmask on the actor; Skyrim expresses the same idea

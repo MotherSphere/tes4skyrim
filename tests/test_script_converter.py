@@ -3457,6 +3457,25 @@ class TestStartCombatIsForced:
             body = body[:body.index('EndFunction')]
             assert push in body and 'StartCombat' not in body and 'StopCombat()' not in body
 
+    def test_same_burst_startcombat_adds_a_target_and_unpairs(self):
+        """TES4 StartCombat calls in one frame ADD targets (Nehrim's elevator trolls: Player,
+        then Celebro): no stand-down, and the several-target fight leaves its pair.
+
+        See: docs/commentary/script_convert.md#startcombat-adds-targets
+        """
+        src = open('script_convert/static_scripts/TES4Polyfill.psc', encoding='utf-8').read()
+        body = src[src.index('Function ForceCombatNow('):]
+        body = body[:body.index('EndFunction')]
+        assert 'Bool abAdd = False' in body.split('\n')[0]
+        assert '!abAdd && akAttacker.IsInCombat()' in body
+        drain = open('script_convert/static_scripts/TES4_CombatQueue.psc', encoding='utf-8').read()
+        update = drain[drain.index('Event OnUpdate()'):drain.index('EndEvent')]
+        assert 'ForceCombatNow(attacker, target, attackerFaction, victimFaction, adds)' in update
+        assert update.index('If adds') < update.index('Release(attacker)') < update.index('Hold(attacker, target)')
+        adds = drain[drain.index('Bool Function AddsTarget('):]
+        adds = adds[:adds.index('EndFunction')]
+        assert 'HeldTargets[n].IsDead()' in adds and 'HeldAt[n] < 1.0' in adds
+
     def test_queue_pair_count_matches_the_importer(self):
         """The queue's fixed pair count is the number of alias pairs the importer writes."""
         from tes5_import.actors.combat_approach import PAIRS
@@ -3489,25 +3508,6 @@ class TestJailIsNotExpulsion:
     TG00FindThievesGuildScript's stage 10 is the entry point of the whole
     Thieves Guild questline and was gated on this.
     """
-    def test_same_burst_startcombat_adds_a_target_and_unpairs(self):
-        """TES4 StartCombat calls in one frame ADD targets (Nehrim's elevator trolls: Player,
-        then Celebro): no stand-down, and the several-target fight leaves its pair.
-
-        See: docs/commentary/script_convert.md#startcombat-adds-targets
-        """
-        src = open('script_convert/static_scripts/TES4Polyfill.psc', encoding='utf-8').read()
-        body = src[src.index('Function ForceCombatNow('):]
-        body = body[:body.index('EndFunction')]
-        assert 'Bool abAdd = False' in body.split('\n')[0]
-        assert '!abAdd && akAttacker.IsInCombat()' in body
-        drain = open('script_convert/static_scripts/TES4_CombatQueue.psc', encoding='utf-8').read()
-        update = drain[drain.index('Event OnUpdate()'):drain.index('EndEvent')]
-        assert 'ForceCombatNow(attacker, target, attackerFaction, victimFaction, adds)' in update
-        assert update.index('If adds') < update.index('Release(attacker)') < update.index('Hold(attacker, target)')
-        adds = drain[drain.index('Bool Function AddsTarget('):]
-        adds = adds[:adds.index('EndFunction')]
-        assert 'HeldTargets[n].IsDead()' in adds and 'HeldAt[n] < 1.0' in adds
-
 
     @pytest.mark.parametrize('spelling', [
         'IsPlayerInJail', 'GetPlayerInJail', 'IsPlayerInPrison', 'SentToJail',

@@ -6927,6 +6927,25 @@ class TestCombatStyleConversion:
         csgd = _find_subrecord(convert_CSTY(self._style()), b'CSGD')
         assert abs(struct.unpack_from('<f', csgd)[0] - 0.45 / 0.95) < 1e-5
 
+    def test_defensive_never_exceeds_offensive(self):
+        """TrollStyle blocks 30% x 2.0 = 0.6 but attacks 0.474: Defensive capped, so no keep-away stance.
+
+        See: docs/commentary/tes5_import_actors.md#combat-style-stance
+        """
+        from tes5_import.actors.combat_style import convert_CSTY
+        self._styles()
+        style = dict(self._style(), **{'CSTD.BlockChance': '30'})
+        offensive, defensive = struct.unpack_from('<2f', _find_subrecord(convert_CSTY(style), b'CSGD'))
+        assert abs(offensive - 0.45 / 0.95) < 1e-5 and defensive == offensive
+
+    def test_never_attacking_style_keeps_its_block(self):
+        """Attack 0% (Blades block trainer): Offensive 0, Defensive the full block, like vanilla MG01TolfdirWard."""
+        from tes5_import.actors.combat_style import convert_CSTY
+        self._styles()
+        style = dict(self._style(), **{'CSTD.AttackChance': '0', 'CSTD.BlockChance': '50'})
+        offensive, defensive = struct.unpack_from('<2f', _find_subrecord(convert_CSTY(style), b'CSGD'))
+        assert offensive == 0.0 and abs(defensive - 1.0) < 1e-5
+
     def test_fleeing_disabled_style_never_flees(self):
         """An actor on a Fleeing Disabled style reads the flag through its own style."""
         from tes5_import.actors.combat_style import actor_combat_style, fleeing_disabled
@@ -7002,6 +7021,17 @@ class TestCombatApproachPool:
             assert len(gate) == 1 and gate[0][0] == 0x42, 'GetDistance > , alias parameter'
             assert struct.unpack_from('<fHHI', gate[0], 4) == (reach, 1, 0, 1)
 
+    def test_override_pulls_only_toward_the_current_combat_target(self):
+        """GetDistance(target alias) < 1 run on the Combat Target (3): an attacker fighting someone else is not pulled.
+
+        See: docs/commentary/script_convert.md#startcombat-adds-targets
+        """
+        for _fid, subs in self._records()['PACK']:
+            current = [d for t, d in subs if t == b'CTDA' and struct.unpack_from('<HxxIII', d, 8)[::3] == (1, 3)]
+            assert len(current) == 1 and current[0][0] == 0x82, 'GetDistance < , alias parameter'
+            value, target_alias = struct.unpack_from('<fxxxxI', current[0], 4)
+            assert value == 1.0 and target_alias % 2 == 1
+
 
 class TestAggressionTierTargeting:
     """Aggression is "which reaction tier do I attack", not "how nasty am I".
@@ -7023,17 +7053,6 @@ class TestAggressionTierTargeting:
         load_faction_player_reactions({'FACT': [
             {'FormID': self.PREY_FID, 'EditorID': 'Prey', 'RelationCount': '0'},
         ]})
-    def test_override_pulls_only_toward_the_current_combat_target(self):
-        """GetDistance(target alias) < 1 run on the Combat Target (3): an attacker fighting someone else is not pulled.
-
-        See: docs/commentary/script_convert.md#startcombat-adds-targets
-        """
-        for _fid, subs in self._records()['PACK']:
-            current = [d for t, d in subs if t == b'CTDA' and struct.unpack_from('<HxxIII', d, 8)[::3] == (1, 3)]
-            assert len(current) == 1 and current[0][0] == 0x82, 'GetDistance < , alias parameter'
-            value, target_alias = struct.unpack_from('<fxxxxI', current[0], 4)
-            assert value == 1.0 and target_alias % 2 == 1
-
 
     @staticmethod
     def _aggr(aggression, personality, factions=()):
