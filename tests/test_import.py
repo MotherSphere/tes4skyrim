@@ -4720,6 +4720,48 @@ class TestWeatherConversion:
         assert sndr_gnam(0x0040) == 0x000172A1            # 2D one-shot -> SFX
         assert sndr_gnam(0x0010) == 0x000172A1            # 3D loop -> SFX
 
+    def _dusk_rec(self, hdr=True):
+        """Nehrim Clear's dusk Sky-Lower, fog and night in every time slot."""
+        raw = bytearray(160)
+        for slot, rgb in ((7, (164, 90, 72)), (1, (164, 90, 72)),
+                          (9, (231, 150, 122))):
+            for time in range(3):
+                o = (slot * 4 + time) * 4
+                raw[o:o + 3] = bytes(rgb)
+            o = (slot * 4 + 3) * 4
+            raw[o:o + 3] = bytes((5, 16, 31))
+        over = {'NAM0.Data': bytes(raw).hex().upper()}
+        if hdr:
+            over.update({'HNAM.TargetLum': '1.2', 'HNAM.BrightScale': '1.75',
+                         'HNAM.BrightClamp': '0.3'})
+        return self._rec(**over)
+
+    def test_dome_colors_take_oblivions_hdr_hue(self):
+        """Oblivion's per-channel bright pass reddens a warm dusk sky; the hue is baked.
+
+        See: docs/commentary/tes5_import_weather.md#baked-hdr-hue
+        """
+        nam0 = _find_subrecord(self._convert(self._dusk_rec()), b'NAM0')
+        out = self._slot(nam0, 7, 2)
+        assert out[0] / out[1] > 2.2, f'sky-lower not reddened: {out}'
+        assert abs(self._lum(out) - self._lum((164, 90, 72))) < 2
+        assert self._slot(nam0, 7, 3) == (5, 16, 31), 'dark night changed'
+        assert self._slot(nam0, 1, 2) == (164, 90, 72), 'fog must not be baked'
+
+    def test_hdr_hue_needs_authored_hdr(self):
+        """A weather with no Oblivion HNAM (FO3/FNV) keeps its colors exactly."""
+        nam0 = _find_subrecord(self._convert(self._dusk_rec(hdr=False)), b'NAM0')
+        assert self._slot(nam0, 7, 2) == (164, 90, 72)
+
+    def test_cloud_tint_takes_oblivions_hdr_hue(self):
+        """The upper cloud tint shifts the same way as the dome."""
+        from tes5_import.record_types.weather import _WTHR_UPPER_LAYER
+        plain = _find_subrecord(self._convert(self._dusk_rec(hdr=False)), b'PNAM')
+        baked = _find_subrecord(self._convert(self._dusk_rec()), b'PNAM')
+        o = (_WTHR_UPPER_LAYER * 4 + 2) * 4
+        p, b = plain[o:o + 3], baked[o:o + 3]
+        assert b[2] / b[0] < p[2] / p[0], f'cloud tint not reddened: {p} -> {b}'
+
 
 class TestClimateConversion:
     def _rec(self, **over):
