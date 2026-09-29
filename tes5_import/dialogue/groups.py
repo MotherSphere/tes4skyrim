@@ -9,7 +9,7 @@ See: docs/commentary/tes5_import_dialogue.md#branches-views-topic-ownership
 
 import re
 import struct
-from collections import defaultdict
+from collections import Counter, defaultdict
 from ..base.text_reader import get_formid_index_offset, info_result_script
 from .quest import (bark_choice_gate_bytes, compute_quest_priorities,
                     has_quest_state_condition, quest_state_ctdas)
@@ -216,6 +216,24 @@ def _bark_dial_fids(dials) -> set:
     return out
 
 
+def _fill_say_dispositions(by_type: dict) -> None:
+    """Fill SAY_TOPIC_DISPOSITIONS; must run before the first should_skip_dial.
+
+    is_npc_to_npc_conversation reads it to spare script-spoken Type-1 topics.
+    Engine bark topics keep their non-identity RunOn=Target conditions.
+    See: docs/commentary/tes5_import_dialogue.md#engine-fired-say-topics
+    """
+    engine_fired = frozenset(
+        get_formid(d, 'FormID') & 0xFFFFFF for d in by_type.get('DIAL', [])
+        if classify_topic(get_str(d, 'EditorID', ''), get_int(d, 'DATA.Type'))[3])
+    SAY_TOPIC_DISPOSITIONS.clear()
+    SAY_TOPIC_DISPOSITIONS.update(build_say_topic_dispositions(by_type, engine_fired))
+    kinds = Counter(v[0] for v in SAY_TOPIC_DISPOSITIONS.values())
+    print(f"    say-driven topics: {len(SAY_TOPIC_DISPOSITIONS)} "
+          f"({kinds['ref']} retargeted to a unique ref, {kinds['drop']} drop "
+          f"target-conditions, {kinds['target']} engine-fired drop identity only)")
+
+
 def _scan_bark_choice_links(dials, infos, offset, script_vars):
     """Bark topics and the conversation topics their choices reveal.
 
@@ -383,18 +401,7 @@ def build_dialog_groups(by_type: dict, writer, npc_to_vtyp: dict,
     # Populated on demand by _build_bark_topics_per_quest; drained into SGE.
     bark_generic_quests = {}   # source DIAL EditorID -> synthetic quest FID
 
-    # --- Pre-scan ---
-    # Say-driven topics MUST be resolved before the first should_skip_dial call:
-    # is_npc_to_npc_conversation consults _SAY_TOPIC_DISPOSITIONS to spare the
-    # 293 scripted Type-1 topics (CharGen, Announcers, Daedric speeches) from
-    # the NPC-to-NPC drop. With an empty map every one of them would be skipped
-    # and the tutorial would lose its dialogue.
-    SAY_TOPIC_DISPOSITIONS.clear()
-    SAY_TOPIC_DISPOSITIONS.update(build_say_topic_dispositions(by_type))
-    n_ref = sum(1 for v in SAY_TOPIC_DISPOSITIONS.values() if v[0] == 'ref')
-    print(f"    say-driven topics: {len(SAY_TOPIC_DISPOSITIONS)} "
-          f"({n_ref} retargeted to a unique ref, "
-          f"{len(SAY_TOPIC_DISPOSITIONS) - n_ref} drop target-conditions)")
+    _fill_say_dispositions(by_type)
 
     # --- NPC-to-NPC conversation chains ------------------------------------
     # Quest-advancing engine-scheduled conversations (CharacterGen 26→27,

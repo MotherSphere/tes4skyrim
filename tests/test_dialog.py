@@ -30,6 +30,7 @@ from tes5_import.base.conditions import (
     build_or_chain,
     convert_ctda,
     convert_ctda_list,
+    convert_ctda_list_with_strings,
     has_positive_getisid,
     needs_origin_gate,
     order_condition_groups,
@@ -39,6 +40,7 @@ from tes5_import.base.conditions import (
 from tes5_import.base.owned_records import _source_counts_whole_days
 from tes5_import.dialogue.converter import DIAL_TYPE_COMBAT, DIAL_TYPE_CONVERSATION, DIAL_TYPE_DETECTION, DIAL_TYPE_MISC, DIAL_TYPE_PERSUASION, DIAL_TYPE_SERVICE, DIAL_TYPE_TOPIC, _EDID_SUBTYPE, classify_topic, convert_DIAL, convert_INFO, make_dlbr, make_dlvw, should_skip_dial
 from tes5_import.dialogue.groups import build_dialog_groups
+from tes5_import.dialogue.say_topics import ENGINE_TARGET, build_say_topic_dispositions
 from tes5_import.dialogue.quest import (convert_QUST,
                                         set_assigned_var_names)
 from tes5_import.base.tes5_reader import records
@@ -172,6 +174,21 @@ class TestCTDAConversion:
         out = convert_ctda(raw, offset=1, drop_run_on_target=False)
         assert out is not None
         assert struct.unpack_from('<I', out, 20)[0] == 1
+
+    def test_engine_fired_say_topic_keeps_state_target_tests(self):
+        """'Die, you Orc filth!': the target-race test stays, GetIsID drops."""
+        rec = {'Condition[0].Raw': _tes4_ctda(type_byte=0x02, func=69, p1=0x000191C0).hex(),
+               'Condition[1].Raw': _tes4_ctda(type_byte=0x02, func=72, p1=0x00023F2E).hex()}
+        out = convert_ctda_list_with_strings(rec, offset=1, drop_identity_target=True)
+        assert [struct.unpack_from('<HxxxxxxxxxxI', c, 8) for c, _ in out] == [(69, 1)]
+
+    def test_engine_fired_say_topic_disposition(self):
+        """A plain `Say Attack` must not strip the combat topic's target tests."""
+        by_type = {'DIAL': [{'FormID': '000000DC', 'EditorID': 'Attack'}],
+                   'SCPT': [{'SCTX': 'begin OnStartCombat\n\tSay Attack\nend'}]}
+        assert build_say_topic_dispositions(by_type) == {0xDC: ('drop', None)}
+        assert build_say_topic_dispositions(by_type, frozenset({0xDC})) == {
+            0xDC: ENGINE_TARGET}
 
     def test_identity_is_never_retargeted_onto_a_reference(self):
         """GetIsID must never land on RunOn=Reference (the 667-GREETING

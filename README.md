@@ -94,9 +94,9 @@ python convert.py --build-morrowind-patch "C:\path\to\Morrowind\Data Files"
 
 A decent PC. More cores make it faster, but each core also uses more RAM. Tested on a 7950X3D with 32 GB of RAM (converting Oblivion.esm peaks at about 16 GB).
 
-**The easy way: the portable package.** Download `TESAutoConvert-<version>-win64.zip`, unzip it anywhere you can write to (not `Program Files`), and double-click `TES Auto-Convert.cmd`. It carries its own Python with every package installed, so steps 1 and 2 below are already done. You still need steps 3 and 4.
+**The easy way: the portable package.** Download `TESAutoConvert-<version>-win64.zip`, unzip it anywhere you can write to (not `Program Files`), and double-click `TES Auto-Convert.cmd`. It carries its own Python with every package installed, so steps 1 and 2 below are already done. You still need steps 3 to 5.
 
-Running from a source checkout instead, you need four things:
+Running from a source checkout instead, you need five things:
 
 1. **Python 3.14.** Use exactly 3.14. Other versions need you to compile the navmesh module yourself (see `native/dist/README.md`).
 2. **The Python packages.** Open PowerShell in this folder and paste:
@@ -109,6 +109,7 @@ Running from a source checkout instead, you need four things:
    dragging mod archives onto the GUI.
 3. **The Skyrim SE Creation Kit**, free on Steam. It provides lip sync and the files scripts are compiled against.
 4. **xWMAEncode.exe**, for voice files. See the note below.
+5. **[SKSE](https://skse.silverlock.org/), with its script sources**, extracted into the real Skyrim `Data` folder (not only a mod manager's), so `Data\Scripts\Source` holds its `.psc` files. Converted scripts are compiled against them.
 
 > **xWMAEncode.exe** ships with the [Microsoft DirectX SDK (June 2010)](https://www.microsoft.com/en-us/download/details.aspx?id=6812)
 > and cannot be redistributed. You should extract it from the SDK installer using 7-zip to avoid having to do a full install.
