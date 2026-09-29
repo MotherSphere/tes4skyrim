@@ -4049,8 +4049,24 @@ them at all. A link joins two triangles that do NOT share an edge, so the only
 way to see one is to draw it centroid-to-centroid (orange).
 
 Links are **directional** — Ledge Up is not Ledge Down — so `l` takes the upper
-triangle first. `replay` drops a link whose triangle was deleted and remaps the
-survivors, the same tombstone-then-compact rule the door flags follow.
+triangle first, and chevrons along the line point down the drop. `replay` drops
+a link whose triangle was deleted and remaps the survivors, the same
+tombstone-then-compact rule the door flags follow. `l` refuses a triangle with
+no open edge, and a link that cannot be written draws red; see
+[pinned drop links](#pinned-drop-links).
+
+### <a id="cellview-layer-cut"></a>Cellview: the layer cut and page preferences
+
+The cut slider clips collision outside a height band with two three.js clipping
+planes, so one storey can be edited without the floors above and below in the
+way. The raycaster ignores clipping, so surface picking filters hits outside
+the band itself. **solid** draws collision opaque with a polygon offset, so the
+navmesh lying ON the floor still draws over it.
+
+The plugin and the Layers checkboxes are remembered in
+`export/cellview_prefs.json` (`server.save_prefs`), not browser storage: the
+GUI serves the page on a free port each launch, and browser storage is per
+origin, so it came back empty every time.
 
 Measured: `ImperialDungeon01` has one (triangle 567 → 276, a 192-unit drop);
 the Bruma corpus interiors have none, being single-storey.
@@ -4681,7 +4697,33 @@ whose open edge lies nearest the other side, which is the same rule
 `_open_edge_towards` uses to pick the edge. So extending or re-cutting a lip
 triangle keeps its drop-down. A lip on a triangle deleted with nothing frozen
 over it has no heir, and its link is dropped. Not yet carried: door flags, and
-ledge links added or removed in the editor (the pin file stores no links).
+a generator ledge REMOVED in the editor (`del_link` is not pinned).
+
+### <a id="pinned-drop-links"></a>Pinned drop links
+
+**Code:** `navmesh_pins.links_for` / `save(links=)`, `navmesh_frozen._carry_ledges`,
+`bake.frozen_patch`.
+
+A link added in the editor is pinned as its two triangles by WORLD position
+(the `links` section, 18 floats: upper triangle, then lower), since the
+generator renumbers triangles on every build. Pinning a link also freezes and
+voids BOTH its triangles, so they come back verbatim. After the frozen patches
+go in, each stored triangle resolves to its heir by the same `_heir` rule as a
+carried generator ledge. Unpinning a patch drops every link with an end on it,
+and each link enters `digest()`, so pinning one restages only that cell.
+
+**Both ends need an open edge, or the link cannot be written.** A carrier
+edge's neighbour slot holds the Edge Link index instead of a neighbour
+(xEdit `wbEdgeToStr`), so an edge cannot be both. Vanilla census, Skyrim.esm
+(15,966 navmeshes): 2,027 Ledge Down and 2,027 Ledge Up, every one on an edge no
+other triangle shares. On the 1,705 reciprocal same-mesh pairs, the two lips'
+midpoints are 51u apart in plan at the median (90th percentile 96u, max 322u),
+with a drop of 89u (90th percentile 240u). So the landing is the LOWER FLOOR'S
+OWN EDGE near the ledge, usually against the wall below it. The first pinned
+links (SchattenrufMinePart02) all failed this way: each lower triangle lay
+mid-floor under a walkway, so `_heir` found it but it had no lip, and
+`_resolve_ledge_links` would have refused it anyway. Cellview now refuses such a
+link at `l` and draws any existing one red.
 
 ### <a id="pin-ab-toggle"></a>The pinned-edits toggle is a RE-BAKE
 

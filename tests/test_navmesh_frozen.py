@@ -158,6 +158,22 @@ def test_a_ledge_on_a_triangle_deleted_outright_is_dropped():
     assert out == []
 
 
+def test_a_pinned_link_lands_on_the_triangles_now_over_its_ends():
+    """A pinned (upper, lower) pair resolves to the rebuilt mesh's frozen triangles.
+
+    See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
+    """
+    deck = [(x, y, 200.0) for (x, y, _z) in GRID]
+    verts = GRID + deck
+    tris = GRID_TRIS + [tuple(k + 9 for k in t) for t in GRID_TRIS]
+    up, down = _pts(verts, tris[8]), _pts(verts, tris[1])
+    out_v, out_t, out = apply_frozen(verts, tris, [], [up, down], [up, down],
+                                     [(up, down)])
+    assert len(out) == 1 and out[0][2] == 200.0
+    assert frozenset(_pts(out_v, out_t[out[0][0]])) == frozenset(up)
+    assert frozenset(_pts(out_v, out_t[out[0][1]])) == frozenset(down)
+
+
 def test_no_patch_leaves_the_mesh_untouched():
     """An unpatched cell must be exactly what it was before patches existed."""
     verts, tris, _l = apply_frozen(GRID, GRID_TRIS, [], [], [])
@@ -170,16 +186,25 @@ def test_no_patch_leaves_the_mesh_untouched():
 
 def test_a_deletion_only_edit_freezes_nothing():
     """Deleting a triangle voids it; it never freezes the whole mesh."""
-    frozen, voids = frozen_patch(GRID, GRID_TRIS, [{'op': 'del_tri', 'tri': 0}])
+    frozen, voids, _l = frozen_patch(GRID, GRID_TRIS, [{'op': 'del_tri', 'tri': 0}])
     assert frozen == [] and voids == [_pts(GRID, GRID_TRIS[0])]
 
 
 def test_a_move_freezes_and_voids_every_triangle_on_that_vertex():
     """The moved corner's triangles are frozen as moved and voided as generated."""
     ops = [{'op': 'move_vert', 'v': 4, 'to': [11.0, 11.0, 0.0]}]
-    frozen, voids = frozen_patch(GRID, GRID_TRIS, ops)
+    frozen, voids, _l = frozen_patch(GRID, GRID_TRIS, ops)
     assert len(frozen) == len(voids) == 6
     assert all((11.0, 11.0, 0.0) in t for t in frozen)
+
+
+def test_an_added_link_freezes_both_triangles_and_keeps_the_link():
+    """Linking two untouched triangles pins exactly them, plus the pair itself."""
+    frozen, voids, links = frozen_patch(GRID, GRID_TRIS,
+                                        [{'op': 'add_link', 'up': 2, 'down': 7}])
+    ends = [_pts(GRID, GRID_TRIS[2]), _pts(GRID, GRID_TRIS[7])]
+    assert frozen == voids == ends
+    assert links == [tuple(ends)]
 
 
 def test_a_re_edit_replaces_the_older_frozen_triangle():
@@ -244,6 +269,18 @@ def test_unpinning_removes_only_the_patch_at_the_point(tmp_path, monkeypatch):
     assert (nf, nv) == (2, 2)
     assert pins.tris_for('Nehrim.esm', 'frozen', 'Cell') == FAR
     assert pins.tris_for('Nehrim.esm', 'voids', 'Cell') == []
+
+
+def test_links_round_trip_and_unpin_with_their_patch(tmp_path, monkeypatch):
+    """A pinned link reads back, moves the digest, and goes when its patch is unpinned."""
+    _store(tmp_path, monkeypatch)
+    pins.save('Nehrim.esm', 'Cell', frozen=FLIPPED + FAR, voids=REPLACED)
+    bare = pins.digest('Nehrim.esm', 'Cell')
+    pins.save('Nehrim.esm', 'Cell', links=[(FAR[0], FLIPPED[0])])
+    assert pins.links_for('Nehrim.esm', 'Cell') == [(FAR[0], FLIPPED[0])]
+    assert pins.digest('Nehrim.esm', 'Cell') != bare
+    pins.remove_patch('Nehrim.esm', 'Cell', (3.0, 3.0, 0.0))
+    assert pins.links_for('Nehrim.esm', 'Cell') == []
 
 
 def test_unpinning_a_whole_cell_clears_its_patches(tmp_path, monkeypatch):

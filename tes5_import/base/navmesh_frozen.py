@@ -350,7 +350,7 @@ def _open_edges(tris):
     return out
 
 
-def _mean(pts):
+def centroid(pts):
     """Centroid of a triangle given as three points."""
     return tuple(sum(p[k] for p in pts) / 3.0 for k in range(3))
 
@@ -385,28 +385,36 @@ def _heir(verts, out, first, lips, old, toward):
     return None if best is None else best[1]
 
 
-def _carry_ledges(verts, out, first, keep, before, ledges):
+def _carry_ledges(verts, out, first, keep, before, ledges, links=()):
     """Ledge pairs renumbered into `out`; a removed side moves to its heir.
 
     `before` is each ledge triangle's corners as the generator built them.
+    `links` are pinned `(upper, lower)` triangles, each resolved to the
+    triangle now over it the same way.
     See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
     """
     lips = _open_edges(out)
+    rows = [(tuple(keep[i] if i in keep
+                   else _heir(verts, out, first, lips, before[i], centroid(before[j]))
+                   for i, j in ((u, l), (l, u))), tuple(rest))
+            for (u, l, *rest) in ledges or ()]
+    rows += [((_heir(verts, out, 0, lips, up, centroid(down)),
+               _heir(verts, out, 0, lips, down, centroid(up))),
+              (centroid(up)[2] - centroid(down)[2],))
+             for up, down in links]
     carried, seen = [], set()
-    for (u, l, *rest) in ledges or ():
-        ends = tuple(keep[i] if i in keep
-                     else _heir(verts, out, first, lips, before[i], _mean(before[j]))
-                     for i, j in ((u, l), (l, u)))
+    for ends, rest in rows:
         if None not in ends and ends[0] != ends[1] and ends not in seen:
             seen.add(ends)
-            carried.append(ends + tuple(rest))
+            carried.append(ends + rest)
     return carried
 
 
-def apply_frozen(verts, tris, ledges, frozen, voids):
-    """(verts, tris, ledges) with each frozen patch put back verbatim.
+def apply_frozen(verts, tris, ledges, frozen, voids, links=()):
+    """(verts, tris, ledges) with each frozen patch and its pinned links put back.
 
     A ledge whose triangle the patch replaced moves to the new triangle over it.
+    `links` are `(upper, lower)` pairs of triangles given as three points.
     See: docs/commentary/tes5_import_navmesh.md#frozen-navmesh-patches
     """
     if not tris or not (frozen or voids):
@@ -426,6 +434,7 @@ def apply_frozen(verts, tris, ledges, frozen, voids):
     frozen_t = ccw_in_plan(pool.verts, _place(frozen, pool.frozen_corner))
     refill_t = ccw_in_plan(pool.verts, _place(refill, pool.refill_corner))
     out = kept_t + _stitch(pool.verts, frozen_t, kept_t, refill_t) + refill_t
-    ledges = _carry_ledges(pool.verts, out, len(kept_t), keep, before, ledges)
+    ledges = _carry_ledges(pool.verts, out, len(kept_t), keep, before, ledges,
+                           links)
     new_verts, new_tris = drop_unused_verts(pool.verts, out)
     return new_verts, new_tris, ledges
