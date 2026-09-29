@@ -744,7 +744,8 @@ class TestConverters:
         writer = _DerivingWriter()
         cr.load_creature_item_index({})
         race, variants, _vnam = cr._build_race_chain(
-            writer, founder, key[0], list(key[1]), proj, key, {key: [founder, black, twin]})
+            writer, founder, key[0], list(key[1]), proj, key, {key: [founder, black, twin]},
+            set())
         assert list(variants) == [42] and variants[42] != race
         reach = {struct.unpack('<I', d[12:16])[0]:
                  struct.unpack_from('<f', self._get_subrecord_data(d, 'DATA'), 100)[0]
@@ -753,6 +754,31 @@ class TestConverters:
         arma = next(d for t, d in writer.records if t == 'ARMA')
         extra = [struct.unpack('<I', v)[0] for s, v in self._iter_subrecords(arma) if s == 'MODL']
         assert extra == [variants[42]]
+
+    def test_only_a_talking_creature_race_allows_pc_dialogue(self, tmp_path):
+        """A creature named by a GREETING GetIsID or a TES3 MWIN Topic Actor talks; one named
+        only by a combat bark does not, and only a talking race keeps Allow PC Dialogue."""
+        from tes5_import.actors import creature_races as cr
+        from tes5_import.actors.creature_speakers import talking_creatures
+        from tes5_import.base.text_reader import get_formid
+
+        def getisid(fid):
+            """A raw TES4 `GetIsID(fid) == 1` condition."""
+            return (bytes(4) + struct.pack('<fII', 1.0, 72, fid) + bytes(8)).hex()
+        crabs = [{'Signature': 'CREA', 'FormID': f'0000000{i}', 'EditorID': e}
+                 for i, e in enumerate(('talker', 'barker', 'mwtalker', 'mute'), 1)]
+        by_type = {
+            'DIAL': [{'Signature': 'DIAL', 'FormID': '00000A01', 'EditorID': 'GREETING', 'DATA.Type': '0'},
+                     {'Signature': 'DIAL', 'FormID': '00000A02', 'EditorID': 'Attack', 'DATA.Type': '2'}],
+            'INFO': [{'Signature': 'INFO', 'ParentDIAL': '00000A01', 'Condition[0].Raw': getisid(1)},
+                     {'Signature': 'INFO', 'ParentDIAL': '00000A02', 'Condition[0].Raw': getisid(2)}]}
+        (tmp_path / 'MWIN.txt').write_text(
+            '---RECORD_BEGIN---\nSignature=MWIN\nInfoType=Topic\nActor=MWTalker\n---RECORD_END---\n'
+            '---RECORD_BEGIN---\nSignature=MWIN\nInfoType=Voice\nActor=mute\n---RECORD_END---\n')
+        talkers = talking_creatures(crabs, by_type, {}, str(tmp_path))
+        assert talkers == {get_formid(crabs[0], 'FormID'), get_formid(crabs[2], 'FormID')}
+        flags = {t: struct.unpack_from('<I', cr._race_data({}, talks=t), 32)[0] for t in (False, True)}
+        assert not flags[False] & 0x200000 and flags[True] & 0x200000
 
     def test_atkd_carries_the_attack_spell(self):
         """ATKD field 3 is 'Attack Spell' (xEdit: [SPEL, SHOU, NULL]) — the

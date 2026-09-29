@@ -36,6 +36,7 @@ them does.
 - [A plugin's own race stands in by its shared face parts](#new-races-by-face-parts)
 - [A creature race is a caster only for a castable spell](#caster-race-needs-a-castable-spell)
 - [Attack reach is per creature: reach-variant races](#reach-variant-races)
+- [A creature race allows PC dialogue only when a creature on it talks](#creature-talk-prompt)
 - [Voice type resolution](#voice-resolution)
 
 ## <a id="acbs-flag-collision"></a>ACBS flags: the same bit means three different things
@@ -1029,6 +1030,35 @@ Bethesda's own values differ between the games with no fixed ratio (Oblivion →
 Skyrim race: troll 100→128, skeleton 36→96, mudcrab 32→120, deer 32→96, rat
 96→64, NPC 76.8→96), so no rescale is applied. Not yet traced: whether
 `0x5c0b80` is the HitFrame hit test itself or the combat AI's approach check.
+
+## <a id="creature-talk-prompt"></a>A creature race allows PC dialogue only when a creature on it talks
+
+**Code:** `tes5_import/actors/creature_speakers.py` `talking_creatures`,
+`creature_races.py` `_race_data`.
+
+Skyrim shows the "Talk" prompt from RACE DATA flag `0x00200000` Allow PC
+Dialogue (xEdit `wbRACE_DATAFlags01`), not from whether the actor has any lines.
+The creature race template is vanilla `DogRace` (`0x00308948`), so every
+converted creature showed "Talk" and opened an empty menu. Vanilla sets the bit
+only where an animal talks: `WolfRace` is `0x00108948`, and of 89 non-playable
+races the only animals with it are the talking dog races and `WerewolfBeastRace`.
+
+The bit is now cleared unless a CREA sharing the race is the named speaker of a
+line the player can reach. A single talking creature turns it on for its whole
+shared race; there are no talking-only race variants.
+- **TES4 INFO** (plugin and masters): a positive `GetIsID(creature)` under
+  `GREETING` or a topic that is neither a bark (`classify_topic`) nor a
+  Conversation (type 1, NPC-to-NPC and Say).
+- **TES3 MWIN** (the plugin's own): `Actor=<creature id>` on a Topic, Greeting
+  or Persuasion line. OpenMW's `Filter::testActor` gives a creature only lines
+  that name its own id, so this is complete.
+
+Measured: Oblivion.esm 0 of 914 CREA, Nehrim.esm 0 of 734, Morrowind.esm 33 of
+260 (Yagrum Bagarn, `vivec_god`, the Dagoth brothers, `scamp_creeper`,
+`mudcrab_unique`), TR_Mainland 139 of 721. No TR talk line names a Tamriel_Data
+creature, so reading only the plugin's own MWIN loses nothing. The Morroblivion
+compat patch's Yagrum has only barks in our build and loses "Talk". Confirmed
+in game.
 
 ## <a id="creature-class-and-package"></a>A creature needs a CLASS and a PACKAGE
 
