@@ -6800,6 +6800,12 @@ class TestCombatApproachPool:
         assert len(aliases) == 2 * PAIRS
         assert all((b'ECOR' in a) == (i % 2 == 0) for i, a in enumerate(aliases))
 
+    def test_quest_carries_the_combat_queue_script(self):
+        """The pool quest's VMAD, right after EDID, attaches TES4_CombatQueue."""
+        (_fid, subs), = self._records()['QUST']
+        assert [t for t, _d in subs[:3]] == [b'EDID', b'VMAD', b'FULL']
+        assert b'TES4_CombatQueue' in subs[1][1]
+
     def test_override_applies_only_out_of_reach(self):
         """Melee: travel-512 template, GetDistance(alias 1) > 512; ranged: 1024. Weapon drawn."""
         packs = {}

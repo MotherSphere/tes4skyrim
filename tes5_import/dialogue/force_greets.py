@@ -94,9 +94,11 @@ def pool_quest(fid: int, edid: str, full: str, pack_fids: list) -> bytes:
     return alias_quest(fid, edid, full, [pack_formid_subrecord('ALPC', p) for p in pack_fids])
 
 
-def alias_quest(fid: int, edid: str, full: str, alias_bodies: list) -> bytes:
+def alias_quest(fid: int, edid: str, full: str, alias_bodies: list, vmad: bytes = b'') -> bytes:
     """A start-game QUST with one empty, runtime-filled alias per body (its subrecords after FNAM)."""
     subs = pack_string_subrecord('EDID', edid)
+    if vmad:
+        subs += pack_subrecord('VMAD', vmad)
     subs += pack_string_subrecord('FULL', full)
     subs += pack_subrecord('DNAM', struct.pack('<HBBII', _SGE_FLAGS,
                                                _PRIORITY, 0, 0, 0))

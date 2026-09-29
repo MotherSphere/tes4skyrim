@@ -2714,6 +2714,19 @@ dead attacker or target is skipped, as TES4 does nothing there. The 4-argument
   never attacked. Charactergen's ambush assassin `CGAssassin04Ref` stood beside
   Renault, and the Blades, only fighting back once hit, stood too.
 
+**StartCombat and StopCombat return at once (confirmed in game: Nehrim mine
+exit).** The pairing first ran on the caller's thread. `MQ00AusgangTriggerScript`
+starts twelve trolls in one state, then counts Nehrim's timers to Merzul (+3 s)
+and the fire wall (`MQ00Feuer01`–`07`, done +5.3 s); the twelve calls, each
+walking all 32 pairs through alias natives, held that countdown back until the
+trolls had charged. The quest now carries `TES4_CombatQueue`: `ForceCombatApproach`
+and `EndCombatApproach` push onto its 128-entry ring and return; its `OnUpdate`
+carries the calls out one at a time in call order (a StopCombat never overtakes
+its StartCombat, and two fights never race for a pair), keeps its own
+attacker/target array per pair (read from the aliases once per save), and folds
+a repeat of an attacker's pending call. A pool quest without the script, or a
+full ring, falls back to `ForceCombatNow` with no pair.
+
 The distance gate is what makes it work for both: far out, the override pulls
 the attacker in; inside its travel stop, Skyrim's own combat fights. `GetDistance`
 with the CTDA "use aliases" flag (0x02) is vanilla's (230 uses, 13 in PACK);

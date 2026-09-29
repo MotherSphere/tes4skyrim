@@ -3423,7 +3423,7 @@ class TestStartCombatIsForced:
         See: docs/commentary/script_convert.md#startcombat-retargets"""
         src = open('script_convert/static_scripts/TES4Polyfill.psc',
                    encoding='utf-8').read()
-        body = src[src.index('Function ForceCombatApproach('):]
+        body = src[src.index('Function ForceCombatNow('):]
         body = body[:body.index('EndFunction')]
         assert 'GetCombatTarget() != akTarget' in body
         assert body.index('StandDown(akAttacker)') < body.index('StartCombat(akTarget)')
@@ -3432,18 +3432,37 @@ class TestStartCombatIsForced:
         assert stand.index('StopCombat()') < stand.index('While akActor.IsInCombat()')
 
     def test_startcombat_pairs_after_the_native_and_stopcombat_unpairs(self):
-        """Dead actors are skipped; the pool pair is filled after StartCombat and emptied by StopCombat.
+        """Dead actors are skipped; the queue pairs after the forced StartCombat and unpairs before StopCombat.
 
         See: docs/commentary/script_convert.md#startcombat-approaches-an-undetected-target
         """
         src = open('script_convert/static_scripts/TES4Polyfill.psc', encoding='utf-8').read()
-        body = src[src.index('Function ForceCombatApproach('):]
+        body = src[src.index('Function ForceCombatNow('):]
         body = body[:body.index('EndFunction')]
         assert 'akAttacker.IsDead() || akTarget.IsDead()' in body.split('\n')[1]
-        assert body.index('StartCombat(akTarget)') < body.index('HoldCombatPair(akPool, akAttacker, akTarget)')
-        end = src[src.index('Function EndCombatApproach('):]
-        end = end[:end.index('EndFunction')]
-        assert end.index('slot.Clear()') < end.index('EndCombat(akActor, akAttackers)')
+        drain = open('script_convert/static_scripts/TES4_CombatQueue.psc', encoding='utf-8').read()
+        drain = drain[drain.index('Event OnUpdate()'):drain.index('EndEvent')]
+        assert drain.index('If TES4Polyfill.ForceCombatNow(') < drain.index('Hold(attacker, target)')
+        assert drain.index('Release(attacker)') < drain.index('TES4Polyfill.EndCombat(attacker')
+
+    def test_startcombat_and_stopcombat_return_at_once(self):
+        """Both queue on the pool, so a script starting a dozen fights keeps its timers (Nehrim's mine exit fire).
+
+        See: docs/commentary/script_convert.md#startcombat-approaches-an-undetected-target
+        """
+        src = open('script_convert/static_scripts/TES4Polyfill.psc', encoding='utf-8').read()
+        for name, push in (('ForceCombatApproach', 'queue.Push(akAttacker, akTarget'),
+                           ('EndCombatApproach', 'queue.Push(akActor, None')):
+            body = src[src.index(f'Function {name}('):]
+            body = body[:body.index('EndFunction')]
+            assert push in body and 'StartCombat' not in body and 'StopCombat()' not in body
+
+    def test_queue_pair_count_matches_the_importer(self):
+        """The queue's fixed pair count is the number of alias pairs the importer writes."""
+        from tes5_import.actors.combat_approach import PAIRS
+        src = open('script_convert/static_scripts/TES4_CombatQueue.psc', encoding='utf-8').read()
+        assert f'Int Property Pairs = {PAIRS} AutoReadOnly' in src
+        assert f'new Actor[{PAIRS}]' in src
 
     def test_forcecombat_never_puts_the_player_in_the_shared_pair(self):
         """A player in TES4ForceCombatVictims makes every forced Attacker (Nehrim's
@@ -3452,7 +3471,7 @@ class TestStartCombatIsForced:
         See: docs/commentary/script_convert.md#forcecombat-player-faction"""
         src = open('script_convert/static_scripts/TES4Polyfill.psc',
                    encoding='utf-8').read()
-        body = src[src.index('Function ForceCombatApproach('):]
+        body = src[src.index('Function ForceCombatNow('):]
         body = body[:body.index('EndFunction')]
         assert 'GetFormFromFile(0x06E02D, "Skyrim.esm")' in body
         assert 'player.RemoveFromFaction(akVictims)' in body

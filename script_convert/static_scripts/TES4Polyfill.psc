@@ -419,16 +419,27 @@ EndFunction
 ; function waits for combat to actually end, and then starts it afresh.
 ; Kept for scripts compiled before ForceCombatApproach; the signature must not change.
 Function ForceCombat(Actor akAttacker, Actor akTarget, Faction akAttackers, Faction akVictims) Global
-  ForceCombatApproach(akAttacker, akTarget, akAttackers, akVictims, None)
+  ForceCombatNow(akAttacker, akTarget, akAttackers, akVictims)
 EndFunction
 
 ; ForceCombat, then the attacker and target join a pair of the importer's
 ; TES4CombatApproaches quest, whose combat override package keeps the attacker
 ; closing on the target the way TES4 combat does instead of hiding or searching.
+; Both happen on the pool's own thread (TES4_CombatQueue), so the caller goes
+; on at once as TES4's StartCombat does; a pool without the queue, or a full
+; queue, fights at once without a pair.
 ; See docs/commentary/script_convert.md#startcombat-approaches-an-undetected-target
 Function ForceCombatApproach(Actor akAttacker, Actor akTarget, Faction akAttackers, Faction akVictims, Quest akPool) Global
+  TES4_CombatQueue queue = akPool as TES4_CombatQueue
+  If !queue || !queue.Push(akAttacker, akTarget, akAttackers, akVictims)
+    ForceCombatNow(akAttacker, akTarget, akAttackers, akVictims)
+  EndIf
+EndFunction
+
+; The forced StartCombat itself; False when either actor is missing or dead.
+Bool Function ForceCombatNow(Actor akAttacker, Actor akTarget, Faction akAttackers, Faction akVictims) Global
   If akAttacker == None || akTarget == None || akAttacker.IsDead() || akTarget.IsDead()
-    Return
+    Return False
   EndIf
   Actor player = Game.GetPlayer()
   If akAttackers != None && akVictims != None
@@ -453,61 +464,16 @@ Function ForceCombatApproach(Actor akAttacker, Actor akTarget, Faction akAttacke
     StandDown(akAttacker)
   EndIf
   akAttacker.StartCombat(akTarget)
-  HoldCombatPair(akPool, akAttacker, akTarget)
+  Return True
 EndFunction
 
-; Attacker alias of the pair `akAttacker` holds, else of a pair that is empty or
-; whose actors are dead, else of the first pair; None without a pool.
-ReferenceAlias Function CombatPair(Quest akPool, Actor akAttacker) Global
-  If !akPool
-    Return None
-  EndIf
-  ReferenceAlias free = None
-  Int i = 0
-  ReferenceAlias slot = akPool.GetAlias(0) as ReferenceAlias
-  While slot
-    Actor held = slot.GetActorReference()
-    If held == akAttacker
-      Return slot
-    EndIf
-    Actor victim = (akPool.GetAlias(i + 1) as ReferenceAlias).GetActorReference()
-    If !free && (!held || held.IsDead() || !victim || victim.IsDead())
-      free = slot
-    EndIf
-    i += 2
-    slot = akPool.GetAlias(i) as ReferenceAlias
-  EndWhile
-  If !free
-    free = akPool.GetAlias(0) as ReferenceAlias
-  EndIf
-  Return free
-EndFunction
-
-; Put `akAttacker` and `akTarget` in one pair of `akPool` (attacker alias 2n, target alias 2n+1).
-Function HoldCombatPair(Quest akPool, Actor akAttacker, Actor akTarget) Global
-  ReferenceAlias slot = CombatPair(akPool, akAttacker)
-  If !slot
-    Return
-  EndIf
-  If !akPool.IsRunning()
-    akPool.Start()
-  EndIf
-  ReferenceAlias victim = akPool.GetAlias(slot.GetID() + 1) as ReferenceAlias
-  If slot.GetActorReference() != akAttacker || victim.GetActorReference() != akTarget
-    victim.ForceRefTo(akTarget)
-    slot.ForceRefTo(akAttacker)
-    akAttacker.EvaluatePackage()
-  EndIf
-EndFunction
-
-; TES4 StopCombat on an attacker ForceCombatApproach paired: empty its pair, then EndCombat.
+; TES4 StopCombat on an attacker ForceCombatApproach may have paired: queued
+; behind its StartCombat, it empties the pair, then EndCombat.
 Function EndCombatApproach(Actor akActor, Faction akAttackers, Quest akPool) Global
-  ReferenceAlias slot = CombatPair(akPool, akActor)
-  If slot && slot.GetActorReference() == akActor
-    (akPool.GetAlias(slot.GetID() + 1) as ReferenceAlias).Clear()
-    slot.Clear()
+  TES4_CombatQueue queue = akPool as TES4_CombatQueue
+  If !queue || !queue.Push(akActor, None, akAttackers, None)
+    EndCombat(akActor, akAttackers)
   EndIf
-  EndCombat(akActor, akAttackers)
 EndFunction
 
 ; StopCombat, then wait (up to a second) for the controller to actually let go.

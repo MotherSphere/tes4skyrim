@@ -13,7 +13,8 @@ See: docs/commentary/script_convert.md#startcombat-approaches-an-undetected-targ
 
 import struct
 
-from script_convert.constants import COMBAT_APPROACH_QUEST
+from script_convert.constants import COMBAT_APPROACH_QUEST, COMBAT_QUEUE_SCRIPT
+from script_convert.pipeline import build_vmad_quest_fragments
 from ..base.conditions import build_ctda
 from ..dialogue.force_greets import alias_quest
 from ..packages.converter import ANY_TIME_PSDT, Inputs, package_markers
@@ -102,10 +103,13 @@ def _pair(writer, quest_fid: int, n: int) -> list:
 
 
 def create_combat_approach(writer, master_index=None) -> dict:
-    """The pool quest, adopted from a master that has it; {EditorID: FormID}."""
+    """The pool quest with its TES4_CombatQueue script, adopted from a master that has it; {EditorID: FormID}."""
     fid = master_index.find_by_edid(b'QUST', COMBAT_APPROACH_QUEST) if master_index is not None else 0
     if not fid:
         fid = writer.derive_formid(_QUEST_SITE, COMBAT_APPROACH_QUEST)
         bodies = [body for n in range(PAIRS) for body in _pair(writer, fid, n)]
-        writer.add_record('QUST', alias_quest(fid, COMBAT_APPROACH_QUEST, 'TES4 Combat Approaches', bodies))
+        vmad = build_vmad_quest_fragments(COMBAT_APPROACH_QUEST, [], None,
+                                          attached_script=(COMBAT_QUEUE_SCRIPT, {}), quest_fid=fid)
+        writer.add_record('QUST', alias_quest(fid, COMBAT_APPROACH_QUEST, 'TES4 Combat Approaches',
+                                              bodies, vmad))
     return {COMBAT_APPROACH_QUEST: fid}

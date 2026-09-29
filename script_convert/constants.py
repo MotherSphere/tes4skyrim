@@ -634,6 +634,9 @@ FORCE_FLEE_QUEST = 'TES4ForceFlees'
 #: The importer's combat-approach alias quest, which StartCombat and StopCombat's Quest property names.
 COMBAT_APPROACH_QUEST = 'TES4CombatApproaches'
 
+#: The static script on that quest that queues and carries out StartCombat and StopCombat.
+COMBAT_QUEUE_SCRIPT = 'TES4_CombatQueue'
+
 #: The importer's fall-damage spell, which ResetFallDamageTimer's Spell property names.
 FALL_DAMAGE_SPELL = 'TES4NoFallDamage'
 
