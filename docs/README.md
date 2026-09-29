@@ -81,6 +81,7 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [ck_vs_game_missing_objects.md](commentary/ck_vs_game_missing_objects.md) | tes5_import/ - objects in the CK, missing in game |
 | [ck_warnings.md](commentary/ck_warnings.md) | tes5_import/ - what the CK complains about |
 | [core_run_log.md](commentary/core_run_log.md) | core/run_log.py - per-run logs and their profiling timestamps |
+| [core_setup_check.md](commentary/core_setup_check.md) | TES Auto-Convert.cmd, core/setup_check.py - the launcher and its install checks |
 | [ingame_testing.md](commentary/ingame_testing.md) | tools/dialog/ - in-game test methodology |
 | [morrowind_runtime.md](commentary/morrowind_runtime.md) | tes_runtime/morrowind/, external/openmw/ - Morrowind dialogue and MWScript in-engine |
 | [performance.md](commentary/performance.md) | the whole pipeline - performance and parallelism |
@@ -108,7 +109,6 @@ Why the SHIPPED code is the way it is. Named after the code it explains; opens w
 | [tes_runtime_crime.md](commentary/tes_runtime_crime.md) | tes_runtime/tes/crime.cpp, tes5_import/record_types/crime.py - bounty realms, jails and the arrest |
 | [tes_runtime_guns.md](commentary/tes_runtime_guns.md) | tes_runtime/fallout/fire.cpp - the gun shot, reload key and ammo restriction in FalloutRuntime |
 | [tes_runtime_journal.md](commentary/tes_runtime_journal.md) | tes_runtime/tes/journal_objectives.cpp, asset_convert/ui/journal_patch.py - a clicked quest objective shows its stage's text |
-| [tools_portable_build.md](commentary/tools_portable_build.md) | tools/release/build_portable.py - the portable Windows package with its own Python |
 | [version_upgrade_planning.md](commentary/version_upgrade_planning.md) | version.py - which steps a new release owes |
 
 ## `plans/`
