@@ -986,6 +986,11 @@ def cell_geom_key(rec, land_rec, cell_rec, refr_recs, base_model_by_fid,
                      pin_digest=cell_pins(rec, cell_rec, geom_cache)[1])
 
 
+def geom_cache_path(geom_cache, cell_fid, pgrd_fid):
+    """Path of one cell's entry in the navmesh geometry cache."""
+    return os.path.join(geom_cache[0], '%08X_%08X.pkl' % (cell_fid, pgrd_fid))
+
+
 def cached_geometry(geom_cache, cell_fid, pgrd_fid):
     """The stored (verts, tris, ledges) for one cell, ignoring its hash, or None.
 
@@ -994,9 +999,8 @@ def cached_geometry(geom_cache, cell_fid, pgrd_fid):
     """
     if not geom_cache:
         return None
-    path = os.path.join(geom_cache[0], '%08X_%08X.pkl' % (cell_fid, pgrd_fid))
     try:
-        with open(path, 'rb') as fh:
+        with open(geom_cache_path(geom_cache, cell_fid, pgrd_fid), 'rb') as fh:
             stored = pickle.load(fh)
         return ([tuple(v) for v in stored['verts'].tolist()],
                 [tuple(t) for t in stored['tris'].tolist()],
@@ -1063,13 +1067,12 @@ def _cell_geometry(rec, cell_fid, points, edges, origin_x, origin_y,
     ledges = []
     edits, pin_digest = cell_pins(rec, cell_rec, geom_cache)
     if geom_cache is not None:
-        cache_dir, tag = geom_cache
-        geom_key = geom_hash(tag, points, edges, refr_recs,
+        geom_key = geom_hash(geom_cache[1], points, edges, refr_recs,
                              base_model_by_fid, doors,
                              land_rec if is_exterior else None,
                              origin_x, origin_y, pin_digest=pin_digest)
-        cache_path = os.path.join(
-            cache_dir, '%08X_%08X.pkl' % (cell_fid, get_formid(rec, 'FormID')))
+        cache_path = geom_cache_path(geom_cache, cell_fid,
+                                     get_formid(rec, 'FormID'))
         cached = _geom_cache_load(cache_path, geom_key)
         if cached is not None:
             verts3d, tris, ledges = cached

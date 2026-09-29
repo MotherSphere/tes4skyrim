@@ -615,6 +615,20 @@ Coincident vertices are FUSED first: passes before and inside the loop mint midp
 
 A component may USE a junction while presenting no BORDER edge there -- the other surface arrives into the MIDDLE of its fan, so every edge already has two owners. A bridge cannot help: `_compute_adjacency` links an edge shared by 3+ triangles to NOTHING, so laying a bridge SEVERS the fan it lands on. Candidates are tried LARGEST FIRST until one passes; trying only the largest gave up whenever it failed a guard while a splittable fan triangle sat beside it (**the Sanctum pit-gate seam: the 15,676u^2 candidate's opposite edge spans dz 36, 2u over MAX_CLIMB, while the 2,936u^2 one is dead flat**).
 
+**A fan split cuts EVERY triangle on the split edge, or waits a round.** An
+edge split for one owner leaves each other owner on the uncut edge, so it drops
+out of the component. Where layers of floor stack, the far edge often has 4 or
+more owners, and the old code split only the first neighbor. On Morrowind_ob's
+ArkngthandVSHallSofSCentrifuge (the Dwemer bridge deck), fan splits alone added
+a component every round (3→4→6…→36). Each new component made new junctions to
+split, so the stitch never converged. The mesh then reached 88,048 triangles on
+5,670 vertices (87,107 of them stacked at z=1536). That is past NVNM's 16-bit
+indices, so the cell got no navmesh, took 6+ minutes to build, and its failure
+kept the plugin's CACHE_TAG from being stamped. `_open_fan` now splits every
+owner. It skips an edge that an earlier split this round already replaced, and
+the next round retries it. The cell now stitches to one component and builds
+803 vertices and 1,051 triangles in 5.1 s.
+
 Three guards apply. A split must not manufacture a near-VERTICAL or degenerate triangle -- the halves inherit the parent's corners plus a midpoint, so a parent spanning a big drop hands both halves that drop and the result reads as wall; splitting those **added OPPOSITE_NORMALS/DOWNFACING triangles to ImperialSewers03 and Bruma**. The test is SLOPE-based: a bridge on ramped ground may climb with its plan run (~35 degrees); only height without run is a wall. The MANIFOLD guard requires every introduced edge to end with at most TWO owners. The OVERLAP guard requires the bridge to land on empty ground -- a wide, guard-passing bridge can lie across mesh it shares no vertex with, and at **Pinarus's stair top a 126u flat bridge at the landing height overlapped the flight's emerging top triangles (same surface, dz 19)**.
 
 When every candidate spans too far, the shortest border edge of each side is split at its midpoint. Decimation merges boundary vertices into edges well past the 160u bridge cap, so both sides offer only LONG border edges -- **the Sanctum pit gate: components touching at 0.00u, shortest edges 104/173u, all bridges rejected**.
@@ -2388,6 +2402,20 @@ correct. Measured on a real moved tag: **Morrowind_ob 40/40 identical → 5,239
 entries adopted → 40/40 cache hits, 0 rebuilt**; Nehrim 39/39 → 2,885 adopted.
 With a deliberately corrupted entry the same path refused (1/7 differ) and left
 the stamp uncertified.
+
+**A failed cell keeps no cache entry, and is built once more.**
+<a id="a-failed-cell-keeps-no-cache-entry"></a>
+Geometry is stored before it is packed (`_cell_geometry`), so a cell whose
+NVNM fails to pack still leaves an entry. Adoption proves only a sample, then
+re-keys EVERY entry, so that entry was carried from tag to tag: Morrowind_ob's
+ArkngthandVSHallSofSCentrifuge failed with `'h' format requires -32768 <=
+number <= 32767` in every build from 9/19 to 9/28. Once the stitch was fixed,
+the next import adopted 40/40 identical and served the old 88,048-triangle entry
+straight back. `worker.run_job` now deletes a failed cell's entry and builds it
+once more. A stale adopted entry then heals in the same run, and a cell that
+fails again leaves nothing to adopt. A run that still has failures also removes
+the CACHE_TAG that adoption wrote before generation (`pool.precompute_navmeshes`),
+so the pre-push gate calls the cache stale instead of publishing a partial one.
 
 **Proving runs on the pool, not in the parent.**
 <a id="proving-runs-on-the-pool"></a>
@@ -4401,8 +4429,12 @@ the only difference in the blob is the geometry the human changed.
 
 **Doors and water flags are carried over, not recomputed.** A retriangulation
 renumbers every triangle, so each Door Triangle is re-aimed at whichever new
-triangle is nearest the old one's centroid, keeping the door REFR's FormID (and
-therefore its XNDP) intact. The water flag is a height test against the cell's
+triangle is nearest the old one's centroid. The door REFR's **XNDP names that
+triangle too** (`<Ihxx`: NAVM, triangle), so `xndp_edits` rewrites it in place
+(same size, no GRUP change). Before this, every patch left each door's XNDP
+naming its old triangle number. Fed a cell's own geometry back, the rewrite
+reproduces the shipped XNDP exactly: 8/8 doors in ImperialDungeon02 and 11/11 in
+ImperialDungeon01. The water flag is a height test against the cell's
 water plane; reading that plane back as the highest Z any water triangle reached
 reproduces the test without re-reading the CELL record.
 
@@ -4414,11 +4446,21 @@ dropped and renumbered, the seam is matched again with the import's own
 on `output/Oblivion.esm`, 1,000 of 1,002 exterior navmeshes sampled carry edge
 links, so skipping this would strand the edited cell.
 
-**A split cell is refused.** `split.py` cuts an interior with a same-cell
-teleport pair into one NAVM per component; re-splitting mints new FormIDs and
-moves door XNDPs, which only a real import can do. Measured on
-`output/Oblivion.esm`: 8,183 of 8,203 navmeshed cells hold exactly one NAVM, 20
-hold more, so the refusal costs almost nothing.
+**A split cell is re-cut onto its own records** (`split_edits`). `split.py`
+cuts an interior with a same-cell teleport pair into one NAVM per component
+(8,183 of 8,203 navmeshed cells in `output/Oblivion.esm` hold one NAVM, 20 hold
+more, ImperialDungeon01 among them). Cellview edits the whole cell, so the
+patch packs the corrected mesh once, finds its components with the import's
+own `components`, and packs each one with `pack_component_nvnm`. Each
+component then goes to the record whose old triangles most of its own lie
+nearest, so FormIDs, EDIDs, ONAMs and NAVI's NVMI entries stay valid. The patch
+is refused, pointing at `--import-only`, when that is impossible:
+* the pieces no longer match the records one-to-one (an edit joined two pieces
+  or cut one in two), or
+* a piece's doors or sibling ledge links changed, because NVMI lists both.
+Re-splitting then would mean new FormIDs, which only a real import mints.
+Fed ImperialDungeon01's own geometry back (847 + 28 + 27 triangles, 11 doors,
+one cross-piece ledge pair), all three NVNMs come back byte-identical.
 
 **Resizing a record means fixing every GRUP above it.** A GRUP's size covers its
 children, so a record that grows or shrinks changes the size of each GRUP

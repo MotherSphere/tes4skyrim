@@ -825,6 +825,8 @@ def precompute_navmeshes(by_type: dict, writer, base_model_by_fid: dict,
           f"{hits} geometry-cache hits)")
 
     navm_verify.report_verification(cache, geom_cache)
-    if not navm_verify.report_failures(cache):
+    if navm_verify.report_failures(cache):
+        navm_verify.uncertify(geom_cache)
+    else:
         stamp_navmesh_cache_tag(geom_cache)
     return cache

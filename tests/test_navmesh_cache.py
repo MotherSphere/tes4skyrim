@@ -1234,6 +1234,62 @@ def test_uncertify_removes_only_the_stamp(tmp_path):
     assert (cdir / '00000001_00000002.pkl').exists()
 
 
+def _failing_convert(monkeypatch, cdir, outcomes):
+    """Patch the worker's build to replay `outcomes`, recording if the entry existed."""
+    from tes5_import.navmesh import worker as navm_worker
+    seen = []
+
+    def convert(_job, geom_cache):
+        """Raise or return the next outcome; note whether the entry is on disk."""
+        seen.append((geom_cache is not None,
+                     (cdir / '00000001_00000002.pkl').exists()))
+        got = outcomes.pop(0)
+        if isinstance(got, Exception):
+            raise got
+        return got
+    monkeypatch.setattr(navm_worker, '_convert', convert)
+    monkeypatch.setattr(navm_worker, '_GEOM_CACHE', (str(cdir), 'tag'))
+    return navm_worker, seen
+
+
+def test_a_failed_cell_drops_its_entry_and_builds_once_more(tmp_path, monkeypatch):
+    """An adopted entry that cannot be packed must not keep failing the cell.
+
+    See: docs/commentary/tes5_import_navmesh.md#a-failed-cell-keeps-no-cache-entry
+    """
+    cdir = tmp_path / 'navmesh_geom_cache'
+    cdir.mkdir()
+    (cdir / '00000001_00000002.pkl').write_bytes(b'payload')
+    worker, seen = _failing_convert(
+        monkeypatch, cdir, [ValueError('bad cached geometry'), (b'NAVM', {})])
+    key, (navm, meta) = worker.run_job({'key': (1, 2)})
+    assert key == (1, 2) and navm == b'NAVM' and 'error' not in meta
+    assert seen == [(True, True), (True, False)]
+
+
+def test_a_cell_that_fails_twice_leaves_no_entry(tmp_path, monkeypatch):
+    """A retry that fails too reports the error and deletes what it stored."""
+    cdir = tmp_path / 'navmesh_geom_cache'
+    cdir.mkdir()
+    (cdir / '00000001_00000002.pkl').write_bytes(b'payload')
+    boom = ValueError('overflow')
+    worker, _seen = _failing_convert(monkeypatch, cdir, [boom, boom])
+    _key, (navm, meta) = worker.run_job({'key': (1, 2)})
+    assert navm is None and 'overflow' in meta['error']
+    assert not (cdir / '00000001_00000002.pkl').exists()
+
+
+def test_a_prover_never_retries_or_deletes(tmp_path, monkeypatch):
+    """A prove job builds without the cache, so it has no entry to drop."""
+    cdir = tmp_path / 'navmesh_geom_cache'
+    cdir.mkdir()
+    (cdir / '00000001_00000002.pkl').write_bytes(b'payload')
+    worker, seen = _failing_convert(monkeypatch, cdir, [ValueError('x')])
+    worker.run_job({'key': (1, 2), 'prove': True})
+    assert seen == [(False, True)]
+    assert (cdir / '00000001_00000002.pkl').exists()
+
+
 def test_rekey_rewrites_only_the_hash(tmp_path):
     """Adoption changes the KEY, never the geometry."""
     path = tmp_path / 'e.pkl'
