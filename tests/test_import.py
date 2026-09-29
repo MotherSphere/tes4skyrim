@@ -4063,6 +4063,38 @@ class TestActorScriptOnPlacedRef:
         assert not _script_uses_self_reference_call(
             'begin GameMode\\r\\n\\tset x to 1\\r\\nend')
 
+    def test_script_variable_binds_same_named_form_only_via_scro(self):
+        """A `ref` variable binds its same-named form only when the SCRO lists it.
+
+        See: docs/commentary/script_convert.md#local-shadows-form
+        """
+        from script_convert.cross_ref import CrossRefGraph
+        from tes5_import.base import object_scripts
+        from tes5_import.base.text_reader import set_formid_index_offset
+        set_formid_index_offset(0)
+        xref = CrossRefGraph()
+        for fid, edid, sig in (('00001234', 'PartnerSwitch', 'REFR'),
+                               ('00005678', 'HenIdle', 'SOUN')):
+            xref.edid_to_formid[edid.lower()] = fid
+            xref.formid_to_edid[fid] = edid
+            xref.record_type[fid] = sig
+        by_type = {
+            'SCPT': [{'FormID': '00000A01', 'EditorID': 'SwitchScript',
+                      'SCTX': 'scn SwitchScript\nref PartnerSwitch\n'
+                              'begin OnActivate\n'
+                              'PartnerSwitch.playgroup forward 1\nend',
+                      'SCRO[0]': '00001234'},
+                     {'FormID': '00000A02', 'EditorID': 'HenScript',
+                      'SCTX': 'scn HenScript\nref HenIdle\nbegin GameMode\n'
+                              'playsound HenIdle\nend'}],
+            'ACTI': [{'FormID': '00000B01', 'SCRI': '00000A01'},
+                     {'FormID': '00000B02', 'SCRI': '00000A02'}],
+        }
+        object_scripts.build_object_script_plan(by_type, xref, {})
+        switch = object_scripts.get_object_vmad(0xB01)
+        assert struct.pack('<I', 0x1234) in switch[switch.index(b'PartnerSwitch'):]
+        assert b'HenIdle' not in object_scripts.get_object_vmad(0xB02)
+
 
 class TestLoadGatedPollStart:
     """A load-gated update loop must start from OnLoad, not OnInit alone.

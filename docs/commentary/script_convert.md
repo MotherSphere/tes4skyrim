@@ -939,6 +939,48 @@ bindings reported all-clear while every object script was broken.
   Check with `python tools/script/vmad_probe.py <esm> <script> --props` — a property the
   `.psc` declares but the probe does not list is unbound.
 
+### <a id="object-script-binder"></a>How `object_scripts._resolve_props` binds a property
+
+**Code:** `tes5_import/base/object_scripts.py` (`_collect_scpts`, `_resolve_props`).
+
+- <a id="master-scpt-keying"></a>**Masters' scripts are indexed too, keyed on
+  the master_export KEY.** A dependent plugin routinely attaches its master's
+  scripts to its own records (33 of ElsweyrAnequina.esp's resolve only from the
+  master), and a SCRI that misses the index gets no VMAD, silently. A master
+  record's `FormID` field is in the master's own index space while every SCRI is
+  in this plugin's, so keying on the raw field misses (or collides) whenever the
+  master has a different master count. Masters go in first so an override wins.
+- <a id="base-name-binds-placed-ref"></a>**A reference-typed property naming a
+  BASE binds the base's one placed reference.** Oblivion resolves
+  `ArenaMouth.Say ...` through the NPC_ EditorID; the VM refuses an
+  NPC_/CREA/ACTI/LIGH base in a reference property and it reads None.
+- <a id="engine-hardcoded-bindings"></a>**Engine-hardcoded forms bind to
+  Skyrim's record, not our remapped copy.** `player.AddItem Gold001 200` must
+  hand out Skyrim gold. The playable RACEs are not converted at all (actors are
+  retargeted onto Skyrim's races), so a race property binds to the Skyrim race;
+  otherwise the CK reports "pointing at an invalid object" (22 on
+  DAHermaeusStaff/DABoethiaPortal alone).
+- <a id="local-shadows-form"></a>**A script's own variable binds a same-named
+  form only when the compiled script referenced that form (SCRO)** (2026-09-28,
+  confirmed in game; the 70 newly bound UL references were not separately
+  played). TES4
+  compiles each name to one of two reference kinds: `SCRO` (a form) or `SCRV`
+  (a local variable, by index). The same name can go either way: Unique
+  Landscapes' `xulcvhSchalterScript0101` declares `ref xulcvhSchalter0102`, yet
+  `xulcvhSchalter0102.playgroup` compiled to `SCRO=010C0F8F`, the placed switch.
+  `xulrhChickenPickScript` declares `ref xulrhHenIdle`, and `playsound
+  xulrhHenIdle` compiled to `SCRV=2`, the never-set local, so it played nothing.
+  Binding by name alone filled the local with the SOUN of the same name, and 18
+  chickens started a cluck every 0.1 s on the player: a feedback-like screech
+  across the Rolling Hills farm. The export writes SCRO but not SCRV, so the
+  test is "the resolved form is in this script's SCRO list". The binder used to
+  read only the body's property table, which never lists a declared variable,
+  so it also got the opposite case wrong: the SCRO-backed `xulcvhSchalter0102`
+  stayed None and throwing one switch never moved its partner. Declared
+  variables are now candidates too, both directions gated on SCRO. UL has 72
+  same-named variables: 70 SCRO-backed references now bind, and the 2
+  SCRV-backed chicken sounds no longer do.
+
 ### An early `return` killed the OnUpdate poll (2026-07-31)
 
 TES4 `return` ends only **this frame's** `GameMode` pass; the script runs again

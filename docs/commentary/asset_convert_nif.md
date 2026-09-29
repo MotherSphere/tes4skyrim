@@ -333,7 +333,7 @@ flat-XY quad (thin axis Z), and every mode's quads are flat-XY in both games'
 meshes. The removed "Oblivion +Y up / Skyrim +Z up" correction composed −90°X
 onto every such node: a no-op for modes 0/2/3/4/5, and for mode 1 a second turn
 — the sunbeam shipped at 180°, lying flat. Removing it changed only mode-1
-billboards: 68 in Oblivion's meshes, 48 in Nehrim's, none of them `Fire\*.nif`.
+billboards: 74 in Oblivion's meshes, 48 in Nehrim's, none of them `Fire\*.nif`.
 
 **A wrapper this converter builds carries NO axis correction.** These meshes are
 authored +Y-up and their PLACED REFERENCES carry the stand-up rotation: censused
