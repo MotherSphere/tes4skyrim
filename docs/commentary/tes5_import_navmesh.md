@@ -2417,6 +2417,16 @@ fails again leaves nothing to adopt. A run that still has failures also removes
 the CACHE_TAG that adoption wrote before generation (`pool.precompute_navmeshes`),
 so the pre-push gate calls the cache stale instead of publishing a partial one.
 
+**Adoption samples only STALE entries.**
+<a id="adoption-samples-only-stale-entries"></a>
+An entry already keyed to the current code was built by it, so it reproduces
+by construction and proves nothing about the others. A stopped Morrowind_ob
+import had rebuilt 2,508 of 5,285 cells with new code. The next import drew
+its 40-cell sample from those, found 40/40 identical, and adopted the other
+2,777 entries, which nothing had rebuilt; the navmesh step ran at 200+/s.
+`cache_audit._stale_jobs` now restricts the sample to entries whose stored
+hash differs from the one the current code would write.
+
 **Proving runs on the pool, not in the parent.**
 <a id="proving-runs-on-the-pool"></a>
 Proving rebuilds real cells with the same `navm_worker.run_job` the main stage

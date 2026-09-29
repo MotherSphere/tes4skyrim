@@ -144,14 +144,40 @@ def report_verification(cache: dict, geom_cache) -> bool:
     return True
 
 
+def _stored_hash(geom_cache, key) -> str:
+    """The hash one cell's cache entry was stored under, or '' when it has none."""
+    import pickle
+    from .from_pgrd import geom_cache_path
+    try:
+        with open(geom_cache_path(geom_cache, *key), 'rb') as fh:
+            return pickle.load(fh).get('hash') or ''
+    except Exception:
+        return ''
+
+
+def _stale_jobs(jobs: list, geom_cache) -> list:
+    """Jobs whose cache entry was stored by OTHER code, the only ones adoption can prove.
+
+    An entry already keyed to the current code matches it by construction, so a
+    sample drawn from those proves nothing about the rest.
+    See: docs/commentary/tes5_import_navmesh.md#adoption-samples-only-stale-entries
+    """
+    out = []
+    for job in jobs:
+        was = _stored_hash(geom_cache, job['key'])
+        if was and was != _job_key(job, geom_cache):
+            out.append(job)
+    return out
+
+
 def _sampled_with_entries(jobs: list, geom_cache, sample: int) -> tuple:
-    """The sampled jobs that HAVE a cache entry, and those entries.
+    """The sampled STALE jobs that have a cache entry, and those entries.
 
     Reading the stored payload first keeps un-cached cells out of the rebuild
     entirely: there is nothing to compare them against.
     """
     from .from_pgrd import cached_geometry
-    picked = list(jobs)
+    picked = [dict(j) for j in _stale_jobs(jobs, geom_cache)]
     mark_jobs(picked, sample)
     todo, stored = [], []
     for job in [j for j in picked if j.get('verify')]:

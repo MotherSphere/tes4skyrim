@@ -1341,6 +1341,37 @@ _GEOM_A = ([(0.0, 0.0, 0.0)], [(0, 0, 0)], [])
 _GEOM_B = ([(9.0, 0.0, 0.0)], [(0, 0, 0)], [])
 
 
+def _stale_entries(monkeypatch, current=()):
+    """Stub every cell's entry as stored by OLDER code, except the keys in `current`."""
+    monkeypatch.setattr(navm_verify, '_stored_hash',
+                        lambda _g, key: 'new' if key in current else 'old')
+    monkeypatch.setattr(navm_verify, '_job_key', lambda _j, _g: 'new')
+
+
+def test_proving_never_samples_entries_the_current_code_built(monkeypatch):
+    """A half-regenerated cache must be proven on its STALE half.
+
+    A stopped run left Morrowind_ob with 2,508 cells rebuilt by the new code;
+    the next import sampled only those, found 40/40 identical, and adopted the
+    2,777 cells nothing had rebuilt.
+    See: docs/commentary/tes5_import_navmesh.md#adoption-samples-only-stale-entries
+    """
+    from tes5_import.navmesh import from_pgrd
+    monkeypatch.setattr(from_pgrd, 'cached_geometry', lambda *_a: _GEOM_A)
+    jobs = [_job('interior', i) for i in range(6)]
+    _stale_entries(monkeypatch, current={(i, i) for i in range(3)})
+    seen = []
+
+    def _rebuild(js):
+        """Record which cells were proven; every one reproduces."""
+        for j in js:
+            seen.append(j['key'][0])
+            yield j['key'], (b'', {'geometry': _GEOM_A})
+
+    assert navm_verify.prove_cache(jobs, ('dir', 'tag'), 6, _rebuild) == (3, [])
+    assert seen == [3, 4, 5]
+
+
 def _prove_with_stub(monkeypatch, geoms, jobs):
     """Run prove_cache over stubbed cells; returns (checked, bad, rebuilt).
 
@@ -1348,6 +1379,7 @@ def _prove_with_stub(monkeypatch, geoms, jobs):
     geometry is always _GEOM_A, so any other value reads as a mismatch.
     """
     from tes5_import.navmesh import from_pgrd, worker as navm_worker
+    _stale_entries(monkeypatch)
     rebuilt = []
 
     def _run(job):
@@ -1396,6 +1428,7 @@ def test_proving_uses_the_rebuild_callable_it_was_given(monkeypatch):
 
     monkeypatch.setattr(from_pgrd, 'cached_geometry', lambda *_a: _GEOM_A)
     monkeypatch.setattr(navm_worker, 'run_job', _boom)
+    _stale_entries(monkeypatch)
     jobs = [_job('interior', i) for i in range(3)]
     checked, bad = navm_verify.prove_cache(
         jobs, ('dir', 'tag'), 3,
@@ -1411,6 +1444,7 @@ def test_proving_reports_the_first_mismatch_in_submission_order(monkeypatch):
     """
     from tes5_import.navmesh import from_pgrd
     monkeypatch.setattr(from_pgrd, 'cached_geometry', lambda *_a: _GEOM_A)
+    _stale_entries(monkeypatch)
     jobs = [_job('interior', i) for i in range(4)]
     geoms = {0: _GEOM_A, 1: _GEOM_B, 2: _GEOM_B, 3: _GEOM_A}
 
