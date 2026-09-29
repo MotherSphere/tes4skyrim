@@ -6998,7 +6998,7 @@ class TestCombatApproachPool:
             single, ctdas = packs[edid]
             assert struct.unpack_from('<I', single[b'PKCU'], 4)[0] == template
             assert struct.unpack_from('<I', single[b'PKDT'])[0] & 0x00800000, 'weapon drawn'
-            gate = [c for c in ctdas if struct.unpack_from('<H', c, 8)[0] == 1]
+            gate = [c for c in ctdas if struct.unpack_from('<HxxIII', c, 8)[::3] == (1, 0)]
             assert len(gate) == 1 and gate[0][0] == 0x42, 'GetDistance > , alias parameter'
             assert struct.unpack_from('<fHHI', gate[0], 4) == (reach, 1, 0, 1)
 
@@ -7023,6 +7023,17 @@ class TestAggressionTierTargeting:
         load_faction_player_reactions({'FACT': [
             {'FormID': self.PREY_FID, 'EditorID': 'Prey', 'RelationCount': '0'},
         ]})
+    def test_override_pulls_only_toward_the_current_combat_target(self):
+        """GetDistance(target alias) < 1 run on the Combat Target (3): an attacker fighting someone else is not pulled.
+
+        See: docs/commentary/script_convert.md#startcombat-adds-targets
+        """
+        for _fid, subs in self._records()['PACK']:
+            current = [d for t, d in subs if t == b'CTDA' and struct.unpack_from('<HxxIII', d, 8)[::3] == (1, 3)]
+            assert len(current) == 1 and current[0][0] == 0x82, 'GetDistance < , alias parameter'
+            value, target_alias = struct.unpack_from('<fxxxxI', current[0], 4)
+            assert value == 1.0 and target_alias % 2 == 1
+
 
     @staticmethod
     def _aggr(aggression, personality, factions=()):

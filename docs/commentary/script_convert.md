@@ -2849,6 +2849,61 @@ instance (it never touched `self` — only three class-level regexes). Nothing
 proved the two reordering passes could not ping-pong. It is now
 `tes5.blocks.hoist_quest_start_above_writes`, a module function
 `_state_writes_before_setstage` calls on its own result as an ordinary fixup
+## StartCombat calls in one burst add targets; the pool leaves such a fight to Skyrim (2026-09-29, confirmed in game: Nehrim elevator room)
+<a id="startcombat-adds-targets"></a>
+
+**Code:** `TES4_CombatQueue.AddsTarget`, `TES4Polyfill.ForceCombatNow(abAdd)`,
+`tes5_import/actors/combat_approach.py` `_conditions`.
+
+**Symptom:** after the queue landed, Nehrim's elevator-room troll
+(`StartCelleAufzugRaumTroll01Ref`) never attacked. It stood still, unable to
+reach Celebro past the player.
+
+**Authored intent:** `StartCelleAufzugRaumTrigZoneScript` calls
+`troll.StartCombat Player` and then `troll.StartCombat CelebroRef` in the same
+frame. Oblivion's `StartCombat` (Oblivion.exe 0x514660) is immediate. On an actor
+already in combat it ADDS the target (process vtable +0x228 at 0x514826),
+re-sorts the target list (0x5b27a0, comparator 0x614190) and makes the new
+target current (+0x22c). The troll is hostile to both, fighting whichever is
+nearer.
+
+**Cause, in three parts (SkyrimSE 1.6.1170):**
+- Papyrus `StartCombat` (0x9eae60) only queues the start on the task queue
+  (0x6564c0). The queue ran the two calls back to back, so the second saw
+  `IsInCombat()` false, skipped the stand-down and added Celebro (task
+  0x657e1f → 0x6e2970). The pair was still re-aimed at Celebro.
+- The pair's combat override then drove the troll toward Celebro. A combat
+  override replaces fighting, so with the player in the way it stood still.
+- No condition can see "the target actually fought". `IsCombatTarget` (0x803df0)
+  and `GetCombatTargetHasKeyword` (0x339410) both scan the whole combat-group
+  target list. Only run-on 3, **Combat Target**, reads the current one: case
+  0x4a0683 reads `Actor+0x104`, as Papyrus `GetCombatTarget` (0x9e84f0) does.
+  0x662be0 mirrors it from the controller (+0x2c) while in combat and clears it
+  only when combat ends (0x662c44, 0x6b723c), so it stays set while searching or
+  hiding.
+
+**Fix:**
+- A StartCombat within a second of one the queue made on another LIVE target of
+  the same attacker is an add (`AddsTarget`). `ForceCombatNow(..., abAdd)` then
+  skips the stand-down, and the pair is released so Skyrim's own multi-target
+  combat fights.
+- A later StartCombat, or one after the earlier target died, still retargets
+  and re-pairs, so SE02's Gatekeeper is unchanged.
+- Each approach package also requires `GetDistance(target alias) < 1` run on the
+  Combat Target, so an attacker Skyrim has turned on someone else is never
+  pulled away.
+- Reverted: waiting for the first start to land before the second call. It made
+  the second call a retarget, which dropped the player and pinned the troll on
+  Celebro.
+
+**Scope:** about a dozen scripts give one attacker two live targets in a row.
+Nehrim: the intro guards-vs-trolls trigger, `MQ01TateScript`, `CalistoScn`,
+`NQ01TheophilScript`. Oblivion: `Dark18MotherScript`, `MS91MazogaScript`. The
+mine-exit finale gives each troll one target (the player) and Merzul one (troll
+A05), so it keeps its pull. Tests:
+`TestStartCombatIsForced::test_same_burst_startcombat_adds_a_target_and_unpairs`,
+`TestCombatApproachPool::test_override_pulls_only_toward_the_current_combat_target`.
+
 — the same emitted lines, but a pass repairing what it just did rather than
 two passes iterating to agreement.
 
