@@ -20,7 +20,7 @@ from shapely.ops import unary_union
 from tes5_import.navmesh.corridor import ccw_in_plan
 
 #: Bump when `apply_frozen` builds differently, so every patched cell re-caches.
-FROZEN_VERSION = 3
+FROZEN_VERSION = 4
 
 #: Plan area (u^2) below which an overlap or a refill piece is float noise.
 AREA_EPS = 1.0
@@ -204,10 +204,18 @@ class _VertexPool(object):
         return i
 
     def frozen_corner(self, p):
-        """Index for a frozen corner: a generated vertex it already sits on, else new."""
+        """Index for a frozen corner: the generated vertex under it on its storey, moved onto it.
+
+        The pinned position wins, so a patch stays joined to the floor beside
+        it even where the generator has since moved that vertex.
+        See: docs/commentary/tes5_import_navmesh.md#frozen-corner-takes-the-vertex
+        """
         i = self.find(p, FROZEN_Z_TOL)
         if i is None:
-            i = self.add(p)
+            i = self.find(p, STOREY_BAND)
+            if i is None or i in self.frozen:
+                i = self.add(p)
+            self.verts[i] = tuple(float(c) for c in p[:3])
         self.frozen.add(i)
         return i
 

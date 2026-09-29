@@ -4669,6 +4669,31 @@ Patch corners snap onto the generated vertex they already are (0.5u in plan,
 on SchattenrufMinePart05: 1,092 triangles, none extra or missing against the
 saved result, and the same edge counts (1,324 shared, 628 open).
 
+<a id="frozen-corner-takes-the-vertex"></a>**A frozen corner takes over the
+generated vertex under it** (`_VertexPool.frozen_corner`). Past the 1u snap, a
+corner still claims the nearest generated vertex within 0.5u in plan and
+`STOREY_BAND` in height, and moves that vertex onto the pinned position. The pin
+wins, and the kept floor that shares the vertex stays joined to the patch.
+Before this, the corner got a vertex of its own. On ImperialDungeon01
+(Oblivion.esm), cellview built door 00085288's threshold corners at z 511.45,
+and the pin recorded them there. The import's generator built them at 518.66
+and 519.09. So the door triangle shared no vertex with the frozen triangles
+around it, `split_disconnected_interiors` moved it into a one-triangle NAVM of
+its own, and no actor could reach the door.
+
+The drift itself came from cellview: its index (`tools/navmesh/audit._parse_tables`)
+built its own base-model table from STAT/CONT/FURN/ACTI/TREE/DOOR. The import's
+`pool.build_base_model_index` uses STAT/CONT/FURN/ACTI/TREE/FLOR, so cellview
+carved door meshes the import never carves and skipped flora the import does
+carve. ImperialDungeon01 had 11 door refs that differed; cellview built 877
+triangles where the import built 902. Cellview and `probe.py` now call
+`build_base_model_index`. A stored index whose `bases` meta is older than
+`cell_index.BASES` gets that one table rewritten from the six base record types
+alone (`audit._ensure_store`), in about 2s. A `SCHEMA` bump would have worked
+too, but it throws away the whole 2 GB index and re-parses every cell, reference
+and LAND record inside the cellview process. That filled the user's RAM on the
+first open.
+
 **Where the new floor's edge crosses a frozen edge, the frozen edge is split**
 (`_stitch`). The refill cuts the patch out of the removed floor, so it leaves a
 vertex part-way along the frozen edge: a T-junction the engine will not link

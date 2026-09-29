@@ -100,6 +100,21 @@ def test_a_frozen_edge_the_new_floor_edge_crosses_is_split_and_joined():
     assert _max_edge_owners(tris) == 2
 
 
+def test_a_frozen_corner_the_generator_raised_takes_the_vertex_and_stays_joined():
+    """The generator built x=10 7u higher than when pinned; the pin wins and stays linked.
+
+    See: docs/commentary/tes5_import_navmesh.md#frozen-corner-takes-the-vertex
+    """
+    raised = [(x, y, 7.0 if x == 10.0 else z) for (x, y, z) in GRID]
+    verts, tris, _l = apply_frozen(raised, GRID_TRIS, [], FLIPPED, REPLACED)
+    edges = Counter(frozenset((verts[t[k]], verts[t[(k + 1) % 3]]))
+                    for t in tris for k in range(3))
+    assert {frozenset(t) for t in FLIPPED} <= _shapes(verts, tris)
+    assert edges[frozenset(((10.0, 0.0, 0.0), (10.0, 10.0, 0.0)))] == 2
+    assert edges[frozenset(((0.0, 10.0, 0.0), (10.0, 10.0, 0.0)))] == 2
+    assert len(verts) == len(GRID)
+
+
 def test_a_patch_never_removes_another_storey():
     """A deck 200u above the patch keeps every triangle."""
     deck = [(x, y, 200.0) for (x, y, _z) in GRID]
