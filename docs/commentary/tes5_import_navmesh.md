@@ -3758,7 +3758,7 @@ read as absent -- the master-export blindness CLAUDE.md warns about.
 
 Cellview therefore reads worldspaces and cells from `load_master_export` first
 and lets the plugin's own records override by FormID, the same order
-`navmesh/pool.py:_merge_master_cell_records` uses. `load_master_export` re-keys
+`navmesh/pool.py:_records_of` uses. `load_master_export` re-keys
 each master id into THIS plugin's index space, which is what makes a
 master-owned FormID comparable to one of the plugin's own.
 
@@ -4397,7 +4397,7 @@ and door panels read the module cache too.
 
 ### The geometry must merge the masters too
 
-**Code:** `navmesh/pool.py:_merge_master_cell_records`.
+**Code:** `navmesh/pool.py:_records_of`.
 
 Owning the master's NAVM id is only half the contract. A child plugin restates
 **only the references it edits**, so building the navmesh from `by_type` alone
@@ -4424,11 +4424,21 @@ This was latent before navmesh overriding landed. The thin navmesh used to ship
 under a **derived** id, so the master's correct navmesh stayed loaded beside it;
 once the child adopted the master's id, the thin mesh *replaced* the good one.
 
-`_merge_master_cell_records` therefore makes the masters the baseline for REFR
+`_records_of` therefore makes the masters the baseline for REFR
 and LAND: master records first, the plugin's own overriding by FormID, and an
 override flagged `DELETED_FLAG` dropping out so a deleted ref cannot resurrect.
 After merging, the cell above carries 154 refs (121 master + 33 new; the 12
 edited ones replace rather than add).
+
+**The override match must shift the master key.** `master_export` keys are raw
+TES4 ids; `get_formid` moves every id past the prepended Skyrim masters (UL:
+offset 1). A second merge helper once compared the raw key against the shifted
+id, so no override ever matched. Both copies were kept, with the master's first. UL's
+navmesh walked Oblivion's heights instead of UL's reshaped LAND in 1,733 of its
+1,856 jobs (Tamriel 20,20: 26-layer master LAND, not UL's 29-layer one). Every
+edited ref also carved twice, and a deleted one still carved. Tests at the default offset 0
+never saw it. There is now one merge (`_records_of`); Oblivion.esm's 8,228 jobs,
+masterless, come out identical.
 
 **PGRD is deliberately NOT merged.** Which jobs exist, and their
 `(cell_fid, pgrd_fid)` keys, stay driven by the plugin's own pathgrids — merging

@@ -109,24 +109,26 @@ def base_model_key(rec: dict):
 
 
 def _records_of(by_type: dict, master_export: dict, sigs) -> list:
-    """(base_fid, record) of *sigs*, MASTERS FIRST, keyed as a REFR names them.
+    """(fid, record) of *sigs*: the masters' plus this plugin's, one per FormID.
 
-    Masters first so an override in this plugin wins the key.  `master_export`
-    keys by the raw TES4 slot while `get_formid` shifts every reference by the
-    load-order offset, so a master's id is shifted here to match what a NAME
-    actually resolves to.
+    `master_export` keys by the raw TES4 slot while `get_formid` shifts every id
+    by the load-order offset, so a master's key is shifted to match.  The
+    plugin's override replaces the master's record; one it flags deleted drops
+    out entirely.  Masters come first, then the plugin's own.
 
-    See: docs/commentary/tes5_import_navmesh.md#base-ids-carry-their-plugin-index
+    See: docs/commentary/tes5_import_navmesh.md#master-owned-cells
     """
-    out = []
-    if master_export:
-        offset = get_formid_index_offset()
-        out.append((_shift_index(key, offset), r)
-                   for key, r in master_export.items()
-                   if r.get('Signature') in sigs)
-    out.append((get_formid(r, 'FormID'), r)
-               for sig in sigs for r in by_type.get(sig, []))
-    return [(fid, r) for src in out for fid, r in src if fid]
+    own = [(get_formid(r, 'FormID'), r)
+           for sig in sigs for r in by_type.get(sig, [])]
+    own_fids = {fid for fid, _r in own}
+    offset = get_formid_index_offset()
+    masters = [(_shift_index(key, offset), r)
+               for key, r in (master_export or {}).items()
+               if r.get('Signature') in sigs]
+    out = [(fid, r) for fid, r in masters if fid and fid not in own_fids]
+    out.extend((fid, r) for fid, r in own
+               if not get_int(r, 'RecordFlags') & DELETED_FLAG)
+    return out
 
 
 def _shift_index(fid_str: str, offset: int):
@@ -235,26 +237,9 @@ def _by_parent_cell(recs) -> dict:
     return out
 
 
-def _merge_master_cell_records(by_type: dict, master_export: dict,
-                               sig: str) -> list:
-    """`sig` records the plugin navmeshes with: the masters' plus its own.
-
-    A child plugin re-states only the references it edits, so navmeshing from
-    `by_type` alone carves a cell the masters furnished as if it were bare.
-    The masters' records are the baseline; the plugin's own override them by
-    FormID, and one the plugin flags deleted drops out entirely.
-
-    See: docs/commentary/tes5_import_navmesh.md#master-owned-cells
-    """
-    own = by_type.get(sig, [])
-    if not master_export:
-        return own
-    own_fids = {get_formid(rec, 'FormID') for rec in own}
-    merged = [rec for key, rec in master_export.items()
-              if rec.get('Signature') == sig and int(key, 16) not in own_fids]
-    merged.extend(rec for rec in own
-                  if not (get_int(rec, 'RecordFlags') & DELETED_FLAG))
-    return merged
+def _merged(by_type: dict, master_export: dict, sig: str) -> list:
+    """The `sig` records `_records_of` keeps, without their FormIDs."""
+    return [rec for _fid, rec in _records_of(by_type, master_export, (sig,))]
 
 
 def _is_door_ref(rec: dict, door_fids) -> bool:
@@ -416,13 +401,11 @@ def navmesh_land_at(by_type: dict, master_export: dict = None):
     PARENT's LAND (what the engine draws); its own LAND is only the fallback
     where the parent has none.  Masters are included.
     """
-    worlds = {get_formid(w, 'FormID'): w for w in
-              _merge_master_cell_records(by_type, master_export, 'WRLD')}
+    worlds = dict(_records_of(by_type, master_export, ('WRLD',)))
     land_world = _land_world_of(worlds)
     grid = _land_by_grid(
-        _merge_master_cell_records(by_type, master_export, 'CELL'),
-        _by_parent_cell(_merge_master_cell_records(by_type, master_export,
-                                                   'LAND')))
+        _merged(by_type, master_export, 'CELL'),
+        _by_parent_cell(_merged(by_type, master_export, 'LAND')))
 
     def land_at(square):
         wrld, gx, gy = square
@@ -499,8 +482,7 @@ def gather_navm_jobs(by_type: dict, door_fids: set = None,
     See: docs/commentary/tes5_import_navmesh.md#pool-orchestration
     """
     cells = by_type.get('CELL', [])
-    refr_by_cell = _by_parent_cell(
-        _merge_master_cell_records(by_type, master_export, 'REFR'))
+    refr_by_cell = _by_parent_cell(_merged(by_type, master_export, 'REFR'))
     pgrd_by_cell = _by_parent_cell(by_type.get('PGRD', []))
     indexes = (refr_by_cell, navmesh_land_at(by_type, master_export),
                pgrd_by_cell)
