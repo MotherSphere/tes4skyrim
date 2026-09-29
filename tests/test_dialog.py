@@ -1170,6 +1170,39 @@ class TestAuthoredObjectives:
         dnam = _find_subrecord(convert_QUST(self._rec()), b'DNAM')
         assert struct.unpack_from('<I', dnam, 8)[0] == 8
 
+    def test_package_alias_follows_targets_and_carries_stage_script(self):
+        """A package-only ref takes the next alias id after the targets, and its alias gets the re-check script.
+
+        See: docs/commentary/script_convert.md#setstage-re-evaluates-alias-packages
+        """
+        out = convert_QUST(self._rec(), pack_plan=_OnePackagePlan())
+        assert [struct.unpack('<I', a)[0] for a in _find_all_subrecords(out, b'ALST')] == [0, 1, 2]
+        assert struct.unpack('<I', _find_subrecord(out, b'ALPC'))[0] == _OnePackagePlan.PACK
+        vmad = _find_subrecord(out, b'VMAD')
+        assert b'TES4_StagePackageAlias' in vmad
+        assert struct.pack('<hHhIhhh', 1, 0, 2, 0x000842DD, 5, 2, 1) in vmad
+        order = _sub_order(out)
+        assert order.index('EDID') < order.index('VMAD') < order.index('FULL' if 'FULL' in order else 'DNAM')
+
+    def test_quest_without_packages_gets_no_vmad(self):
+        """No fragments, script or package alias: no VMAD at all."""
+        assert _find_subrecord(convert_QUST(self._rec()), b'VMAD') is None
+
+
+class _OnePackagePlan:
+    """A PackagePlan stand-in owning one package on one ref no objective targets."""
+
+    REF, PACK = 0x000A0001, 0x000B0002
+
+    def assign_aliases(self, qfid, existing):
+        """Add REF after the existing aliases."""
+        existing[self.REF] = max(existing.values()) + 1
+        return [(self.REF, existing[self.REF])]
+
+    def packages_for_alias(self, qfid, ref_fid):
+        """PACK for REF, nothing for the objective targets."""
+        return [self.PACK] if ref_fid == self.REF else []
+
 
 class TestFalloutConditions:
     """A 28-byte CTDA is Fallout's: function remapped, Run On carried.

@@ -637,6 +637,9 @@ COMBAT_APPROACH_QUEST = 'TES4CombatApproaches'
 #: The static script on that quest that queues and carries out StartCombat and StopCombat.
 COMBAT_QUEUE_SCRIPT = 'TES4_CombatQueue'
 
+#: The static alias script that re-checks its actor's AI packages when its quest's stage is set.
+STAGE_PACKAGE_ALIAS_SCRIPT = 'TES4_StagePackageAlias'
+
 #: The importer's fall-damage spell, which ResetFallDamageTimer's Spell property names.
 FALL_DAMAGE_SPELL = 'TES4NoFallDamage'
 

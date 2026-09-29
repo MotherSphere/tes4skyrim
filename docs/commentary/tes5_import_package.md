@@ -912,3 +912,31 @@ A script's `AddScriptPackage` on a BASE still goes to its first placement.
 Quests that gained aliases renumber existing ones, so a save made midway
 through one may hold a stale alias fill. Test:
 `tests/test_packages.py::test_every_placed_copy_gets_its_quest_package`.
+
+## Quest-only actors hold in place
+<a id="quest-only-actors-hold-in-place"></a>
+
+**Code:** `default_package_list` in `packages/actor_wiring.py`
+
+When none of an actor's packages is valid, Oblivion leaves it standing where it
+is (UESP: Kiara "never moves because she has no AI packages"; the Blackwood
+Company guards "stand in place when not engaged in combat"). Skyrim instead runs
+the NPC's Default Package List (`DPLT`), and every converted NPC carried
+vanilla's `DefaultMasterPackageList`, which sandboxes. A sandboxing actor is
+placed at a sandbox spot when its cell loads, so an actor authored to stand on
+one spot turned up somewhere else each time.
+
+Nehrim's nightmare shows it. `Celebro02`'s only packages are MQ00's
+(`MQ00Cel02ZumTroll` and the `AddScriptPackage`d `MQ00CalebroPackage04`, both
+`GetStage MQ00 == 20`), so before stage 20 he had nothing valid. In game he
+loaded 257 units to the left of his placement, once in the entrance doorway,
+instead of in front of the player where the scene expects him.
+
+An NPC whose every authored package is quest-owned (it reaches the actor through
+a quest alias, so the author gave it AI only for quest moments) now carries
+vanilla's `DefaultHoldPositionCurrentLoc64List` (Skyrim.esm `000A6853`, holding
+`DefaultHoldPositionCurrentLoc64`: HoldPosition, "near package start location",
+radius 64) instead. It holds wherever the actor is when the fallback takes
+over, so it neither pulls back an actor a script `MoveTo`'d nor lets one wander.
+Other NPCs keep `DefaultMasterPackageList`. Creatures are unchanged, since their
+PKID always ends in vanilla's always-valid `DefaultMasterPackageCreature`.

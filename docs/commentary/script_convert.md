@@ -386,6 +386,17 @@ Genuinely incomparable (bound as Faction/GlobalVariable, say) returns None: an
 unguarded body is WRONG for every event the filter excluded, so the caller keeps
 the body but does not execute it.
 
+<a id="block-type-guards"></a>
+**Some block types need a guard with no filter at all** (`BLOCK_TYPE_GUARDS`),
+because their Papyrus event fires more widely than the TES4 block did. The
+blocks merged into `OnCombatStateChanged` each test their state. `OnTriggerActor`
+fires in TES4 only for actors, but Skyrim's `OnTrigger`/`OnTriggerEnter` fire for
+any object in the volume, so its body runs only when `akActionRef as Actor`.
+Without it, Nehrim's nightmare cave-in (`TrigZoneACTOR01SCRIPT`,
+`SchattenrufTrigZoneGeroellSoundACTOR01SCRIPT`) dropped its rocks and dust the
+moment the cell loaded, set off by loose clutter settling at the zones' edges,
+before Celebro walked into them.
+
 <a id="onhitwith-ammo"></a>
 **`OnHitWith <ammo>` is read off the shooter, not `akSource`.** For an arrow,
 Skyrim's `OnHit` passes the BOW as `akSource` (CK wiki: "the Weapon, Spell,
@@ -2794,6 +2805,32 @@ tick. It never made the Gatekeeper invincible, never put him in
 `TES4_<Script>.TES4SetStage(<quest> as TES4_<Script>, N)`. That Global sits beside
 `TES4Start`, routes a stopped quest through `TES4Start`, then calls `SetStage`.
 `conversation_sequence` recognizes both call shapes.
+
+## SetStage re-evaluates alias packages
+<a id="setstage-re-evaluates-alias-packages"></a>
+
+**Code:** `TES4Polyfill.StageSet`, `static_scripts/TES4_StagePackageAlias.psc`,
+`_quest_vmad` in `tes5_import/dialogue/quest.py`
+
+Oblivion picked up a package gated on a quest stage on its own once the stage
+was set. Skyrim re-checks an actor's packages only on `EvaluatePackage` (vanilla
+stage fragments call it on the aliases they change), a forced alias fill, or a
+package ending. Nehrim's nightmare shows the gap: `MQ01CelebroDeadScript01` sets
+MQ00 20, which turns on Celebro's walk to the troll (`MQ00Cel02ZumTroll`, `GetStage
+MQ00 == 20`), and enables the troll 2.5 s later. In game the stage landed at
+23.5 s and the walk only started at 26.7 s, when the combat pool's `ForceRefTo`
+re-checked him, so the troll caught him standing at his start.
+
+Every converted `SetStage` now ends in `TES4Polyfill.StageSet` (inside
+`TES4SetStage`, or `TES4Polyfill.SetStage` for a quest with no script), which
+sends the SKSE mod event `TES4StageSet<quest FormID>`. The importer attaches
+`TES4_StagePackageAlias` to every alias that carries the quest's packages; it
+registers for its own quest's event and calls `EvaluatePackage` on its actor.
+Walking the aliases in the caller instead would block it: `Quest.GetAlias` and
+`EvaluatePackage` are delayed natives (absent from the CK wiki's non-delayed
+list, as are SKSE's `GetNthAlias`), about a frame each, the same stall the
+combat queue removed from the Nehrim mine exit. Each alias runs on its own
+thread, and the caller pays one `SendModEvent`.
 
 ## ResetInterior sends moved-in references home (2026-09-24, confirmed in game)
 <a id="resetinterior-sends-moved-refs-home"></a>

@@ -18,7 +18,7 @@ from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
 from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
 from ..actors.outfits import split_inventory
 from ..packages.actor_wiring import (CSTY_DEFAULT, DPLT_NPC_LIST, authored_packages,
-                                     npc_packages)
+                                     default_package_list, npc_packages)
 from ..base.equivalents import map_hair_color
 from ..base.race_factions import race_faction
 from .actor_common import (GOLD001_FID, NAM5_UNKNOWN, SOUND_LEVEL_NORMAL,
@@ -348,7 +348,7 @@ def convert_NPC_(rec: dict, writer=None) -> bytes:
             'DOFT', build_outfit(writer, (edid or 'NPC') + '_Outfit',
                                   outfit_fids, get_formid(rec, 'FormID')))
 
-    subs += pack_formid_subrecord('DPLT', DPLT_NPC_LIST)
+    subs += pack_formid_subrecord('DPLT', default_package_list(authored_packages(rec), DPLT_NPC_LIST))
     crime = _crime_faction_of(rec)
     if crime:
         subs += pack_formid_subrecord('CRIF', crime)

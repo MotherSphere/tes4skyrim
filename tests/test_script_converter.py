@@ -460,9 +460,9 @@ class TestFunctionConversion:
         assert 'GetAngleZ' in result
 
     def test_setstage(self, converter_with_quests):
+        """A scriptless quest's SetStage re-checks alias packages via the Polyfill."""
         result = emit_function(converter_with_quests, None, 'SetStage', 'MQ01 20', 'Quest')
-        assert 'MQ01.SetStage' in result
-        assert '20' in result
+        assert result == 'TES4Polyfill.SetStage(MQ01, 20)'
 
     def test_getstage(self, converter_with_quests):
         result = emit_function(converter_with_quests, None, 'GetStage', 'MQ01', 'Quest')
@@ -947,7 +947,8 @@ End
         These bodies used to be merged, unguarded, into the GameMode OnUpdate
         loop — so MQ01Script's MenuMode 1014/1030 blocks ran `setstage MQ01 70/84`
         on the first tick of a new game, blowing the tutorial quest through its
-        whole stage machine and into stage 100's `stopquest MQ01`.
+        whole stage machine and into stage 100's `stopquest MQ01`. The body
+        survives only as a comment, so it can be hand-ported.
         """
         source = """ScriptName MQ01Script
 
@@ -966,10 +967,8 @@ End
         lines = result.split('\n')
         onupdate = lines[lines.index('Event OnUpdate()'):]
         onupdate = onupdate[:onupdate.index('EndEvent')]
-        # The MenuMode SetStage must not appear anywhere inside OnUpdate...
-        assert not any('SetStage(70)' in ln for ln in onupdate)
-        # ...but must survive as a comment so it can be hand-ported.
-        assert any(ln.lstrip().startswith(';') and 'SetStage(70)' in ln
+        assert not any('SetStage(MQ01, 70)' in ln for ln in onupdate)
+        assert any(ln.lstrip().startswith(';') and 'SetStage(MQ01, 70)' in ln
                    for ln in lines)
 
 
@@ -4023,7 +4022,7 @@ class TestQuotedEditorIds:
     def test_quoted_and_unquoted_name_the_same_property(self, converter):
         quoted = conv_line(converter, 'SetStage "MQ01Tate" 20', 'Quest')
         bare = conv_line(converter, 'SetStage MQ01Tate 20', 'Quest')
-        assert quoted == bare == 'MQ01Tate.SetStage(20)'
+        assert quoted == bare == 'TES4Polyfill.SetStage(MQ01Tate, 20)'
 
     @pytest.mark.parametrize('line,expected', [
         ('if ( GetStage "MQ01Tate" == 15 )', 'If (MQ01Tate.GetStage() == 15)'),
@@ -4089,7 +4088,7 @@ class TestPlayerBaseScriptRidesAQuestAlias:
             f'ScriptName TES4_GlobalplayerScript extends {PLAYER_ALIAS_EXTENDS}')
 
     def test_the_stage_call_survives(self, out):
-        assert 'MQ00.SetStage(1)' in out
+        assert 'TES4Polyfill.SetStage(MQ00, 1)' in out
 
     def test_no_self_as_actor_cast(self, out):
         """`Self` is the ReferenceAlias, so the cast the compiler rejects must
@@ -4261,6 +4260,22 @@ end
                "begin onTriggerEnter\n  set x to 2\nend\n")
         out = converter.convert_standalone('T', src, 'ObjectReference', 'T')
         assert out.count('Event OnTriggerEnter(') == 1
+
+    def test_trigger_actor_admits_only_actors(self, converter):
+        """OnTriggerActor's body runs only for an actor, not for clutter settling in the zone.
+
+        See: docs/commentary/script_convert.md#block-type-guards
+        """
+        src = "scn T\nshort x\nbegin onTriggerActor\n  set x to 1\nend\n"
+        out = converter.convert_standalone('T', src, 'ObjectReference', 'T')
+        body = out.split('Function TES4_OnTriggerBody(')[1].split('EndFunction')[0]
+        assert body.split('\n')[1].strip() == 'If akActionRef as Actor'
+        assert 'x = 1' in body
+
+    def test_plain_trigger_stays_unguarded(self, converter):
+        """A plain OnTrigger fires for any object, as in TES4."""
+        out = converter.convert_standalone('T', self.SRC, 'ObjectReference', 'T')
+        assert 'as Actor' not in out.split('Function TES4_OnTriggerBody(')[1]
 
 
 class TestPhysicalTrapDamage:
@@ -4449,7 +4464,7 @@ class TestDisablingAGateStillAdvancesTheQuest:
         # Preamble still comes first (faithful), but it now reads False for a
         # destroyed gate, so the setstage below it can run.
         assert dis < des
-        assert 'MS48.SetStage(50)' in out or 'ms48.SetStage(50)' in out
+        assert 'TES4Polyfill.SetStage(MS48, 50)' in out or 'TES4Polyfill.SetStage(ms48, 50)' in out
 
 
 class TestBaseItemPropertiesKeepTheirRecordType:
@@ -4871,6 +4886,25 @@ class TestQuestStartDoesNotClobberSeededWrites:
             < body.index('akQuest.Start()') \
             < body.index('akQuest.CombatantsKilled = v0')
         assert 'Float v1 = akQuest.OpenTimer' in body
+
+    def test_setstage_rechecks_alias_packages(self, converter):
+        """TES4SetStage sets the stage, then signals the quest's package aliases.
+
+        See: docs/commentary/script_convert.md#setstage-re-evaluates-alias-packages
+        """
+        out = converter.convert_standalone(
+            'ArenaScript', 'scn ArenaScript\nshort n\nbegin gamemode\nend', 'Quest', 'ArenaScript')
+        body = out[out.index('Bool Function TES4SetStage('):].split('EndFunction')[0]
+        assert body.index('akQuest.SetStage(aiStage)') < body.index('TES4Polyfill.StageSet(akQuest)') \
+            < body.index('Return done')
+
+    def test_polyfill_stage_advance_is_lifted(self):
+        """A scriptless quest's `TES4Polyfill.SetStage` is still lifted behind its GetStage guard."""
+        from script_convert.conversation_sequence import split_stage_advances
+        gated, advances = split_stage_advances(['  x = 1', '  TES4Polyfill.SetStage(MQ00, 20)'])
+        assert gated == ['  x = 1']
+        assert advances == ['  If MQ00.GetStage() < 20  ; advance survives a rejected turn',
+                            '    TES4Polyfill.SetStage(MQ00, 20)', '  EndIf']
 
     def test_object_script_has_no_restart(self, converter):
         """Only a quest script is restarted, so only it carries TES4Start."""

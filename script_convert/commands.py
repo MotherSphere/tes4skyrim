@@ -125,9 +125,11 @@ def stage(ctx, call) -> str:
 
     TES4 spells the quest as the first argument and the stage as the second;
     Papyrus makes the quest the receiver. SetStage on a quest with a script is
-    its `TES4SetStage`, which keeps the variables the implied start would reset.
+    its `TES4SetStage`, which keeps the variables a start resets; without
+    one, `TES4Polyfill.SetStage`. Both re-check the alias packages.
     See: docs/commentary/script_convert.md#quest-property-never-downgrades
     See: docs/commentary/script_convert.md#setstage-start-keeps-variables
+    See: docs/commentary/script_convert.md#setstage-re-evaluates-alias-packages
     """
     parts = ctx.arg_srcs()
     quest_src = parts[0].strip() if parts else (call.ref or '')
@@ -141,7 +143,7 @@ def stage(ctx, call) -> str:
         script = ctx.xref.get_quest_script_type(quest_src) if ctx.xref else 'Quest'
         if script != 'Quest':
             return f'{script}.TES4SetStage({prop} as {script}, {stage_no})'
-        return f'{prop}.SetStage({stage_no})'
+        return f'TES4Polyfill.SetStage({prop}, {stage_no})'
     # GetStageDone asks whether a specific stage has run; GetStage reads the
     # current stage number, and TES4 writes it with no stage operand.
     if len(parts) > 1:

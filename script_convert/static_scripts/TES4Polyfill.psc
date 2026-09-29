@@ -824,6 +824,25 @@ Function EvaluatePackage(Actor akActor) Global
   akActor.EvaluatePackage()
 EndFunction
 
+; The mod event `akQuest`'s TES4_StagePackageAlias aliases listen on.
+String Function StageEventName(Quest akQuest) Global
+  Return "TES4StageSet" + akQuest.GetFormID()
+EndFunction
+
+; After a converted SetStage: every alias of `akQuest` carrying its packages
+; re-checks its actor, as Oblivion did on its own, each on its own thread.
+; See docs/commentary/script_convert.md#setstage-re-evaluates-alias-packages
+Function StageSet(Quest akQuest) Global
+  akQuest.SendModEvent(StageEventName(akQuest))
+EndFunction
+
+; TES4 SetStage on a quest with no converted script (one that has uses its TES4SetStage).
+Bool Function SetStage(Quest akQuest, Int aiStage) Global
+  Bool done = akQuest.SetStage(aiStage)
+  StageSet(akQuest)
+  Return done
+EndFunction
+
 ; TES4 `StartConversation Player [topic]`.  Papyrus cannot open dialogue, so the
 ; actor joins one alias of the topic's pool on the importer's TES4ForceGreets
 ; quest; that alias's ForceGreet package walks over and opens the topic.
