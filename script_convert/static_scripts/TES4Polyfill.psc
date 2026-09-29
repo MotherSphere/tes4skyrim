@@ -508,14 +508,17 @@ EndFunction
 ; ==========================================================================
 ; Confidence
 ; ==========================================================================
-; TES4 Confidence N means "flee once N% of my own health is lost"; Skyrim's
-; tiers 1-3 instead flee by comparing strength with the enemy.  So a converted
-; actor is only ever Cowardly (0) or Foolhardy (4), and 1-99 lives on as the
-; actor's rank in TES4ConfidenceFaction, which the TES4ConfidenceFlee ability
-; watches.  The combat controller copies the tier when combat STARTS
-; (1.6.1170 0x840c90, reached only from combat start), so a change made
-; mid-fight restarts the fight against the same target.
-; See docs/commentary/tes5_import_actors.md#confidence-tiers
+; Oblivion flees once its flee score (Confidence, own health) beats the actor's
+; best attack; Skyrim's tiers 1-3 instead compare strength with the enemy.  So
+; a converted actor is only ever Cowardly (0) or Foolhardy (4).  Its authored
+; Confidence is its rank in TES4ConfidenceFaction; its flee margin, rank in
+; TES4FleeMarginFaction, flees on sight below 0, never at Q
+; (TES4FleeHealthScale) or more, and in between once health is under
+; 1 - margin/Q, which the TES4ConfidenceFlee ability watches.  A Confidence
+; change shifts the margin by the same amount.  The combat controller copies
+; the tier when combat STARTS (1.6.1170 0x840c90, reached only from combat
+; start), so a change made mid-fight restarts the fight against the same target.
+; See docs/commentary/tes5_import_actors.md#flee-margin
 
 Function SetConfidenceTier(Actor akActor, Int aiTier) Global
   If akActor == None || akActor.GetActorValue("Confidence") as Int == aiTier
@@ -530,31 +533,34 @@ Function SetConfidenceTier(Actor akActor, Int aiTier) Global
   akActor.EvaluatePackage()
 EndFunction
 
-; Cowardly once health is at or below 1 - rank/100, Foolhardy above it.
-Function ApplyConfidence(Actor akActor, Faction akFaction) Global
-  If akActor == None || akFaction == None || akActor.IsDead()
+; Cowardly below margin 0 or while health is under 1 - margin/Q, else Foolhardy.
+Function ApplyConfidence(Actor akActor, Faction akMargin, GlobalVariable akScale) Global
+  If akActor == None || akMargin == None || akScale == None || akActor.IsDead()
     Return
   EndIf
-  Int rank = akActor.GetFactionRank(akFaction)
-  If rank < 1
+  If !akActor.IsInFaction(akMargin)
     Return
   EndIf
-  If akActor.GetActorValuePercentage("Health") <= 1.0 - rank / 100.0
+  Int margin = akActor.GetFactionRank(akMargin)
+  Float scale = akScale.GetValue()
+  If margin < 0
+    SetConfidenceTier(akActor, 0)
+  ElseIf margin < scale && akActor.GetActorValuePercentage("Health") < 1.0 - margin / scale
     SetConfidenceTier(akActor, 0)
   Else
     SetConfidenceTier(akActor, 4)
   EndIf
 EndFunction
 
-; TES4 GetAV Confidence: the 0-100 value the actor was converted or set to.
-; Without the faction (an FO3/FNV plugin, whose Confidence is already the
-; Skyrim tier) the tier itself.
+; TES4 GetAV Confidence: the value the actor was converted or set to.  Without
+; the faction (an FO3/FNV plugin, whose Confidence is already the Skyrim tier)
+; the tier itself.
 Float Function GetConfidence(Actor akActor, Faction akFaction) Global
   If akActor == None
     Return 0.0
   ElseIf akFaction == None
     Return akActor.GetActorValue("Confidence")
-  ElseIf akActor.GetFactionRank(akFaction) >= 1
+  ElseIf akActor.IsInFaction(akFaction)
     Return akActor.GetFactionRank(akFaction) as Float
   ElseIf akActor.GetActorValue("Confidence") >= 1.0
     Return 100.0
@@ -562,39 +568,44 @@ Float Function GetConfidence(Actor akActor, Faction akFaction) Global
   Return 0.0
 EndFunction
 
-; TES4 SetAV/ForceAV Confidence (ModAV passes GetConfidence + delta).  Without
-; the faction, afValue is already a tier and is written as one.
-Function SetConfidence(Actor akActor, Float afValue, Faction akFaction, Spell akFlee) Global
+; Clamp to a faction rank's signed byte.
+Int Function ClampRank(Int aiValue) Global
+  If aiValue < -128
+    Return -128
+  ElseIf aiValue > 127
+    Return 127
+  EndIf
+  Return aiValue
+EndFunction
+
+; TES4 SetAV/ForceAV Confidence (ModAV passes GetConfidence + delta): the margin
+; moves by the change.  Without the faction, afValue is already a tier and is
+; written as one; an actor without a margin (not converted from TES4) is
+; Cowardly at 0 and Foolhardy above.
+Function SetConfidence(Actor akActor, Float afValue, Faction akFaction, Faction akMargin, Spell akFlee, GlobalVariable akScale) Global
   If akActor == None
     Return
   EndIf
   Int raw = afValue as Int
-  If akFaction == None
-    If raw < 0
-      raw = 0
-    ElseIf raw > 4
+  If akFaction == None || akMargin == None || !akActor.IsInFaction(akMargin)
+    If akFaction == None && raw > 4
       raw = 4
+    ElseIf akFaction != None && raw > 0
+      raw = 4
+    ElseIf raw < 0
+      raw = 0
     EndIf
     SetConfidenceTier(akActor, raw)
     Return
   EndIf
-  If raw > 0 && raw < 100 && akFlee != None
-    akActor.SetFactionRank(akFaction, raw)
+  raw = ClampRank(raw)
+  Int margin = ClampRank(akActor.GetFactionRank(akMargin) + raw - (GetConfidence(akActor, akFaction) as Int))
+  akActor.SetFactionRank(akFaction, raw)
+  akActor.SetFactionRank(akMargin, margin)
+  If akFlee != None && akScale != None && margin >= 0 && margin < akScale.GetValue()
     akActor.AddSpell(akFlee, False)
-    ApplyConfidence(akActor, akFaction)
-    Return
   EndIf
-  If akFaction != None
-    akActor.RemoveFromFaction(akFaction)
-  EndIf
-  If akFlee != None
-    akActor.RemoveSpell(akFlee)
-  EndIf
-  If raw > 0
-    SetConfidenceTier(akActor, 4)
-  Else
-    SetConfidenceTier(akActor, 0)
-  EndIf
+  ApplyConfidence(akActor, akMargin, akScale)
 EndFunction
 
 ; TES4 SetAV Speed.  Skyrim has no Speed attribute, so the write becomes a

@@ -12,7 +12,7 @@ See: docs/commentary/tes5_import_actors.md
 import re
 import struct
 
-from ..actors.confidence import actor_confidence, confidence_tier
+from ..actors.confidence import confidence_tier
 from ..base.constants import (DEFAULT_RACE, RACE_MAP, TES4_SKILL_TO_TES5,
                          TES5_SKILL_ORDER)
 from ..base.equivalents import ATTRIBUTE_SKILL_MAP, VOICE_TYPE_MAP
@@ -244,7 +244,7 @@ def build_aidt(rec: dict) -> bytes:
     else:
         pers = get_int(rec, 'DATA.Personality', 50)
         tes5_aggr = _aggression_tier(rec, get_int(rec, 'AIDT.Aggression'), pers)
-        tes5_conf = confidence_tier(actor_confidence(rec))
+        tes5_conf = confidence_tier(rec)
     tes5_moral = 3 if resp >= 80 else (2 if resp >= 50 else (1 if resp >= 30 else 0))
     tes5_assist = 1 if resp >= 30 else 0
 

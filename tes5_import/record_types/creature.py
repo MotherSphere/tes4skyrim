@@ -10,7 +10,7 @@ import struct
 from ..base.constants import TES5_SKILL_ORDER
 from ..actors.creature_races import creature_capped_level, creature_health_offset
 from ..actors.combat_style import actor_combat_style
-from ..actors.confidence import actor_confidence, flee_memberships, flee_spells
+from ..actors.confidence import flee_memberships, flee_spells
 from ..actors.creature_unarmed import creature_unarmed_ability
 from ..actors.outfits import split_inventory
 from ..packages.actor_wiring import (CLAS_CREATURE_CASTER, CLAS_CREATURE_PREDATOR,
@@ -318,7 +318,7 @@ def _crea_snams(rec: dict, vendor_fids: list) -> bytes:
               for i in range(get_int(rec, 'FactionCount'))]
     ranked += [(vfid, 0) for vfid in vendor_fids]
     ranked += [(origin_fid, 0) for origin_fid in origin_memberships()]
-    ranked += flee_memberships(actor_confidence(rec))
+    ranked += flee_memberships(rec)
     return b''.join(pack_subrecord('SNAM', struct.pack('<IbBBB', fid, rank, 0, 0, 0))
                     for fid, rank in ranked)
 
@@ -367,7 +367,7 @@ def _crea_spell_subs(rec: dict) -> bytes:
     fids = [get_formid(rec, f'Spell[{i}]')
             for i in range(get_int(rec, 'SpellCount'))]
     fids.append(creature_unarmed_ability(get_formid(rec, 'FormID') & 0x00FFFFFF))
-    fids += flee_spells(actor_confidence(rec))
+    fids += flee_spells(rec)
     fids = [f for f in fids if f]
     if not fids:
         return b''

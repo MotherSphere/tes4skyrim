@@ -6689,10 +6689,9 @@ class TestOutfitIndexAcrossMasters(TestOutfitSplit):
 
 
 class TestAidtConfidenceTiers:
-    """TES4 confidence N flees after losing N% of the actor's OWN health; Skyrim's
-    Cowardly-Brave tiers flee by comparing strength with the enemy, which sent
-    Nehrim's 1-HP exit trolls running.  Only Cowardly (0) and Foolhardy (4) are
-    written; 1-99 rides on a faction rank the flee ability reads.
+    """Skyrim's Cowardly-Brave tiers flee by comparing strength with the enemy, which
+    sent Nehrim's 1-HP exit trolls running.  Only Cowardly (0) and Foolhardy (4)
+    are written; without a margin (Morrowind), Cowardly at 0.
 
     See: docs/commentary/tes5_import_actors.md#confidence-tiers
     """
@@ -6719,10 +6718,93 @@ class TestAidtConfidenceTiers:
     def test_zero_is_cowardly(self):
         assert self._conf(0) == 0
 
-    def test_threshold_rides_on_the_faction_rank(self):
-        """1-99 is the own-health threshold; 0 and 100 carry none."""
-        from tes5_import.actors.confidence import flee_rank
-        assert [flee_rank(v) for v in (0, 1, 50, 99, 100)] == [0, 1, 50, 99, 0]
+
+#: Oblivion.esm's overrides of the flee and damage settings.
+_OBLIVION_FLEE_GMSTS = {
+    'fAIFleeConfBase': '30.0', 'fAIFleeHealthMult': '10.0', 'fDamageWeaponMult': '0.5',
+    'fDamageSkillMult': '1.5', 'fDamageStrengthBase': '0.75', 'fDamageStrengthMult': '0.5',
+    'fDamageWeaponConditionBase': '0.5', 'fDamageWeaponConditionMult': '0.5', 'fFatigueBase': '1.0'}
+
+
+class TestFleeMargin:
+    """Oblivion flees when Confidence x fAIFleeConfMult + fAIFleeConfBase + lost
+    health x fAIFleeHealthMult beats the actor's best attack; the margin is what
+    Confidence has left over, flee on sight below 0 and never at Q.
+
+    See: docs/commentary/tes5_import_actors.md#flee-margin
+    """
+
+    @staticmethod
+    def _records(gmsts: dict, extra: dict = None) -> dict:
+        """Create the confidence records for a plugin authoring `gmsts`; returns their FormIDs."""
+        from tes5_import.actors.confidence import create_confidence_records
+        by_type = {'GMST': [{'EditorID': k, 'DATA.Value': v} for k, v in gmsts.items()]}
+        by_type.update(extra or {})
+        return create_confidence_records(TestCombatStyleConversion._Writer(), by_type, None)
+
+    def teardown_method(self):
+        """Switch the margin and style conversion back off for the other tests."""
+        from tes5_import.actors.combat_style import create_combat_styles
+        from tes5_import.actors.confidence import create_confidence_records
+        writer = TestCombatStyleConversion._Writer()
+        create_confidence_records(writer, {}, None, wanted=False)
+        create_combat_styles(writer, {}, None, wanted=False)
+
+    @staticmethod
+    def _creature(conf: int, damage: int) -> dict:
+        """An unarmed creature with this Confidence and AttackDamage."""
+        return {'Signature': 'CREA', 'AIDT.Confidence': str(conf),
+                'DATA.AttackDamage': str(damage)}
+
+    def test_weak_timid_animal_flees_on_sight(self):
+        """UL's ranch horse: 30 - 5 = 25 beats 1.3 x 10 = 13 at full health."""
+        from tes5_import.actors.confidence import confidence_tier, flee_margin, flee_spells
+        self._records(_OBLIVION_FLEE_GMSTS)
+        horse = self._creature(10, 10)
+        assert flee_margin(horse) == -24
+        assert confidence_tier(horse) == 0 and flee_spells(horse) == []
+
+    def test_middling_confidence_flees_below_a_health_line(self):
+        """MQHorseMartin, Confidence 50: margin 16 of Q 20, so flees under 20% health."""
+        from tes5_import.actors.confidence import (FLEE_SPELL_EDID, confidence_tier,
+                                                   flee_margin, flee_spells)
+        fids = self._records(_OBLIVION_FLEE_GMSTS)
+        horse = self._creature(50, 10)
+        assert flee_margin(horse) == 16
+        assert confidence_tier(horse) == 4 and flee_spells(horse) == [fids[FLEE_SPELL_EDID]]
+
+    def test_confidence_sixty_never_flees(self):
+        """A Confidence 75 wolf tops out at 30 - 37.5 + 10 < 10."""
+        from tes5_import.actors.confidence import confidence_tier, flee_margin, flee_spells
+        self._records(_OBLIVION_FLEE_GMSTS)
+        wolf = self._creature(75, 3)
+        assert flee_margin(wolf) >= 20
+        assert confidence_tier(wolf) == 4 and flee_spells(wolf) == []
+
+    def test_a_masterless_plugin_runs_on_the_exe_settings(self):
+        """No GMSTs (Nehrim): ConfBase 40, Q 40; Confidence 50 flees on sight."""
+        from tes5_import.actors.confidence import flee_margin
+        self._records({})
+        assert flee_margin(self._creature(50, 5)) == -10
+
+    def test_fleeing_disabled_never_flees(self):
+        """The style puts the attack term at Q whatever the Confidence."""
+        from tes5_import.actors.combat_style import create_combat_styles
+        from tes5_import.actors.confidence import flee_margin
+        self._records(_OBLIVION_FLEE_GMSTS)
+        create_combat_styles(TestCombatStyleConversion._Writer(),
+                             {'CSTY': [TestCombatStyleConversion._style()]}, None)
+        troll = dict(self._creature(0, 50), **{'ZNAM.CombatStyle': '00000ABC'})
+        assert flee_margin(troll) == 20
+
+    def test_weapon_score_is_oblivions_damage(self):
+        """2 x 0.5 x 30 x condition 1 x (0.2 + 1.5) x (0.75 + 0.5) at skill and Strength 100."""
+        from tes5_import.actors.attack_score import attack_score
+        weapon = {'Signature': 'WEAP', 'FormID': '00000B01', 'DATA.Type': '1', 'DATA.Damage': '30'}
+        self._records(_OBLIVION_FLEE_GMSTS, {'WEAP': [weapon]})
+        npc = {'Signature': 'NPC_', 'ItemCount': '1', 'Item[0].FormID': '00000B01',
+               'DATA.Blade': '100', 'DATA.Luck': '50', 'DATA.Strength': '100'}
+        assert abs(attack_score(npc) - 2 * 0.5 * 30 * 1.7 * 1.25) < 1e-6
 
 
 class TestCombatStyleConversion:
@@ -6772,13 +6854,12 @@ class TestCombatStyleConversion:
         assert abs(struct.unpack_from('<f', csgd)[0] - 0.45 / 0.95) < 1e-5
 
     def test_fleeing_disabled_style_never_flees(self):
-        """An actor on a Fleeing Disabled style is Foolhardy whatever its confidence."""
-        from tes5_import.actors.combat_style import actor_combat_style
-        from tes5_import.actors.confidence import actor_confidence
+        """An actor on a Fleeing Disabled style reads the flag through its own style."""
+        from tes5_import.actors.combat_style import actor_combat_style, fleeing_disabled
         self._styles()
         actor = {'ZNAM.CombatStyle': '00000ABC', 'AIDT.Confidence': '0'}
         assert actor_combat_style(actor) == 0xABC
-        assert actor_confidence(actor) == 100
+        assert fleeing_disabled(actor)
 
     def test_styleless_actor_gets_the_default(self):
         """An actor with no authored style points at the generated default."""

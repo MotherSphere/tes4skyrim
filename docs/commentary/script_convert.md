@@ -1512,20 +1512,22 @@ an inert comment. `ModDisposition` (414) is a genuine engine removal, with the
 **Code:** `commands._confidence`, `TES4Polyfill` (Confidence section),
 `static_scripts/TES4_ConfidenceFlee.psc`.
 
-A converted actor is only ever Cowardly or Foolhardy, and a TES4 confidence of
-1-99 lives on as its rank in `TES4ConfidenceFaction`
-([why](tes5_import_actors.md#confidence-tiers)). A script therefore cannot
-write or read the Confidence actor value directly any more:
+A converted actor is only ever Cowardly or Foolhardy; its authored confidence
+is its rank in `TES4ConfidenceFaction` and its flee margin its rank in
+`TES4FleeMarginFaction` ([why](tes5_import_actors.md#flee-margin)). A script
+therefore cannot write or read the Confidence actor value directly any more:
 
 | TES4 | Papyrus |
 |---|---|
 | `GetAV` / `GetBaseAV Confidence` | `TES4Polyfill.GetConfidence(ref, TES4ConfidenceFaction)`: the rank, else 100 for Foolhardy, else 0 |
-| `SetAV` / `ForceAV Confidence N` | `TES4Polyfill.SetConfidence(ref, N, TES4ConfidenceFaction, TES4ConfidenceFlee)` |
+| `SetAV` / `ForceAV Confidence N` | `TES4Polyfill.SetConfidence(ref, N, TES4ConfidenceFaction, TES4FleeMarginFaction, TES4ConfidenceFlee, TES4FleeHealthScale)` |
 | `ModAV Confidence D` | `SetConfidence(ref, GetConfidence(...) + (D), ...)` |
 
-`SetConfidence` with 1-99 sets the rank, adds the flee ability and applies the
-tier the actor's health calls for now; 0 or 100 removes both and writes
-Cowardly or Foolhardy. So a script's own round trip works: Unique Landscapes'
+`SetConfidence` sets the confidence rank, moves the margin by the same change,
+adds the flee ability when the margin falls inside the health window, and
+applies the tier the actor's health calls for now. An actor with no margin (not
+converted from TES4) is Cowardly at 0 and Foolhardy above. So a script's own
+round trip works: Unique Landscapes'
 fish (`xulcfFishScript`) reads its confidence into `baseConf`, computes a flee
 distance from `100 - baseConf`, and restores it later, all on the 0-100 scale
 it was written for. Before, the read returned the tier (0-4) and its

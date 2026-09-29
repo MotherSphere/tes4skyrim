@@ -290,7 +290,8 @@ def _prescan_special_records(by_type: dict, ctx, writer, export_dir: str, _step_
         writer, getattr(ctx, 'master_index', None)))
     tes4_source = not is_tes3_export(export_dir) and not is_fallout_export(by_type)
     WELL_KNOWN_PROPERTIES.update(create_confidence_records(
-        writer, getattr(ctx, 'master_index', None), wanted=tes4_source))
+        writer, by_type, getattr(ctx, 'master_export', None),
+        getattr(ctx, 'master_index', None), wanted=tes4_source))
     create_combat_styles(writer, by_type, getattr(ctx, 'master_export', None),
                          getattr(ctx, 'master_index', None), wanted=tes4_source)
     WELL_KNOWN_PROPERTIES.update(create_combat_approach(writer, getattr(ctx, 'master_index', None)))

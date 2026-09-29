@@ -12,7 +12,7 @@ from asset_convert.character.hair_plan import (mesh_name_family, output_model_pa
                                                variant_tag)
 from ..actors import hair_variants
 from ..actors.combat_style import actor_combat_style
-from ..actors.confidence import actor_confidence, flee_memberships, flee_spells
+from ..actors.confidence import flee_memberships, flee_spells
 from ..base.constants import TES5_SKILL_ORDER
 from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
 from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
@@ -173,7 +173,7 @@ def _npc_snams(rec: dict, vendor_fids: list, trainer_clas_fid: int) -> bytes:
         subs += _pack_snam(get_trainer_faction_fid())
     for origin_fid in origin_memberships():
         subs += _pack_snam(origin_fid)
-    for flee_fid, rank in flee_memberships(actor_confidence(rec)):
+    for flee_fid, rank in flee_memberships(rec):
         subs += _pack_snam(flee_fid, rank)
     race_fact = race_faction(get_formid(rec, 'RNAM.Race'))
     if race_fact:
@@ -207,7 +207,7 @@ def _spell_subs(rec: dict) -> bytes:
     """SPCT + SPLO for the actor's spell list (b'' when it has none)."""
     fids = [get_formid(rec, f'Spell[{i}]')
             for i in range(get_int(rec, 'SpellCount'))]
-    fids += flee_spells(actor_confidence(rec))
+    fids += flee_spells(rec)
     fids = [f for f in fids if f]
     if not fids:
         return b''

@@ -1,24 +1,33 @@
-"""TES4 Confidence in Skyrim: no strength-based fleeing, an own-health flee threshold.
+"""TES4 Confidence in Skyrim: Cowardly or Foolhardy, switched by Oblivion's own flee rule.
 
-Oblivion flees once an actor has lost Confidence% of its OWN health; Skyrim's
-tiers 0-3 flee by comparing the actor's strength with its enemy's, which no
-Oblivion actor ever did. Every converted actor is therefore Cowardly (0) or
-Foolhardy (4), and one in between carries its threshold as a rank in a hidden
-faction read by a conditioned ability (`TES4ConfidenceFlee`).
+Oblivion flees when its flee score (Confidence and its own health) beats the
+actor's best attack score; Skyrim's tiers 0-3 compare its strength with its
+enemy's, which no Oblivion actor did. Every converted actor is therefore
+Cowardly (0) or Foolhardy (4). The margin between the two scores is a rank in
+a hidden faction, and a conditioned ability switches the tier at the health
+where Oblivion would start to flee.
 
-See: docs/commentary/tes5_import_actors.md#confidence-tiers
+See: docs/commentary/tes5_import_actors.md#flee-margin
 """
 
+import math
 import struct
 
 from ..base.conditions import build_ctda
 from ..base.text_reader import get_int
-from .combat_style import fleeing_disabled
 from ..base.writer import (PluginWriter, pack_formid_subrecord, pack_obnd,
                            pack_record, pack_string_subrecord, pack_subrecord)
+from .attack_score import attack_score, index_attack_sources
+from .combat_style import fleeing_disabled, game_settings
 
-#: The hidden faction whose rank is the actor's TES4 confidence (1-99).
+#: The hidden faction whose rank is the actor's authored TES4 Confidence.
 FACTION_EDID = 'TES4ConfidenceFaction'
+
+#: The hidden faction whose rank is the actor's flee margin.
+MARGIN_FACTION_EDID = 'TES4FleeMarginFaction'
+
+#: The Constant global holding Q, the margin at which fleeing stops.
+SCALE_EDID = 'TES4FleeHealthScale'
 
 #: The constant ability whose effects fire once the owner's health is low enough.
 FLEE_SPELL_EDID = 'TES4ConfidenceFlee'
@@ -30,14 +39,18 @@ FLEE_SCRIPT = 'TES4_ConfidenceFlee'
 #: wbConfidenceEnum tiers the conversion writes.
 TIER_COWARDLY, TIER_FOOLHARDY = 0, 4
 
-#: TES4 confidence at which Oblivion never flees.
-_NEVER_FLEES = 100
+#: Oblivion.exe compiled-in values of the flee score's game settings.
+_EXE_SETTINGS = {'fAIFleeConfBase': 40.0, 'fAIFleeConfMult': -0.5, 'fAIFleeHealthMult': 20.0,
+                 'fAICombatFleeScoreThreshold': 10.0}
+
+#: A faction rank is a signed byte.
+_RANK_MIN, _RANK_MAX = -128, 127
 
 #: CTDA functions and the Health actor value (vanilla GetActorValuePercent(00000018)).
 _FUNC_GET_FACTION_RANK, _FUNC_GET_AV_PERCENT, _AV_HEALTH = 73, 640, 24
 
-#: CTDA comparison operators <= and >=.
-_OP_LE, _OP_GE = 0xA0, 0x60
+#: CTDA comparison operators == and <.
+_OP_EQ, _OP_LT = 0x00, 0x80
 
 #: MGEF flags of vanilla's constant self script holders (WereFXFeedBloodHolder): Hide in UI | FX Persist | No Duration.
 _EFFECT_FLAGS = 0x9200
@@ -51,46 +64,92 @@ _EITHER_HAND = 0x00013F44
 #: FACT DATA flag 0x1: Hidden From PC.
 _HIDDEN_FROM_PC = 0x1
 
-#: FormIDs of this run's faction and ability (0 until created or adopted).
-_FIDS = {FACTION_EDID: 0, FLEE_SPELL_EDID: 0}
+#: GLOB record flag Constant, which 132 of Skyrim.esm's 664 globals carry.
+_GLOB_CONSTANT = 0x40
+
+#: FormIDs of this run's records (0 until created or adopted).
+_FIDS = {FACTION_EDID: 0, MARGIN_FACTION_EDID: 0, SCALE_EDID: 0, FLEE_SPELL_EDID: 0}
+
+#: Run state: TES4 source?, the flee settings in effect, and Q.
+_STATE = {'active': False, 'settings': dict(_EXE_SETTINGS), 'scale': 20.0}
 
 
-def actor_confidence(rec: dict) -> int:
-    """The actor's TES4 confidence; 100 when its combat style disables fleeing."""
-    return _NEVER_FLEES if fleeing_disabled(rec) else get_int(rec, 'AIDT.Confidence')
+# ---------------------------------------------------------------------------
+# The margin
+# ---------------------------------------------------------------------------
+
+def _confidence(rec: dict) -> int:
+    """The actor's authored TES4 Confidence."""
+    return get_int(rec, 'AIDT.Confidence')
 
 
-def confidence_tier(confidence: int) -> int:
-    """TES4 confidence 0-100 as a TES5 tier: Cowardly at 0, else Foolhardy."""
-    return TIER_COWARDLY if confidence <= 0 else TIER_FOOLHARDY
+def _slope() -> float:
+    """-fAIFleeConfMult: the flee score one Confidence point is worth."""
+    return -_STATE['settings']['fAIFleeConfMult']
 
 
-def flee_rank(confidence: int) -> int:
-    """The faction rank carrying an own-health threshold, 0 when none applies."""
-    return confidence if 0 < confidence < _NEVER_FLEES else 0
+def flee_margin(rec: dict) -> int:
+    """Confidence + (best attack - fAIFleeConfBase) / -fAIFleeConfMult, the attack term capped at Q.
+
+    Below 0 the actor flees on sight, at Q or more never; in between once
+    health falls under 1 - margin/Q. Fleeing Disabled puts the attack term at Q.
+    See: docs/commentary/tes5_import_actors.md#flee-margin
+    """
+    s, scale = _STATE['settings'], _STATE['scale']
+    if fleeing_disabled(rec):
+        term = scale
+    else:
+        best = max(s['fAICombatFleeScoreThreshold'], attack_score(rec))
+        term = min(scale, (best - s['fAIFleeConfBase']) / _slope())
+    return max(_RANK_MIN, min(_RANK_MAX, round(_confidence(rec) + term)))
 
 
-def flee_memberships(confidence: int) -> list:
-    """[(faction FormID, rank)] an actor with this confidence joins."""
-    rank = flee_rank(confidence)
-    fid = _FIDS[FACTION_EDID]
-    return [(fid, rank)] if rank and fid else []
+def confidence_tier(rec: dict) -> int:
+    """Cowardly if the actor flees on sight, else Foolhardy."""
+    if not _STATE['active']:
+        return TIER_COWARDLY if _confidence(rec) <= 0 else TIER_FOOLHARDY
+    return TIER_COWARDLY if flee_margin(rec) < 0 else TIER_FOOLHARDY
 
 
-def flee_spells(confidence: int) -> list:
-    """The flee ability, for an actor whose confidence carries a threshold."""
+def _in_window(margin: int) -> bool:
+    """True when the margin flees only below some health."""
+    return 0 <= margin < _STATE['scale']
+
+
+def flee_memberships(rec: dict) -> list:
+    """[(faction FormID, rank)]: the authored Confidence and the flee margin."""
+    if not (_STATE['active'] and _FIDS[FACTION_EDID] and _FIDS[MARGIN_FACTION_EDID]):
+        return []
+    return [(_FIDS[FACTION_EDID], min(_RANK_MAX, _confidence(rec))),
+            (_FIDS[MARGIN_FACTION_EDID], flee_margin(rec))]
+
+
+def flee_spells(rec: dict) -> list:
+    """The flee ability, for an actor whose margin flees below some health."""
     fid = _FIDS[FLEE_SPELL_EDID]
-    return [fid] if flee_rank(confidence) and fid else []
+    return [fid] if _STATE['active'] and fid and _in_window(flee_margin(rec)) else []
 
 
-def _faction(fid: int) -> bytes:
-    """The hidden, relation-free rank holder."""
-    subs = pack_string_subrecord('EDID', FACTION_EDID)
+# ---------------------------------------------------------------------------
+# Records
+# ---------------------------------------------------------------------------
+
+def _faction(fid: int, edid: str) -> bytes:
+    """A hidden, relation-free rank holder."""
+    subs = pack_string_subrecord('EDID', edid)
     subs += pack_subrecord('DATA', struct.pack('<I', _HIDDEN_FROM_PC))
     return pack_record('FACT', fid, 0, subs)
 
 
-def _effect(fid: int, faction: int) -> bytes:
+def _scale_global(fid: int) -> bytes:
+    """The Constant float global holding Q."""
+    subs = pack_string_subrecord('EDID', SCALE_EDID)
+    subs += pack_subrecord('FNAM', struct.pack('<B', ord('f')))
+    subs += pack_subrecord('FLTV', struct.pack('<f', _STATE['scale']))
+    return pack_record('GLOB', fid, _GLOB_CONSTANT, subs)
+
+
+def _effect(fid: int) -> bytes:
     """The constant self Script effect carrying TES4_ConfidenceFlee."""
     from script_convert.pipeline import build_vmad_object_script
     data = bytearray(152)
@@ -101,57 +160,72 @@ def _effect(fid: int, faction: int) -> bytes:
     struct.pack_into('<i', data, 88, -1)
     struct.pack_into('<f', data, 104, 1.0)
     subs = pack_string_subrecord('EDID', FLEE_EFFECT_EDID)
-    subs += pack_subrecord('VMAD', build_vmad_object_script(
-        FLEE_SCRIPT, {FACTION_EDID: faction}))
+    subs += pack_subrecord('VMAD', build_vmad_object_script(FLEE_SCRIPT, {
+        MARGIN_FACTION_EDID: _FIDS[MARGIN_FACTION_EDID], SCALE_EDID: _FIDS[SCALE_EDID]}))
     subs += pack_subrecord('DATA', bytes(data))
     return pack_record('MGEF', fid, 0, subs)
 
 
-def _threshold_effect(effect: int, faction: int, rank: int) -> bytes:
-    """Effect k: active while rank <= k and health <= 1 - k/100, so rank r flees at 1 - r/100."""
+def _threshold_effect(effect: int, rank: int) -> bytes:
+    """Effect k: active while the margin is k and health is under 1 - k/Q."""
+    faction = _FIDS[MARGIN_FACTION_EDID]
     subs = pack_formid_subrecord('EFID', effect)
     subs += pack_subrecord('EFIT', struct.pack('<fII', 0.0, 0, 0))
     subs += pack_subrecord('CTDA', build_ctda(
-        _FUNC_GET_AV_PERCENT, _AV_HEALTH, 0, 1.0 - rank / 100.0, _OP_LE))
-    subs += pack_subrecord('CTDA', build_ctda(
-        _FUNC_GET_FACTION_RANK, faction, 0, float(rank), _OP_LE))
+        _FUNC_GET_AV_PERCENT, _AV_HEALTH, 0, 1.0 - rank / _STATE['scale'], _OP_LT))
     return subs + pack_subrecord('CTDA', build_ctda(
-        _FUNC_GET_FACTION_RANK, faction, 0, 1.0, _OP_GE))
+        _FUNC_GET_FACTION_RANK, faction, 0, float(rank), _OP_EQ))
 
 
-def _ability(fid: int, effect: int, faction: int) -> bytes:
-    """The constant ability with one threshold effect per rank 1-99."""
+def _ability(fid: int, effect: int) -> bytes:
+    """The constant ability with one threshold effect per margin 0 .. ceil(Q)-1."""
     subs = pack_string_subrecord('EDID', FLEE_SPELL_EDID)
     subs += pack_obnd()
     subs += pack_subrecord('ETYP', struct.pack('<I', _EITHER_HAND))
     subs += pack_subrecord('SPIT', struct.pack(
         '<IIIfII12x', 0, 0, _ABILITY, 0.0, _CONSTANT, _SELF))
-    for rank in range(1, _NEVER_FLEES):
-        subs += _threshold_effect(effect, faction, rank)
+    for rank in range(math.ceil(_STATE['scale'])):
+        subs += _threshold_effect(effect, rank)
     return pack_record('SPEL', fid, 0, subs)
 
 
-def create_confidence_records(writer: PluginWriter, master_index=None,
-                              wanted: bool = True) -> dict:
-    """The faction and flee ability, adopted from a master that has them.
+def _read_settings(by_type: dict, master_export: dict) -> None:
+    """The flee settings in effect and Q = fAIFleeHealthMult / -fAIFleeConfMult, capped to a rank."""
+    settings = game_settings(by_type, master_export, _EXE_SETTINGS)[0]
+    if settings['fAIFleeConfMult'] >= 0:
+        print(f"  WARNING: fAIFleeConfMult {settings['fAIFleeConfMult']} makes Confidence "
+              f"meaningless; using the exe value {_EXE_SETTINGS['fAIFleeConfMult']}")
+        settings['fAIFleeConfMult'] = _EXE_SETTINGS['fAIFleeConfMult']
+    _STATE['settings'] = settings
+    _STATE['scale'] = min(float(_RANK_MAX), settings['fAIFleeHealthMult'] / _slope())
+
+
+def create_confidence_records(writer: PluginWriter, by_type: dict, master_export: dict,
+                              master_index=None, wanted: bool = True) -> dict:
+    """The factions, Q global and flee ability, adopted from a master that has them.
 
     Returns {EditorID: FormID} for WELL_KNOWN_PROPERTIES; {} when not `wanted`
-    (a Morrowind or FO3/FNV source, whose actors carry no threshold).
+    (a Morrowind or FO3/FNV source, whose actors carry no margin).
     See: docs/commentary/tes5_import_actors.md#morrowind-flee
     """
     _FIDS.update(dict.fromkeys(_FIDS, 0))
+    _STATE['active'] = wanted
     if not wanted:
         return {}
-    found = {edid: (master_index.find_by_edid(sig, edid)
-                    if master_index is not None else 0)
-             for sig, edid in ((b'FACT', FACTION_EDID), (b'SPEL', FLEE_SPELL_EDID))}
+    _read_settings(by_type, master_export)
+    index_attack_sources(by_type, master_export)
+    sigs = {FACTION_EDID: b'FACT', MARGIN_FACTION_EDID: b'FACT', SCALE_EDID: b'GLOB',
+            FLEE_SPELL_EDID: b'SPEL'}
+    found = {edid: (master_index.find_by_edid(sig, edid) if master_index is not None else 0)
+             for edid, sig in sigs.items()}
     if not all(found.values()):
-        found[FACTION_EDID] = writer.derive_formid('FACT', FACTION_EDID)
+        found = {edid: writer.derive_formid(sig.decode(), edid) for edid, sig in sigs.items()}
+        _FIDS.update(found)
         effect = writer.derive_formid('MGEF', FLEE_EFFECT_EDID)
-        found[FLEE_SPELL_EDID] = writer.derive_formid('SPEL', FLEE_SPELL_EDID)
-        writer.add_record('FACT', _faction(found[FACTION_EDID]))
-        writer.add_record('MGEF', _effect(effect, found[FACTION_EDID]))
-        writer.add_record('SPEL', _ability(found[FLEE_SPELL_EDID], effect,
-                                           found[FACTION_EDID]))
+        for edid in (FACTION_EDID, MARGIN_FACTION_EDID):
+            writer.add_record('FACT', _faction(found[edid], edid))
+        writer.add_record('GLOB', _scale_global(found[SCALE_EDID]))
+        writer.add_record('MGEF', _effect(effect))
+        writer.add_record('SPEL', _ability(found[FLEE_SPELL_EDID], effect))
     _FIDS.update(found)
     return dict(found)

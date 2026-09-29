@@ -3008,8 +3008,8 @@ class TestEnumActorValues:
         See: docs/commentary/script_convert.md#confidence-through-the-polyfill
         """
         out = conv_line(converter, 'SetActorValue Confidence, 80', 'Actor')
-        assert out == ('TES4Polyfill.SetConfidence(Self, 80, '
-                       'TES4ConfidenceFaction, TES4ConfidenceFlee)')
+        assert out == ('TES4Polyfill.SetConfidence(Self, 80, TES4ConfidenceFaction, '
+                       'TES4FleeMarginFaction, TES4ConfidenceFlee, TES4FleeHealthScale)')
 
     def test_confidence_read_and_mod_round_trip(self, converter):
         """GetAV reads the 0-100 value back; ModAV adds to it (the ULC fish script)."""
@@ -3018,7 +3018,8 @@ class TestEnumActorValues:
         current = 'TES4Polyfill.GetConfidence(Self, TES4ConfidenceFaction)'
         assert read == f'baseConf = {current}'
         assert mod == (f'TES4Polyfill.SetConfidence(Self, {current} + (fMod), '
-                       'TES4ConfidenceFaction, TES4ConfidenceFlee)')
+                       'TES4ConfidenceFaction, TES4FleeMarginFaction, TES4ConfidenceFlee, '
+                       'TES4FleeHealthScale)')
 
     def test_non_enum_actor_value_untouched(self, converter):
         out = conv_line(converter,

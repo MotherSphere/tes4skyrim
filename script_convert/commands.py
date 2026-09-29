@@ -37,7 +37,8 @@ from script_convert.constants import typed_already
 from script_convert.constants_falloutnv import FALLOUT_COMMAND_ALIASES
 from tes5_import.dialogue.say_topics import PLAYER_TOKENS
 from tes5_import.actors.confidence import (
-    FACTION_EDID as CONFIDENCE_FACTION, FLEE_SPELL_EDID as CONFIDENCE_FLEE_SPELL)
+    FACTION_EDID as CONFIDENCE_FACTION, FLEE_SPELL_EDID as CONFIDENCE_FLEE_SPELL,
+    MARGIN_FACTION_EDID as FLEE_MARGIN_FACTION, SCALE_EDID as FLEE_HEALTH_SCALE)
 from tes5_import.dialogue.say_topics import flee_key
 
 #: TES4 command name (lowercase) -> handler `(ctx, call) -> str | None`.
@@ -1458,12 +1459,13 @@ def _confidence(ctx, call) -> str:
     current = f'TES4Polyfill.GetConfidence({ref}, {CONFIDENCE_FACTION})'
     if call.name in ACTOR_VALUE_READ_FUNCTIONS:
         return current
-    ctx.sc.property_refs[CONFIDENCE_FLEE_SPELL] = 'Spell'
+    ctx.sc.property_refs.update({FLEE_MARGIN_FACTION: 'Faction', CONFIDENCE_FLEE_SPELL: 'Spell',
+                                 FLEE_HEALTH_SCALE: 'GlobalVariable'})
     value = call.arg(1)
     if _AV_PAPYRUS[call.name] == 'ModActorValue':
         value = f'{current} + ({value})'
     return (f'TES4Polyfill.SetConfidence({ref}, {value}, {CONFIDENCE_FACTION}, '
-            f'{CONFIDENCE_FLEE_SPELL})')
+            f'{FLEE_MARGIN_FACTION}, {CONFIDENCE_FLEE_SPELL}, {FLEE_HEALTH_SCALE})')
 
 
 #: Reads a split skill answers with the higher half; a BASE read feeds a write, so it stays One-Handed.

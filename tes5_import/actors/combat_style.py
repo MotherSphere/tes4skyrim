@@ -77,7 +77,7 @@ _FLIGHT = (0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.75)
 #: CSTY DATA flag: Dueling close-range behavior (circle and fall back, no flanking).
 _DUELING = 0x1
 
-#: Run state: styles converted?, game settings, {style FormID: fleeing disabled}, default style.
+#: Run state: styles converted?, game settings, {style FormID: CSTD flags}, default style.
 _STATE = {'active': False, 'settings': dict(_EXE_SETTINGS), 'styles': {}, 'default': 0}
 
 
@@ -160,9 +160,9 @@ def convert_CSTY(rec: dict) -> bytes:
     return pack_record('CSTY', get_formid(rec, 'FormID'), 0, subs)
 
 
-def _game_settings(by_type: dict, master_export: dict) -> tuple:
-    """(effective settings, whether this plugin authors any of them): exe, masters, own."""
-    settings = dict(_EXE_SETTINGS)
+def game_settings(by_type: dict, master_export: dict, defaults: dict) -> tuple:
+    """(effective settings, whether this plugin authors any): `defaults`, then masters, then own."""
+    settings = dict(defaults)
     own = False
     sources = [(r, False) for _, r in master_records(master_export, 'GMST')]
     sources += [(r, True) for r in by_type.get('GMST', [])]
@@ -175,10 +175,10 @@ def _game_settings(by_type: dict, master_export: dict) -> tuple:
 
 
 def _index_styles(by_type: dict, master_export: dict) -> dict:
-    """{style FormID: fleeing disabled} for the masters' styles and this plugin's own."""
+    """{style FormID: CSTD flags} for the masters' styles and this plugin's own."""
     recs = list(master_records(master_export, 'CSTY'))
     recs += [(get_formid(r, 'FormID'), r) for r in by_type.get('CSTY', [])]
-    return {fid: bool(get_int(r, 'CSTD.Flags') & _FLEEING_DISABLED) for fid, r in recs}
+    return {fid: get_int(r, 'CSTD.Flags') for fid, r in recs}
 
 
 def create_combat_styles(writer: PluginWriter, by_type: dict, master_export: dict,
@@ -191,7 +191,7 @@ def create_combat_styles(writer: PluginWriter, by_type: dict, master_export: dic
     _STATE.update(active=wanted, styles={}, default=0, settings=dict(_EXE_SETTINGS))
     if not wanted:
         return 0
-    _STATE['settings'], own_settings = _game_settings(by_type, master_export)
+    _STATE['settings'], own_settings = game_settings(by_type, master_export, _EXE_SETTINGS)
     _STATE['styles'] = _index_styles(by_type, master_export)
     fid = master_index.find_by_edid(b'CSTY', DEFAULT_STYLE_EDID) if master_index is not None else 0
     if not fid or own_settings:
@@ -199,7 +199,7 @@ def create_combat_styles(writer: PluginWriter, by_type: dict, master_export: dic
         subs = pack_string_subrecord('EDID', DEFAULT_STYLE_EDID) + _csty_subrecords(_style_values({}))
         writer.add_record('CSTY', pack_record('CSTY', fid, 0, subs))
     _STATE['default'] = fid
-    _STATE['styles'][fid] = bool(_STATE['settings']['iAIDefaultFleeDisabled'])
+    _STATE['styles'][fid] = _style_values({})['Flags']
     return fid
 
 
@@ -211,4 +211,9 @@ def actor_combat_style(rec: dict) -> int:
 
 def fleeing_disabled(rec: dict) -> bool:
     """True when the actor's combat style has Oblivion's Fleeing Disabled flag."""
-    return _STATE['styles'].get(actor_combat_style(rec), False)
+    return bool(_STATE['styles'].get(actor_combat_style(rec), 0) & _FLEEING_DISABLED)
+
+
+def prefers_ranged(rec: dict) -> bool:
+    """True when the actor's combat style has Oblivion's Prefers Ranged flag."""
+    return bool(_STATE['styles'].get(actor_combat_style(rec), 0) & _PREFERS_RANGED)

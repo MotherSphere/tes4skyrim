@@ -14,6 +14,9 @@ them does.
 - [Faction reactions and player disposition](#faction-player-disposition)
 - [Aggression and confidence are TIERS, not scalars](#aggression-tiers)
 - [Confidence: only Cowardly or Foolhardy, plus an own-health threshold](#confidence-tiers)
+  - [Oblivion's flee rule](#oblivion-flee-rule)
+  - [The attack score the flee score must beat](#attack-score)
+  - [The flee margin](#flee-margin)
   - [Morrowind: Flee 100 or never](#morrowind-flee)
 - [Combat styles: Oblivion's percentages inverted onto Skyrim's multipliers](#combat-styles)
 - [Vendor factions](#vendor-factions)
@@ -182,17 +185,19 @@ FO3/FNV does not go through any of this: it already stores both axes in the
 TES5 enums. See
 [tes5_import_falloutnv_actors.md](tes5_import_falloutnv_actors.md#aggression-is-already-a-tier).
 
-## <a id="confidence-tiers"></a>Confidence: only Cowardly or Foolhardy, plus an own-health threshold (2026-09-27, confirmed in game: Nehrim mine exit, Charactergen)
+## <a id="confidence-tiers"></a>Confidence: only Cowardly or Foolhardy, plus an own-health threshold
 
-**Code:** `tes5_import/actors/confidence.py`; scripted changes in
-[script_convert.md](script_convert.md#confidence-through-the-polyfill).
+**Code:** `tes5_import/actors/confidence.py`, `attack_score.py`; scripted
+changes in [script_convert.md](script_convert.md#confidence-through-the-polyfill).
 
 The two engines mean different things by confidence, so no tier ladder can map
 one onto the other:
 
-- **Oblivion** (UESP `Oblivion:Confidence`): the percentage of its OWN health an
-  actor must lose before it flees. 0 flees on sight, 100 never flees. The enemy
-  plays no part.
+- **Oblivion** (Oblivion.exe, below): an actor flees when its flee score beats
+  every attack it could make. Confidence, its own health and its own best attack
+  all count; the enemy plays no part. UESP's "percentage of health lost before
+  fleeing" is wrong: Confidence 60 or more never flees in Oblivion.esm, and a
+  weak Confidence 10 animal flees on sight.
 - **Skyrim** (CK wiki AI Data Tab; 1.6.1170): tiers 0-3 flee when the actor's
   strength divided by its enemy's falls below the tier's setting.
   `fConfidenceCowardly/Cautious/Average/Brave` are 1000 (exe default) / 0.375 /
@@ -209,24 +214,105 @@ troll within 300 units of a fire marker). Under the old ladder (80 → Brave) a
 1-HP troll against the player or Merzul (365 HP) scored far below 0.0375 and ran
 away at once, and Merzul walked through the fire after them.
 
-So every converted actor is Cowardly (TES4 0) or Foolhardy (1-100), which
-switches Skyrim's strength comparison off, and 1-99 keeps Oblivion's rule:
+So every converted actor is Cowardly or Foolhardy, which switches Skyrim's
+strength comparison off, and Oblivion's own rule decides between them.
 
-- The actor joins the hidden `TES4ConfidenceFaction` at rank = its confidence and
-  carries the `TES4ConfidenceFlee` ability.
-- The ability has one effect per rank k = 1-99, conditioned
-  `GetActorValuePercent(Health) <= 1 - k/100 AND GetFactionRank <= k AND
-  GetFactionRank >= 1`. The OR over k of those is exactly "health at or below
-  1 - rank/100", and the engine re-evaluates ability conditions itself.
+### <a id="oblivion-flee-rule"></a>Oblivion's flee rule
+
+Oblivion.exe 0x621b40 picks each combat action by score; the highest wins. The
+flee score (0x546cc0) is
+
+`F = Confidence × fAIFleeConfMult + fAIFleeConfBase + (1 − health/max) × fAIFleeHealthMult`
+
+and the actor flees when F is strictly above `fAICombatFleeScoreThreshold` AND
+above every other action's score, unless its combat style has Fleeing Disabled
+(0x20) or it is over-encumbered (vfunc 0x25c zeroes F). Confidence is the current
+value (Demoralize and scripts count). Settings (exe default / Oblivion.esm):
+ConfMult −0.5, ConfBase 40 / 30, HealthMult 20 / 10, threshold 10. Nehrim has
+no master and overrides none of them, so it runs on the exe defaults.
+
+Two things switch fleeing off for the rest of a fight (CombatController +0x4d):
+being over-encumbered when the flee starts (0x620e80), and a counter kept while
+fleeing passing `iAIFleeMaxHitCount` 3 (0x624dd9).
+
+### <a id="attack-score"></a>The attack score the flee score must beat
+
+**Code:** `tes5_import/actors/attack_score.py`.
+
+| Action | Score | Where |
+|---|---|---|
+| Weapon | `fAIMeleeWeaponMult` (2.0) × damage + `fAIMagicSpellMult` (3.0) × enchantment cost, the enchantment only when hostile | 0x612560, 0x547140 |
+| Creature natural attack | `fAIMeleeHandMult` (1.3) × int(AttackDamage × fatigue) | Creature vfunc 0x34c = 0x624f90 |
+| NPC unarmed | 1.3 × int(`fHandHealthMin` + (`fHandHealthMax` − Min) × min(1, strength term × fatigue × skill term)) | 0x60e270, 0x547280 |
+| Touch / Target spell | 3.0 × the spell's cost to this caster | 0x616980 |
+
+- Weapon damage (0x547070) = `fDamageWeaponMult` × base × condition ×
+  (`fDamageSkillBase` + `fDamageSkillMult` × skill%) × (`fDamageStrengthBase` +
+  `fDamageStrengthMult` × min(Str, 100)%) × fatigue. Skill is clamped
+  skill + Luck × `fActorLuckSkillMult` + `iActorLuckSkillBase` (0x547b90). The
+  weapon skill is Blade for types 0-1, Blunt for 2-4 (staffs too), Marksman for
+  bows (table 0xb086a0). Arrows add nothing.
+- A creature reads Armorer to Heavy Armor and Marksman as its Combat skill,
+  magic skills as Magic, the rest as Stealth (Creature vfunc 0x284 = 0x6253c0).
+  Only a creature with Weapon & Shield uses a weapon.
+- An armed NPC considers unarmed only when its Hand to Hand skill is higher
+  than its weapon skill; an armed creature never does (both read Combat).
+- Fatigue at full is `fFatigueBase`; condition at full is
+  `fDamageWeaponConditionBase` + `fDamageWeaponConditionMult`.
+- Spell candidates (0x61b1b0): the actor's own spells of SPIT type Spell, an
+  NPC's race spells, and carried scrolls. Powers enter only on a random roll
+  (`iAINPCRacePowerChance`), abilities and diseases never. A spell counts when
+  it has a hostile effect and no summon/bound effect (MGEF 0x70000): with a
+  Target effect it is a ranged spell, else with a Touch effect a touch spell
+  (0x414fe0, 0x415030). Touch spells score only when unarmed; ranged spells when
+  unarmed or the style Prefers Ranged. Each evaluation picks one spell per list
+  at random, and fleeing is re-checked every evaluation, so the cheapest spell of
+  each list is the one the flee score has to beat.
+- Spell cost: a Manual Spell Cost spell pays SPIT.Cost × (`fMagicCasterSkillCostBase`
+  + `fMagicCasterSkillCostMult` × (1 − skill%)), skill of the costliest effect's
+  school (0x41d320). Otherwise each effect costs max(1, floor(0.1 × BaseCost ×
+  max(1, Duration) × Magnitude^`fMagicCostScale` × max(1, 0.15 × Area) × 1.5 if
+  Target) × the caster factor for its own school) (0x413890, 0x548b50). No
+  Magnitude/Duration/Area flags drop their term. An enchantment pays its ENIT
+  cost when No Autocalc is set, else the effect sum with no caster factor.
+
+Not reproduced, because it changes during a fight: a melee actor that cannot
+reach its target scores 0 for melee, lower fatigue and weapon condition lower
+the attack, a castability check drops spells the actor cannot cast now. A
+level-scaled actor is scored at the stats the export stores for it, and its
+leveled weapons and spells at the level a level-1 player meets it.
+
+### <a id="flee-margin"></a>The flee margin
+
+With M = max(threshold, best attack score), solving F > M for health gives
+
+`flee when (1 − health) × Q > margin`,  `Q = fAIFleeHealthMult ÷ −fAIFleeConfMult`,
+`margin = Confidence + (M − fAIFleeConfBase) ÷ −fAIFleeConfMult`.
+
+Q is 20 for Oblivion.esm and 40 for Nehrim. Margin ≤ 0 flees on sight
+(Cowardly), margin ≥ Q never flees (Foolhardy), and in between the actor is
+Foolhardy until health falls to 1 − margin/Q. Margin rises by exactly the change
+in Confidence, so a script's SetAV only shifts it.
+
+- Every TES4 actor joins hidden `TES4ConfidenceFaction` at rank = its authored
+  Confidence and `TES4FleeMarginFaction` at rank = its margin. The attack term
+  is capped at Q (it can only mean "never"), and Fleeing Disabled sets it to Q.
+- An actor inside the window carries the `TES4ConfidenceFlee` ability: one
+  effect per rank k = 1 … ⌈Q⌉−1, conditioned `GetFactionRank(margin) == k AND
+  GetActorValuePercent(Health) <= 1 − k/Q`. The engine re-evaluates ability
+  conditions itself.
 - Each effect's script (`TES4_ConfidenceFlee`) calls
   `TES4Polyfill.ApplyConfidence` on start and finish, which picks Cowardly or
-  Foolhardy from the live rank and health. Changing the tier mid-fight restarts
-  the fight ([why](script_convert.md#confidence-restarts-combat)).
+  Foolhardy from the live margin, health and Q. Changing the tier mid-fight
+  restarts the fight ([why](script_convert.md#confidence-restarts-combat)).
+- Q lives in the Constant global `TES4FleeHealthScale`, read by the effect
+  script and by `TES4Polyfill.SetConfidence`.
 
-The faction and ability are created by the masterless plugin and adopted by a
-dependent through `master_index.find_by_edid`, like `TES4NoFallDamage`. Vanilla
-has no constant-effect Demoralize to copy (all 21 of its Demoralize effects are
-cast), which is why the flee goes through the Confidence tier instead.
+The factions, global and ability are created by the masterless plugin and
+adopted by a dependent through `master_index.find_by_edid`, like
+`TES4NoFallDamage`. Vanilla has no constant-effect Demoralize to copy (all 21
+of its Demoralize effects are cast), which is why the flee goes through the
+Confidence tier instead.
 
 ### <a id="morrowind-flee"></a>Morrowind: Flee 100 or never
 
@@ -289,9 +375,8 @@ settings:
   without; Power Attack Staggered: (PA% + its bonus) ÷ PA%.
 - Prefers Ranged: vanilla csHumanMissile's 3.2 ranged, 0.83 melee, with the
   ranged mult on magic and staff too.
-- Fleeing Disabled: the actor is Foolhardy with no flee threshold
-  (`confidence.actor_confidence`). TrollStyle carries it, so Nehrim's exit
-  trolls never flee.
+- Fleeing Disabled: the actor never flees ([flee margin](#flee-margin)).
+  TrollStyle carries it, so Nehrim's exit trolls never flee.
 - Bash mults are 0 (Oblivion has no bash). Group offensive, avoid threat,
   special attack, flanking and flight keep the TESCombatStyle constructor
   values. DATA is Dueling.
