@@ -108,6 +108,9 @@ def adopt(plugin: str, sample: int = SAMPLE_DEFAULT,
     print('  proving %d sampled cells reproduce...' % sample, flush=True)
     _im, jobs, geom_cache = load_plugin(plugin, offset)
     checked, bad = navm_verify.prove_cache(jobs, geom_cache, sample)
+    if not checked and _stamped_tag(cache_dir) == want:
+        print('  nothing stale: already keyed to %s.' % want[:12])
+        return ADOPT_OK
     if not checked:
         print('  REFUSED: no sampled cell had a cache entry to compare.')
         return ADOPT_REFUSED

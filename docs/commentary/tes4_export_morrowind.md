@@ -592,6 +592,13 @@ whole archive) and extracted once into `export/morrowind_assets/meshes/`. The
 BODY records themselves are read from the master ESMs resolved the same way,
 by `resolve_plugin_path`.
 
+The compatibility patch deliberately skips `base_anim*` when extracting, and
+Morroblivion ships no Morrowind skeleton, so the registered install is the only
+source of `base_anim.nif`. A user who built the patch (CLI
+`--build-morrowind-patch <dir>` or the GUI folder picker) but never registered
+that folder got `base_anim.nif not found; N worn meshes skipped` on Tamriel
+Rebuilt. `build_patch` now registers the Data Files folder it was given.
+
 ### <a id="who-owns-a-mesh"></a>Ownership is asked of the SOURCE, not the extracted tree
 
 **Code:** `source_meshes` in `asset_convert/sources/morrowind_assets.py`,

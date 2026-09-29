@@ -8,6 +8,7 @@ The invariants are recorded in docs/commentary/tes4_export_morrowind.md.
 import os
 import struct
 
+from asset_convert.sources import source_registry
 from core.plugin_masters import is_master_export
 from tes4_export import tes3_reader as reader
 from tes4_export.export_morrowind import (MorrowindContext, convert_plugin,
@@ -616,6 +617,8 @@ def test_gap_patch_holds_what_morroblivion_lacks(tmp_path):
 
     assert result['ok'], result.get('error')
     assert result['records'] == 1, 'only the object Morroblivion lacks'
+    assert source_registry.directory_for(str(export), 'Morrowind.esm') == str(data), (
+        'the Data folder is registered so dependents find base_anim.nif')
     body = (export / PATCH_NAME / 'STAT.txt').read_text(encoding='utf-8')
     assert 'EditorID=ex_scrapwood01' in body
     fid = patch_formid(('STAT', 'ex_scrapwood01'), 1)
