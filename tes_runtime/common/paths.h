@@ -14,15 +14,13 @@ void SetPluginName(const char* name);
 const std::string& PluginName();
 
 // Data\SKSE\Plugins\<plugin name>\, with the trailing backslash: where the
-// converter puts this plugin's sidecars. "" when the module path is unknown.
-//
-// Derived from THIS MODULE, not from GetModuleFileName(nullptr): a plugin is
-// always loaded from the folder it needs to read, whatever launched the game.
-// See: docs/commentary/morrowind_runtime.md#sidecar
+// converter puts this plugin's sidecars. "" when the game path is unknown.
 std::string SidecarDir();
 
-// Data\SKSE\Plugins\, with the trailing backslash: the folder this DLL is
-// loaded from, which holds every runtime's sidecar folder. "" when unknown.
+// <game folder>\Data\SKSE\Plugins\, with the trailing backslash, "" when
+// unknown. Built from the game exe, never this DLL's own path: a mod manager
+// merges mods only under the game's Data folder.
+// See: docs/commentary/morrowind_runtime.md#sidecar
 std::string PluginsDir();
 
 // The SKSE log folder with a trailing backslash, or "" when Documents is

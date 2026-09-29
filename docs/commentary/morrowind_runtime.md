@@ -946,18 +946,21 @@ and clamps NaN or anything outside int32 to int32's lowest. `_global_value`
 matches that, so the sidecar writes `WearingOrdinatorUni=s,0`. Writing the raw
 float instead would leave the global nonzero at load.
 
-### 🛑 The root comes from THIS MODULE, not the host process
+### 🛑 The root comes from the GAME EXE, not this module
 
-`SidecarDir()` resolves `GetModuleHandleEx(FROM_ADDRESS)` on one of its own
-functions and appends `MorrowindRuntime\`. An SKSE plugin is always loaded from
-`Data\SKSE\Plugins\`, which is exactly the folder holding the sidecars, so this
-needs no assumption at all.
+`PluginsDir()` (`tes_runtime/common/paths.cpp`) is the game exe's folder plus
+`Data\SKSE\Plugins\`; `SidecarDir()` appends the runtime's own name. Every
+runtime DLL and the Address Library lookup share it.
 
-Deriving it from `GetModuleFileNameA(nullptr)` and appending
-`Data\SKSE\Plugins\...` assumes the host process sits beside the Data folder
-this plugin was loaded from. That has no upside over asking the module itself,
-and when it is wrong the failure is silent: `0 sidecar(s)`, no dialogue, and
-every activation falling through to vanilla.
+Asking the DLL for its own path (`GetModuleHandleEx(FROM_ADDRESS)`) breaks
+under Mod Organizer 2: the DLL's real path is `MO2\mods\<its mod>\SKSE\Plugins\`,
+and MO2 merges mods only under the game's `Data` folder. A search of the mod's
+real folder sees only that one mod's files, so sidecars shipped with the
+converted plugin's mod are invisible. The runtime split shipped that way, and
+CreatureRuntime logged `compose: 0 fragment(s) under
+...\MO2\mods\TESRuntime\SKSE\Plugins\CreatureRuntime\animation` with
+`Oblivion.json` installed in another mod. The failure is silent:
+`0 sidecar(s)`, no dialogue, no converted creature animations.
 
 The loader logs the resolved root and a per-file result, so a miss names the
 path it looked in rather than only its own disappointment.
