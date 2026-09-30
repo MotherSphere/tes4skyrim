@@ -1280,12 +1280,20 @@ neighbouring cell. `convert_PGRD` built edges only from `Point.Edge` and ignored
 PGRI, so no ribbon ever crossed a boundary.
 
 **Fix (two parts):**
-1. **Export bug — PGRI is 16 bytes, not 14, and LocalNode is U32, not U16**
-   (UESP TES4 PGRD ref: `Local node number (long)`, then float X/Y/Z of the
-   FOREIGN node). The old 14-byte/U16 reading misaligned every entry after the
-   first into uninitialised CS memory (denormal floats ~1e-41, node indices like
-   17306). Fixed in `tes4_export/record_types/world.py::export_PGRD`. This is a
-   pure-dump correctness fix — it belongs in the export, per CLAUDE.md.
+1. **Export bug — PGRI is 16 bytes, not 14:** U16 local node, **2 unused
+   bytes**, then float X/Y/Z of the FOREIGN node (xEdit
+   `wbDefinitionsTES4.pas`: `wbInteger('Point', itU16), wbUnused(2)`). The old
+   14-byte reading misaligned every entry after the first into uninitialised CS
+   memory (denormal floats ~1e-41, node indices like 17306). Fixed in
+   `tes4_export/record_types/world.py::_pgri_lines`. This is a pure-dump
+   correctness fix — it belongs in the export, per CLAUDE.md.
+   - **The unused bytes are NOT zero.** UESP's `long` reading made the node a
+     U32, which pulled CS garbage into the high half (`794951681` =
+     `0x2F620001` = node 1). `_collect_intercell` then dropped it as out of
+     range, so the ribbon never reached the seam — Nehrim grid (-16,-9)/(-15,-9)
+     had no link at y≈-35000. Measured on the U32 export: 26,323 of 82,121
+     Nehrim entries and 31,751 of 290,661 Oblivion entries had the high half
+     set; every one is in range once read as U16 (0 remain out of range).
 2. **Import — build a cross-seam ribbon per valid PGRI link.**
    `pgrd_to_navm._collect_intercell` parses PGRI, drops residual garbage
    (LocalNode out of range, `(0,0,~0)` padding, non-finite / far-away exits),
