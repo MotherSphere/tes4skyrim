@@ -73,7 +73,8 @@ def _ref(fid, base, flags=0, cell=(0, 0), **extra):
     ref = {'form_id': fid, 'flags': flags, 'base_fid': base,
            'parent_wrld': WRLD, 'parent_cell': CELL,
            'x': cell[0] * 4096.0 + 100.0, 'y': cell[1] * 4096.0 + 100.0,
-           'z': 0.0, 'rx': 0.0, 'ry': 0.0, 'rz': 0.0, 'scale': 1.0}
+           'z': 0.0, 'rx': 0.0, 'ry': 0.0, 'rz': 0.0, 'scale': 1.0,
+           'xesp': None}
     ref.update(extra)
     return ref
 

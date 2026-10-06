@@ -12,6 +12,7 @@
 - [Prescreening the LODGen input](#prescreening-the-lodgen-input)
 - [`write_lodgen_input`: master modes and `only_cells`](#write-lodgen-input-master-modes)
   - [The input file's shape, and the per-base memo](#lodgen-input-shape)
+  - [The scan reads each reference's enable parent](#enable-parent-scan)
 - [Terrain LOD invents ground over cells that own no LAND](#lod-invents-terrain-over-cells-with-no-land)
 - [GENERATED `_far.nif` belong to the LOD mod](#generated-far-nif-belong-to-the-lod-mod)
   - [Why one LOD folder, not one per plugin](#one-lod-folder-not-one-per-plugin)
@@ -431,6 +432,27 @@ started with its own folder, `external\lodgen`, as the working directory
 (`_invoke_lodgen`), so a relative `PathData` would fail its Data-directory
 existence check and a relative `PathOutput` would write the `.bto` under that
 folder.
+
+### <a id="enable-parent-scan"></a>The scan reads each reference's enable parent
+
+**Code:** `asset_convert/lod/esm_scan.py` (`_read_xesp`, `_read_ref`)
+
+`parse_esm` returns `ref['xesp'] = (parent, opposite)` for a REFR that carries
+an XESP subrecord and `None` for one that does not. The parent FormID is
+normalized into the same global index space as `form_id`, so a parent placed
+by another plugin is found by its id whatever index byte each file gives it.
+`opposite` is flags bit 0, "Set Enable State to Opposite of Parent", and no
+other bit is read: the importer writes the field as `<II` parent + flags
+(`tes5_import/record_types/world.py`) and a converted Oblivion.esm holds only 0
+and 1 there, but in the five Skyrim SE masters (Skyrim, Update, Dawnguard,
+HearthFires, Dragonborn; winning records) 6,269 of 32,892 REFR XESP fields
+hold some other value, so the whole field must never be compared.
+
+Measured on one converted Oblivion.esm: **8,670 of 1,025,412 scanned REFRs
+carry XESP**, 1,489 of them with the opposite bit. 8,515 of the parents are
+scanned REFRs themselves; the other 155 are ACHR records, which the scan does
+not read, so a reader of `xesp` finds no record for them. Knights.esp has 995
+in 6,795 REFRs and DLCFrostcrag.esp 491 in 1,055.
 
 
 ## <a id="prescreening-the-lodgen-input"></a>Prescreening the LODGen input
