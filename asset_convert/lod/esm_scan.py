@@ -19,6 +19,9 @@ from tes5_import.base.tes5_reader import masters, walk, zstr
 #: Has Distant LOD -- SSELodGen bakes LOD for this object.
 FLAG_DISTANT_LOD = 0x00008000
 
+#: Initially Disabled -- the reference is off until something enables it.
+FLAG_INITIALLY_DISABLED = 0x00000800
+
 #: Placement values beyond this are junk, not geometry.
 _PLACEMENT_LIMIT = 1e9
 
