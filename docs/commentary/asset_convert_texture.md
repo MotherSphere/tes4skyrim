@@ -883,7 +883,8 @@ that owns this, not the pool.
 <a id="case-blind-lookups"></a>
 
 **Code:** `find_nocase`, `folder_names` in `asset_convert/game_paths.py`;
-`ensure_ltex_normals`, `_Listings` in `asset_convert/texture/landscape_normals.py`
+`ensure_ltex_normals`, `_Listings` in `asset_convert/texture/landscape_normals.py`;
+four more callers, listed at the end of this section
 
 A record keeps its author's mixed case, and the file it names may be spelled
 otherwise on disk: a BSA stores every internal path lowercase and
@@ -935,6 +936,13 @@ differing from it only by case; now it writes the 6 that ship none.
   `oblivion/` (one such folder for Oblivion.esm, where there were four).
 - A placeholder an earlier build wrote beside a real normal is not removed: it
   sits at the record's own spelling, so the exact probe finds it first.
+
+Four more lookups ask it:
+`shaders.resolve_source_texture` ([source textures](asset_convert_shader.md#texture-fallback-roots)),
+`book_inam.find_source_mesh` with the book's cover and its normal,
+`audio_converter._voice_root` with `say_durations.scan_voice_durations`
+(a mod's loose `sound/Voice`), and `hkx_behavior._skeleton_nif`
+(a mod's `Skeleton.NIF`).
 
 ## The blacklist prune
 <a id="the-blacklist-prune"></a>
