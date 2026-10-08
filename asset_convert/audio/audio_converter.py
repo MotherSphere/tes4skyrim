@@ -43,7 +43,7 @@ from core.worker_budget import worker_count
 
 from output_layout import (asset_root as _asset_root, plugin_out_root,
                            record_dir)
-from asset_convert.game_paths import namespace_for
+from asset_convert.game_paths import find_nocase, namespace_for
 from asset_convert import paths
 
 #: Assumed when a caller omits extract_dir; the source registry lives here.
@@ -824,6 +824,15 @@ def _run_conversion_jobs(conversion_jobs, stats, tools, copy):
             shutil.rmtree(lip_pool_dir, ignore_errors=True)
 
 
+def _voice_root(source_dir: Path) -> Path:
+    """`source_dir`'s `sound/voice` folder, in whatever case the tree spells it.
+
+    See: docs/commentary/asset_convert_texture.md#case-blind-lookups
+    """
+    return (find_nocase(source_dir, 'sound', 'voice', kind=os.path.isdir)
+            or source_dir / 'sound' / 'voice')
+
+
 def organize_voice_files(
     source_dir,
     dest_dir,
@@ -871,10 +880,7 @@ def organize_voice_files(
     if isinstance(lip_text, (str, Path)):
         lip_text = load_lip_text(lip_text)
 
-    # BSA archives store every internal path lowercase (Windows' case-
-    # insensitive filesystem never surfaced this); bsa_extract.py preserves
-    # that casing verbatim, so the extracted folder is 'voice', not 'Voice'.
-    voice_root = source_dir / 'sound' / 'voice'
+    voice_root = _voice_root(source_dir)
     if not voice_root.exists():
         print(f'  Voice directory not found: {voice_root}')
         return {'organized': 0, 'skipped': 0, 'no_match': 0, 'errors': 0,
