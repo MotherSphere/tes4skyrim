@@ -7,8 +7,10 @@ masks, flip-book atlases and the UV-transform controllers that drive them.
 See: docs/commentary/asset_convert_shader.md
 """
 
-from asset_convert.game_paths import current_namespace
+from asset_convert.game_paths import (current_namespace, find_nocase,
+                                      folder_names)
 import os
+import time
 
 from asset_convert.nif.pyffi_monkey_patch import apply_patches
 apply_patches()
@@ -98,13 +100,37 @@ _PARALLAX_ALPHA_CACHE = {}
 #: Mask verdicts by absolute path. See: docs/commentary/asset_convert_shader.md#texture-classification-caches
 _SPEC_MASK_CACHE = {}
 
+#: Folder listings by path, with the stamp read. See: docs/commentary/asset_convert_shader.md#texture-fallback-roots
+_SOURCE_LISTINGS = {}
+
+#: A folder changed this recently is never remembered: a later change could carry the same mtime.
+_SETTLE_NS = 2_000_000_000
+
+
+def _source_listing(folder):
+    """`folder_names(folder)`, read again whenever the folder's mtime, ctime or inode has moved.
+
+    See: docs/commentary/asset_convert_shader.md#texture-fallback-roots
+    """
+    try:
+        st = os.stat(folder)
+    except OSError:
+        return {}
+    stamp = (st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
+    kept = _SOURCE_LISTINGS.get(folder)
+    if kept is None or kept[0] != stamp:
+        kept = (stamp, folder_names(folder))
+        if kept[1] and time.time_ns() - st.st_mtime_ns > _SETTLE_NS:
+            _SOURCE_LISTINGS[folder] = kept
+    return kept[1]
+
 
 def resolve_source_texture(tex_rel, src_nif_path, fallback_roots=()):
     """The extracted source file behind a rewritten texture path, or None.
 
     Maps textures\\tes4\\fire\\x\\y.dds back to
     export/<esm>/textures/fire/x/y.dds beside the source mesh tree, falling
-    back to the master's roots.
+    back to the master's roots. Each tree is tried exactly, then ignoring case.
     See: docs/commentary/asset_convert_shader.md#texture-fallback-roots
     """
     if not src_nif_path:
@@ -125,10 +151,16 @@ def resolve_source_texture(tex_rel, src_nif_path, fallback_roots=()):
     cand = tex_root + rel.replace('\\', os.sep)
     if os.path.isfile(cand):
         return cand
+    cand = find_nocase(norm[:i + 1], 'textures', rel, listing=_source_listing)
+    if cand:
+        return str(cand)
     for root in (fallback_roots or ()):
         cand = os.path.join(root, rel.replace('\\', os.sep))
         if os.path.isfile(cand):
             return cand
+        cand = find_nocase(root, rel, listing=_source_listing)
+        if cand:
+            return str(cand)
     return None
 
 
