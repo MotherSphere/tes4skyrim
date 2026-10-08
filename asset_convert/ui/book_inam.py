@@ -38,7 +38,7 @@ CLI:
 Templates are auto-extracted from the SSE BSAs by default (skyrim_assets).
 """
 
-from asset_convert.game_paths import current_namespace
+from asset_convert.game_paths import current_namespace, find_nocase
 from asset_convert.sources import base_plugins, skyrim_assets
 import argparse
 import os
@@ -679,6 +679,9 @@ def _find_source_texture(extract_roots, tex_rel):
             p = os.path.join(root, *candidate.split('\\'))
             if os.path.isfile(p):
                 return p
+            p = find_nocase(root, candidate)
+            if p:
+                return str(p)
     return None
 
 
@@ -704,21 +707,31 @@ def _as_roots(roots):
 
 
 def find_source_mesh(extract_roots, model):
-    """Locate BOOK MODL `model` across this plugin's asset root then its masters'."""
+    """Locate BOOK MODL `model` across this plugin's asset root then its masters'.
+
+    Each root is tried exactly, then ignoring case.
+    """
     parts = model.replace('/', '\\').strip('\\').split('\\')
     for root in _as_roots(extract_roots):
         p = os.path.join(root, 'meshes', *parts)
         if os.path.isfile(p):
             return p
+        p = find_nocase(root, 'meshes', *parts)
+        if p:
+            return str(p)
     return None
 
 
 def _normal_sibling(tex_path):
+    """The `_n` map beside `tex_path`, in whatever case it is spelled, or None."""
     if not tex_path:
         return None
     root, ext = os.path.splitext(tex_path)
     p = root + '_n' + ext
-    return p if os.path.isfile(p) else None
+    if os.path.isfile(p):
+        return p
+    p = find_nocase(os.path.dirname(p), os.path.basename(p))
+    return str(p) if p else None
 
 
 def load_book_template(templates_dir=None, skyrim_data=None):
