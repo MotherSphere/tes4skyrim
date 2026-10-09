@@ -1147,7 +1147,8 @@ def set_ownership(ctx, call) -> str:
     """SetOwnership -- Skyrim splits ownership into ACTOR and FACTION owners.
 
     Which one this is depends on what the argument names, so the comparison
-    picks by record type; a bare call means the player.
+    picks by record type; a bare call means the player.  An NPC_/CREA BASE
+    is the owner itself (`_owner_is_base`); a placed actor's base is read.
     """
     ref = ctx._resolve_self_ref(call.ref, call.extends)
     if not len(call):
@@ -1155,6 +1156,8 @@ def set_ownership(ctx, call) -> str:
     arg = call.arg(0)
     if _is_faction(ctx, call, arg):
         return f'{ref}.SetFactionOwner({arg})'
+    if _owner_is_base(ctx, call, arg):
+        return f'{ref}.SetActorOwner({arg})'
     return f'{ref}.SetActorOwner({arg}.GetActorBase())'
 
 
@@ -1171,6 +1174,8 @@ def is_owner(ctx, call) -> str:
     arg = call.arg(0)
     if _is_faction(ctx, call, arg):
         return f'({ref}.GetFactionOwner() == {arg})'
+    if _owner_is_base(ctx, call, arg):
+        return f'({ref}.GetActorOwner() == {arg})'
     return f'({ref}.GetActorOwner() == {arg}.GetActorBase())'
 
 
@@ -1226,6 +1231,21 @@ def _base_form_type(rtype: str) -> str:
         return 'ActorBase'
     ptype = record_type_to_papyrus(rtype)
     return 'Form' if ptype == 'ObjectReference' else ptype
+
+
+def _owner_is_base(ctx, call, arg: str) -> bool:
+    """Does the owner operand name an actor BASE? Its property is then typed `ActorBase`.
+
+    Never the player: that name is passed as a reference everywhere else.
+    See: docs/commentary/script_convert.md#owner-is-a-base
+    """
+    src = call.source(0).strip().strip('"')
+    if src.lower() in PLAYER_TOKENS:
+        return False
+    if _base_form_type(_record_type(ctx, src)) != 'ActorBase':
+        return False
+    ctx.sc.property_refs[arg] = 'ActorBase'
+    return True
 
 
 def _is_faction(ctx, call, arg: str) -> bool:

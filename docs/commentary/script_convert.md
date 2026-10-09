@@ -6335,6 +6335,18 @@ attached Actor script's type — so every spawn logged "cannot be bound" and
 BASE record; see
 [tes5_import_quest.md](tes5_import_quest.md#actor-script-relocation).
 
+<a id="owner-is-a-base"></a>`SetOwnership` and `IsOwner` are a third: TES4
+names the owning NPC by its BASE, and `SetActorOwner` / `GetActorOwner` work in
+`ActorBase`. An NPC_/CREA operand is typed `ActorBase` and passed as it is
+(`commands._owner_is_base`); a placed actor is still read through
+`GetActorBase()`. Typed as a reference, the owner bound its one placed
+reference and `X.GetActorBase()` compiled, until the same script also named it
+in `SetEssential`: the property is then `ActorBase`, which has no
+`GetActorBase`, and the script did not compile. A base placed nowhere, or
+several times, had no reference to bind at all.
+The player is left out: `Player` is an NPC_ record too, but every other command
+passes that name as a reference, so its property must stay one.
+
 ### <a id="unlock-globals-declared-once"></a>Unlock globals are declared once
 
 The stage-reveal unlock globals are declared from `stage_reveals`. The
