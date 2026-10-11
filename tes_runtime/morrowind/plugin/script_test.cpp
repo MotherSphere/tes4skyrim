@@ -26,6 +26,7 @@
 #include "filter.h"
 #include "game_actor.h"
 #include "log.h"
+#include "npc_anim.h"
 #include "object_script.h"
 #include "object_tick.h"
 #include "persuasion.h"
@@ -1550,6 +1551,183 @@ std::string FixtureDir() {
     return path.substr(0, slash + 1) + "testdata\\scripts\\";
 }
 
+// --- NPC animation files ----------------------------------------------------
+
+// What the fake engine reports to the NPC animation driver, and what it sent.
+std::vector<std::pair<std::uint32_t, std::string>> g_animEvents;
+bool  g_graphReady = true;
+float g_sitterX = 10.0f;
+bool  g_sitterFights = false;
+float g_animRoll = 0.5f;
+
+// One glide the driver asked for: whose, to which x and z, and whether it is
+// the long one that holds an actor in place.
+struct FakeGlide {
+    std::uint32_t id;
+    float x;
+    float z;
+    bool hold;
+};
+std::vector<FakeGlide> g_glides;
+
+constexpr std::uint32_t kSitterRef = 0x0AAA0001;
+constexpr std::uint32_t kFisherRef = 0x0AAA0002;
+constexpr std::uint32_t kWalkerRef = 0x0AAA0003;
+
+std::uint32_t FakeAnimLoadedRef(const std::string&, std::uint32_t local) {
+    return 0x0A000000 | (local & 0x00FFFFFF);
+}
+
+bool FakeSendAnimEvent(std::uint32_t id, const std::string& event) {
+    if (!g_graphReady) return false;
+    g_animEvents.emplace_back(id, event);
+    return true;
+}
+
+// The sitter stands on its authored placement unless a case moves it.
+bool FakeRefPose(std::uint32_t id, float out[6]) {
+    for (int i = 0; i < 6; ++i) out[i] = 0.0f;
+    if (id != kSitterRef) return true;
+    out[0] = g_sitterX;
+    out[1] = 20.0f;
+    out[2] = 30.0f;
+    out[5] = 90.0f;
+    return true;
+}
+
+void FakeGlideRef(std::uint32_t id, const float pose[6], float seconds) {
+    g_glides.push_back({id, pose[0], pose[2], seconds > 100.0f});
+}
+
+bool GlidTo(std::uint32_t id, float x, float z, bool hold) {
+    for (const FakeGlide& glide : g_glides) {
+        if (glide.id == id && glide.x == x && glide.z == z && glide.hold == hold) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FakeInCombat(std::uint32_t id) { return id == kSitterRef && g_sitterFights; }
+
+float FakeAnimRoll() { return g_animRoll; }
+
+std::uint32_t FakeRefRuntimeId(const std::string&) { return kSitterRef; }
+
+bool SentTo(std::uint32_t id, const char* event) {
+    for (const auto& sent : g_animEvents) {
+        if (sent.first == id && sent.second == event) return true;
+    }
+    return false;
+}
+
+// One evaluation of the driver: it looks at its actors every third tick.
+void AnimStep() { TickObjectScripts(TickDelta() * 3.0f); }
+
+// A stall is clamped to a quarter second, so a long wait is many short ones.
+void AnimRun(int steps) {
+    for (int i = 0; i < steps; ++i) AnimStep();
+}
+
+// 🛑 An NPC seated by its own animation file must sit down as soon as its
+// graph takes the event, stay seated between cycles, and be let go the moment
+// it walks or fights -- the clip state has no locomotion in it.
+// See: docs/commentary/morrowind_runtime.md#npc-animation-files
+void NpcAnimCases() {
+    std::printf("an NPC with its own animation file plays its idles\n");
+    ClearInstances();
+    ResetTickState();
+    std::string root = FixtureDir();
+    root.erase(root.size() - std::string("scripts\\").size());
+    LoadNpcAnims(root);
+    Check(NpcAnimClipCount() == 3 && NpcAnimActorCount() == 3 &&
+              NpcAnimPlaceCount() == 3,
+          "the table loads its clips, actors and placements");
+    Hooks().playerCell = TestCell;
+    Hooks().playerInWorld = InWorld;
+    Hooks().is3DLoaded = Always3DLoaded;
+    Hooks().loadedRef = FakeAnimLoadedRef;
+    Hooks().sendAnimEvent = FakeSendAnimEvent;
+    Hooks().refPose = FakeRefPose;
+    Hooks().glideRef = FakeGlideRef;
+    Hooks().inCombat = FakeInCombat;
+    Hooks().refRuntimeId = FakeRefRuntimeId;
+    SetNpcAnimRollForTest(FakeAnimRoll);
+
+    // The graph is not up yet: nothing may be recorded as playing.
+    g_graphReady = false;
+    AnimStep();
+    Check(NpcAnimLiveCount() == 3, "every placement is found in the world");
+    Check(NpcAnimPlaying(kSitterRef).empty(),
+          "an event no graph took leaves the actor not playing");
+    g_graphReady = true;
+    AnimStep();
+    Check(NpcAnimPlaying(kSitterRef) == "idle9" &&
+              SentTo(kSitterRef, "TES3Anim_sit_1_idle9"),
+          "and it is asked again until the graph takes it");
+    Check(NpcAnimPlaying(kFisherRef) == "idle2", "chance 100 on idle2 plays idle2");
+
+    // The roll fails outright: the file's own pose plays where it has one,
+    // and a seat with no pose simply goes on, with no stop sent.
+    g_animRoll = 0.9f;
+    g_animEvents.clear();
+    AnimRun(12);
+    Check(NpcAnimPlaying(kFisherRef) == "idle",
+          "with no idle chosen the file's default pose plays");
+    AnimRun(10);
+    Check(!SentTo(kSitterRef, "TES3AnimStop") || NpcAnimPlaying(kSitterRef).empty(),
+          "a stop is only sent once the choice stays empty");
+    g_animRoll = 0.5f;
+    AnimRun(2);
+    Check(NpcAnimPlaying(kSitterRef) == "idle9", "the seat is taken again");
+
+    // 🛑 A playing actor is HELD on its authored placement: Skyrim's physics
+    // pushes an NPC out of the chair Morrowind stood it in, and its package
+    // walks it off. The hold is a glide that never arrives.
+    Check(GlidTo(kSitterRef, 10.0f, 31.0f, true),
+          "the seated actor is held on its authored spot");
+    g_glides.clear();
+    g_sitterX = 50.0f;
+    AnimStep();
+    Check(NpcAnimPlaying(kSitterRef) == "idle9" && GlidTo(kSitterRef, 10.0f, 30.0f, false),
+          "pushed off it, it is slid back and goes on playing");
+    g_sitterX = 10.0f;
+
+    // An NPC whose package has a distance walks when its roll gives no idle.
+    // It was sent walking by the empty rolls above, and idles again after.
+    Check(SentTo(kWalkerRef, "TES3AnimStop") || NpcAnimPlaying(kWalkerRef) == "idle9",
+          "a wanderer is let go to walk when no idle is rolled");
+    AnimRun(90);
+    Check(NpcAnimPlaying(kWalkerRef) == "idle9", "and idles again where it then stands");
+
+    // A fight lets go at once, hold included.
+    Check(NpcAnimPlaying(kSitterRef) == "idle9", "the sitter is still seated");
+    g_glides.clear();
+    g_sitterFights = true;
+    AnimStep();
+    Check(NpcAnimPlaying(kSitterRef).empty() && !g_glides.empty(),
+          "an actor in combat is let go and released");
+    g_sitterFights = false;
+
+    // PlayGroup: only an NPC with a file, and only a group the file has.
+    Check(PlayNpcGroup("Sitter", "Idle9", kLoopForever), "PlayGroup plays a group the file has");
+    Check(NpcAnimPlaying(kSitterRef) == "idle9", "at once, on the script's own reference");
+    Check(!PlayNpcGroup("Sitter", "Idle3", 0), "a group the file lacks is not ours");
+    Check(!PlayNpcGroup("test_actor", "Idle9", 0), "nor is an NPC with no file");
+
+    SetNpcAnimRollForTest(nullptr);
+    Hooks().refRuntimeId = nullptr;
+    Hooks().inCombat = nullptr;
+    Hooks().refPose = nullptr;
+    Hooks().glideRef = nullptr;
+    Hooks().sendAnimEvent = nullptr;
+    Hooks().loadedRef = nullptr;
+    Hooks().is3DLoaded = nullptr;
+    Hooks().playerCell = nullptr;
+    Hooks().playerInWorld = nullptr;
+    ClearNpcAnims();
+}
+
 // `GetCurrentTime` is the `gamehour` global, which the game refreshes every
 // tick -- not a number of its own that could drift from the clock conditions.
 void CurrentTimeCases(DialogueContext& context) {
@@ -1633,6 +1811,7 @@ void Cases() {
     ObjectScriptTableCases();
     ObjectScriptRunCases();
     TickCases();
+    NpcAnimCases();
     FactionCases(context, actor);
     RankNameCases(context);
     CoSaveCases(context);

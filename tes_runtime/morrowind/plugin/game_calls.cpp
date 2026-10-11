@@ -852,11 +852,18 @@ bool IsDeadRef(std::uint32_t runtimeFormId) {
 // 🛑 The cell, not `IsDisabled`: enabling queues the 3D, so for the frames
 // after `Enable` the reference is neither disabled nor loaded, and a test on
 // the flag would drop the script on exactly the tick it woke up.
+//
+// 🛑 An INTERIOR must also be the cell the player is in. The engine keeps the
+// interior just left attached for a while, so on `IsAttached` alone the
+// scripts of the previous cell ran on behind the player's back: measured, a
+// chargen script went on enabling its light for 48 seconds after the player
+// had been moved to another cell.
 bool InWorld(void* ref) {
     if (g_is3DLoaded(PapyrusVm(), 0, ref)) return true;
-    if (!g_parentCell || !g_cellAttached) return false;
+    if (!g_parentCell || !g_cellAttached || !g_isInterior) return false;
     void* cell = g_parentCell(PapyrusVm(), 0, ref);
-    return cell && g_cellAttached(PapyrusVm(), 0, cell);
+    if (!cell || !g_cellAttached(PapyrusVm(), 0, cell)) return false;
+    return !g_isInterior(PapyrusVm(), 0, cell) || cell == PlayerCell();
 }
 
 LoadState Load3DStateRef(std::uint32_t runtimeFormId) {

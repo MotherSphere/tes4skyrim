@@ -1134,7 +1134,7 @@ class PluginWriter:
             'IPCT', 'IPDS', 'FSTP', 'FSTS',
             'STAT', 'MSTT', 'ACTI', 'TACT', 'CONT', 'DOOR',
             'FLOR', 'FURN', 'GRAS', 'TREE', 'LIGH', 'MISC', 'KEYM', 'ARMO',
-            'ARMA', 'BOOK', 'AMMO', 'ENCH', 'SPEL', 'ALCH', 'INGR', 'SCRL',
+            'ARMA', 'BOOK', 'AMMO', 'ENCH', 'SPEL', 'ALCH', 'IDLM', 'INGR', 'SCRL',
             'PROJ', 'EXPL', 'ADDN',
             'SLGM', 'VTYP', 'OTFT', 'NPC_', 'LVLN', 'LVLI', 'LVSP',
             'IMGS', 'WTHR',

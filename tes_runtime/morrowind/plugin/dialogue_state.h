@@ -401,6 +401,25 @@ struct GameHooks {
     void (*skipAnim)(const std::string& ref) = nullptr;
     // Once a tick of unpaused play: advances every queue `playGroup` filled.
     void (*animTick)() = nullptr;
+    // What the NPC animation driver (npc_anim.cpp) needs of ONE reference, by
+    // RUNTIME FormID: a base NPC is placed many times and each copy plays its
+    // own idle, so the TES3 id alone cannot name which.
+    // See: docs/commentary/morrowind_runtime.md#npc-animation-files
+    //
+    // The runtime FormID of the reference a TES3 id names, or 0.
+    std::uint32_t (*refRuntimeId)(const std::string& ref) = nullptr;
+    // Sends a behaviour-graph event; false when no graph took it, which is
+    // what an actor whose 3D is still loading answers.
+    bool (*sendAnimEvent)(std::uint32_t runtimeFormId,
+                          const std::string& event) = nullptr;
+    // The reference's x, y, z and its three angles in degrees; false when it
+    // could not be read.
+    bool (*refPose)(std::uint32_t runtimeFormId, float out[6]) = nullptr;
+    // Starts a TranslateTo glide to that pose, arriving `seconds` from now.
+    // While it runs the reference is moved by nothing else.
+    void (*glideRef)(std::uint32_t runtimeFormId, const float pose[6],
+                     float seconds) = nullptr;
+    bool (*inCombat)(std::uint32_t runtimeFormId) = nullptr;
 };
 
 // The loop count `PlayGroup` passes: a looping group repeats until replaced.

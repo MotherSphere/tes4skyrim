@@ -206,6 +206,7 @@ def export_NPC_(rec: Tes3Record, ctx) -> list:
     """
     lines = [f'EditorID={escape_value(rec.record_id)}']
     emit_str(lines, 'FULL', rec, 'FNAM')
+    emit_str(lines, 'MorrowindAnim', rec, 'MODL')
     flags = unpack(rec, 'FLAG', '<I')
     lines.append(f'ACBS.Flags={_map_flags(flags[0] if flags else 0, _NPC_FLAGS)}')
     npdt = get_subrecord(rec, 'NPDT')

@@ -49,6 +49,7 @@ from .templates import (
     T_TOPIC,
     T_SINGLEREF,
     T_TARGETSEL,
+    USE_IDLE_MARKER,
     USE_MAGIC,
     Template,
 )
@@ -84,6 +85,15 @@ def _targets_player(rec: dict) -> bool:
 # 3000 radius is the vanilla predator package's own Hunt Location
 # (DefaultPredatorPackage slot 4); WEJS21HunterWander uses type 2 radius 5000.
 _SEARCH_NEAR_SELF = (12, 0, 3000)
+
+#: The export key a pre-pass sets on a wander package that runs on its actor's linked marker.
+MARKER_KEY = 'MorrowindMarker'
+MARKER_SIT = 'sit'
+MARKER_IDLE = 'idle'
+_MARKER_TEMPLATES = {MARKER_SIT: SIT_TARGET, MARKER_IDLE: USE_IDLE_MARKER}
+
+#: PTDA "Linked Reference" with no keyword: the actor's own XLKR.
+_LINKED_REF = struct.pack('<iIi', 3, 0, 0)
 
 # --- TES4 PKDT.Type ------------------------------------------------------
 T4_FIND = 0
@@ -994,10 +1004,22 @@ def _pick_travel(p: _Pick) -> Inputs:
 
 
 def _pick_wander(p: _Pick) -> Inputs:
-    """Wander -> Sandbox: exact, wander/sit/idle within a radius."""
-    return _sandbox(p.loc, allow_wandering=1, allow_sitting=1,
-                    allow_idle_markers=1, allow_conversation=1,
-                    allow_eating=0, allow_sleeping=0)
+    """Wander -> Sandbox within a radius, or the marker the actor links to.
+
+    A pre-pass flags (MARKER_KEY) a Morrowind wander package whose NPCs' own
+    animation files became vanilla furniture or idle markers.
+    See: docs/commentary/asset_convert_animation.md#vanilla-markers-for-npc-animation-files
+    """
+    template = _MARKER_TEMPLATES.get(get_str(p.rec, MARKER_KEY))
+    if template is None:
+        return _sandbox(p.loc, allow_wandering=1, allow_sitting=1,
+                        allow_idle_markers=1, allow_conversation=1,
+                        allow_eating=0, allow_sleeping=0)
+    i = Inputs(template)
+    i.set('target', _LINKED_REF)
+    if template is SIT_TARGET:
+        i.set('wait_time', 0.0)
+    return i
 
 
 def _pick_eat(p: _Pick) -> Inputs:

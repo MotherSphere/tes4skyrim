@@ -9,6 +9,7 @@
 #include "log.h"
 #include "main_thread.h"
 #include "main_tick.h"
+#include "npc_anim.h"
 #include "object_script.h"
 #include "scope.h"
 #include "script_tables.h"
@@ -223,6 +224,7 @@ void RunOneTick() {
     if (Hooks().animTick) Hooks().animTick();
     const bool cellChanged = PlayerCellChanged();
     DiscoverLoaded(cellChanged);
+    TickNpcAnims(cellChanged);
     const std::vector<ObjectScript*> live = BoundInstances();
     std::size_t ran = 0;
     for (ObjectScript* instance : live) {
@@ -309,6 +311,7 @@ void ResetTickState() {
     g_cellSampled = false;
     g_accumulated = 0.0f;
     g_gameSeconds = 0.0;
+    ResetNpcAnims();
 }
 
 }  // namespace tesruntime::mw

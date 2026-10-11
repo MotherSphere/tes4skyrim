@@ -47,6 +47,7 @@ from .actors.attribute_tables import (write_attribute_tables, write_chargen_tabl
 from .record_types.bodypart_falloutnv import write_falloutnv_sidecars
 from .record_types.world_falloutnv import is_fallout_source
 from .record_types.sound import convert_SOUN
+from .record_types.npc_markers_morrowind import flush_npc_markers
 from .base.owned_records import (
     WELL_KNOWN_PROPERTIES,
 )
@@ -429,6 +430,7 @@ def run_record_phases(st, export_dir: str, phase_done,
     _phase1_simple_records(st, export_dir, phase_done, skip_types)
     _phases23_records(st, export_dir, phase_done, skip_types)
     _phase4a_navmesh(st, export_dir, phase_done, skip_types)
+    flush_npc_markers(st.by_type)
 
     land_cache = _precompute_land(st.by_type, export_dir)
     if st.ctx:

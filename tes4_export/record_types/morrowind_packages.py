@@ -41,7 +41,8 @@ def _tes3_id(raw: bytes) -> str:
 
 def _wander(fields) -> tuple:
     """AI_W: distance, duration, time of day, eight idle chances."""
-    return 'wander', {'distance': fields[0], 'duration': fields[1]}
+    return 'wander', {'distance': fields[0], 'duration': fields[1],
+                      'idles': fields[3:11]}
 
 
 def _travel(fields) -> tuple:
@@ -165,7 +166,8 @@ def _package_lines(ctx, actor_id: str, form_id: str, kind: str, fields: dict,
              'PKDT.Flags=0', f'MorrowindHello={fields.get("hello", 0)}']
     if kind == 'wander':
         lines += [f'PKDT.Type={_WANDER}', f'PLDT.Type={_NEAR_EDITOR_LOCATION}',
-                  'PLDT.Location=0', f'PLDT.Radius={max(0, fields["distance"])}']
+                  'PLDT.Location=0', f'PLDT.Radius={max(0, fields["distance"])}',
+                  'MorrowindIdle=' + ','.join(str(c) for c in fields['idles'])]
         return lines + _schedule(fields['duration'])
     if kind == 'travel':
         marker = _marker(ctx, actor_id, fields['pos'], 'xmarker:' + form_id, markers)

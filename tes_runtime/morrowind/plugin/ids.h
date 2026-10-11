@@ -396,6 +396,19 @@ constexpr std::uint64_t kCellIsInterior = 56056;
 // beside the name string `IsAttached`, one registration above IsInterior's.
 // Its whole body is `cmp byte ptr [cell+0x44], 7`.
 constexpr std::uint64_t kCellIsAttached = 56055;
+
+// Debug.SendAnimationEvent(ObjectReference, string) (0xa073f0 on 1.6.1170),
+// the `lea` stored beside the name string `SendAnimationEvent`. Its whole
+// body builds a BSFixedString and calls slot 1 of the
+// IAnimationGraphManagerHolder at ref+0x38 -- NotifyAnimationGraph -- and
+// throws the bool away. The NPC animation driver needs that bool, so it makes
+// the same call itself; the id only proves the build has the native.
+// See: docs/commentary/morrowind_runtime.md#npc-animation-files
+constexpr std::uint64_t kDebugSendAnimationEvent = 55380;
+constexpr std::size_t kGraphHolderOffset = 0x38;
+constexpr std::size_t kNotifyGraphSlot = 1;
+// Actor.IsInCombat (0x9f54a0), found at its registration beside "IsInCombat".
+constexpr std::uint64_t kActorIsInCombat = 54945;
 constexpr std::uint64_t kActorGetValue = 54675;
 constexpr std::uint64_t kActorSetValue = 54743;
 constexpr std::uint64_t kActorRestoreValue = 54737;
