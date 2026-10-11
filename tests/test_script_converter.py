@@ -1336,6 +1336,75 @@ class TestPlaceAtMeBindsABaseForm:
         assert conv.get_property_refs()['NQRatte02'] == ptype
 
 
+class TestScroTableAsksWhetherAScriptClassBinds:
+    """The SCRO table types a scripted record by its script class only where that class binds.
+
+    See: docs/commentary/script_convert.md#script-type-property-binding
+    """
+
+    @staticmethod
+    def _conv(rtype, placed=0):
+        """A converter whose SCRO table named one scripted record of `rtype`, placed `placed` times."""
+        from script_convert.scro_refs import add_scro_ref
+        x = CrossRefGraph()
+        x.formid_to_edid['0001FEF0'] = 'TheThing'
+        x.edid_to_formid['thething'] = '0001FEF0'
+        x.record_type['0001FEF0'] = rtype
+        x.record_scri['0001FEF0'] = '000AAAAA'
+        x.script_formid_to_edid['000AAAAA'] = 'TheThingScript'
+        x.script_formid_to_type['000AAAAA'] = 1
+        for n in range(placed):
+            x.record_base['0002AAA%d' % n] = '0001FEF0'
+            x.record_type['0002AAA%d' % n] = 'REFR'
+        conv = ScriptConverter(x)
+        add_scro_ref(conv, '0001FEF0', x)
+        return conv
+
+    @pytest.mark.parametrize('rtype, ptype', [
+        ('KEYM', 'Key'), ('BOOK', 'Book'), ('ARMO', 'Armor'), ('CLOT', 'Armor'), ('WEAP', 'Weapon'),
+        ('INGR', 'Ingredient'), ('MISC', 'MiscObject'), ('ALCH', 'Potion'), ('AMMO', 'Ammo'),
+        ('SLGM', 'SoulGem'), ('SGST', 'Scroll'), ('APPA', 'MiscObject')])
+    def test_a_scripted_item_keeps_its_item_type(self, rtype, ptype):
+        """An inventory base is never declared with its script class."""
+        assert self._conv(rtype).get_property_refs()['TheThing'] == ptype
+
+    @pytest.mark.parametrize('placed', [1, 3])
+    def test_an_item_placed_in_the_world_is_still_a_base(self, placed):
+        """A lone world placement does not turn an item property into that reference."""
+        assert self._conv('KEYM', placed).get_property_refs()['TheThing'] == 'Key'
+
+    @pytest.mark.parametrize('rtype', ['NPC_', 'CREA', 'CONT', 'DOOR', 'FLOR', 'FURN', 'STAT'])
+    def test_a_reference_type_keeps_the_script_class(self, rtype):
+        """Where the record's own type is a reference type the script class binds."""
+        assert self._conv(rtype).get_property_refs()['TheThing'] == 'TES4_TheThingScript'
+
+    @pytest.mark.parametrize('sig', ['REFR', 'ACHR', 'ACRE'])
+    def test_a_placed_reference_keeps_its_bases_script_class(self, sig):
+        """The commonest SCRO entry: a reference whose base carries the script."""
+        from script_convert.scro_refs import add_scro_ref
+        conv = self._conv('ACTI' if sig == 'REFR' else 'NPC_', placed=2)
+        conv.xref.record_type['0002AAA0'] = sig
+        conv.xref.formid_to_edid['0002AAA0'] = 'TheThingRef'
+        conv.xref.edid_to_formid['thethingref'] = '0002AAA0'
+        add_scro_ref(conv, '0002AAA0', conv.xref)
+        assert conv.get_property_refs()['TheThingRef'] == 'TES4_TheThingScript'
+
+    @pytest.mark.parametrize('rtype, placed, ptype', [
+        ('ACTI', 1, 'TES4_TheThingScript'), ('LIGH', 1, 'TES4_TheThingScript'),
+        ('ACTI', 0, 'Activator'), ('ACTI', 2, 'Activator'), ('LIGH', 0, 'Light'), ('LIGH', 2, 'Light')])
+    def test_a_world_object_keeps_the_script_class_only_when_placed_once(self, rtype, placed, ptype):
+        """The measured exception: one placed reference carries the script instance."""
+        assert self._conv(rtype, placed).get_property_refs()['TheThing'] == ptype
+
+    def test_a_later_stage_table_does_not_undo_the_item_type(self):
+        """Each quest stage reads its own SCRO list after earlier stages' bodies."""
+        from script_convert.scro_refs import add_scro_ref
+        conv = self._conv('KEYM')
+        conv.convert_fragment('player.AddItem TheThing 1', 'Quest')
+        add_scro_ref(conv, '0001FEF0', conv.xref)
+        assert conv.get_property_refs()['TheThing'] == 'Key'
+
+
 # ===========================================================================
 # Stale source names recovered from the SCRO table
 # ===========================================================================

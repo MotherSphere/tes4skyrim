@@ -469,6 +469,18 @@ the base gate stripped cross-script variables off unique activators and
 Inventory types (ARMO/WEAP/…) stay excluded even with a lone world placement:
 their properties mean the BASE (AddItem/RemoveItem), never that placement.
 
+Three places may give a property its record's script class: the body resolver
+(`resolve_name._record`), `converter._record_property_type`, and the SCRO table
+(`scro_refs.add_scro_ref`), which declares every record a script's SCRO list
+names before the body is converted, and again before each quest stage. All three
+ask this function. While the table did not, a scripted key, book, armour, weapon
+or ingredient was declared with its script class unless a command of the body
+re-typed it afterwards, and in a quest's fragment script a later stage's list
+declared it again after one had. Oblivion.esm had 42 such properties in 20
+generated scripts (18 armour, 13 books, 7 keys, 3 weapons, 1 ingredient), 17 of
+them named by a statement such as `JulienneFanisVendorChest.AddItem(MS37FrostSalts, 5)`
+in `TES4_QF_MS37.psc`; Knights.esp had 10 in one script.
+
 ### <a id="generated-script-types"></a>🔴 A generated script type is recognized by PREFIX, and the prefix is per-game
 
 **`is_generated_script_type()` in `script_convert/constants.py` is the ONLY way
