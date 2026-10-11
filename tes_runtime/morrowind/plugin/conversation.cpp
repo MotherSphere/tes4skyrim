@@ -140,6 +140,7 @@ ThumbDrag g_drag;
 bool g_scrollToEnd = false;
 bool g_captionDirty = false;
 bool g_open = false;
+bool g_inResultScript = false;
 
 // OpenMW: the list is dead while a choice is pending or goodbye was said;
 // the button only while a choice is pending.
@@ -571,7 +572,9 @@ void Deliver(const std::string& title, const Reply& reply) {
     g_lastTopic = reply.topic;
 
     SetRunningTopic(reply.topic);
+    g_inResultScript = true;
     RunResultScript(reply.resultScript, context);
+    g_inResultScript = false;
     SetRunningTopic("");
     for (const std::string& message : State().messages) {
         Entry notice;
@@ -977,5 +980,7 @@ void BeginConversation(const char* speaker, const char* displayName,
 }
 
 bool ConversationOpen() { return g_open; }
+
+bool InResultScript() { return g_inResultScript; }
 
 }  // namespace tesruntime::mw

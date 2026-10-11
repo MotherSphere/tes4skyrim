@@ -418,16 +418,6 @@ constexpr std::uint64_t kActorEquipItem = 54661;
 constexpr std::uint64_t kEquipObject = 52933;
 constexpr std::uint64_t kUnequipObject = 52937;
 
-// Debug.MessageBox(string) (0x9a8640), global: found at its registration,
-// `lea r8,['Debug'] / lea rdx,['MessageBox']`, the callback stored into
-// [rdi+0x50] AFTER the call. Takes the text in r9 as a BSFixedString.
-//
-// 🛑 The MESSAGE-BOX native, not Notification: TES3's `MessageBox` is modal and
-// may carry buttons. `Message.Show` cannot serve it -- that needs an authored
-// MESG record per string, and the corpus passes arbitrary runtime text.
-// See: docs/plans/morrowind_object_scripts.md#messagebox
-constexpr std::uint64_t kDebugMessageBox = 55376;
-
 // The message box Debug.MessageBox is a one-button WRAPPER over
 // (0xa072f0 tail-calls it): it builds the MessageBoxData, so it takes the
 // BUTTON NAMES and reports the click. Identical prologue on 1.6.1170
