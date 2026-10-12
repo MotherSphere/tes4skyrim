@@ -502,6 +502,18 @@ constexpr std::uint64_t kVmMagicEffectApplySink = 217097;
 constexpr std::uint64_t kVmMagicEffectApplyProcess = 53978;
 constexpr std::size_t kProcessEventSlot = 0x8;
 
+// SkyrimVM's BSTEventSink<TESSleepStartEvent> and <TESSleepStopEvent>
+// vtables (0x1912948 and 0x1912960 on 1.6.1170), whose slot-1 ProcessEvents
+// (0x9c7910, 0x9c7b20) load 'OnSleepStart' and 'OnSleepStop'. The Sleep/Wait
+// menu's start (0x95e000) calls the player's sleep start (0x72e7f0), which
+// sends the start event, only when the menu was opened for SLEEPING; a wait
+// goes to 0x72e940 and its own event instead.
+// See: docs/commentary/morrowind_runtime.md#the-tick-stops-while-the-game-is-paused
+constexpr std::uint64_t kVmSleepStartSink = 217129;
+constexpr std::uint64_t kVmSleepStartProcess = 53994;
+constexpr std::uint64_t kVmSleepStopSink = 217131;
+constexpr std::uint64_t kVmSleepStopProcess = 53995;
+
 // TESMagicEffectApplyEvent: the target and caster (NiPointers' raw pointers)
 // and the MGEF's runtime FormID. The VM's argument functor (vtable 0x1912ba8,
 // slot 1) reads the caster at +0x8 and looks the +0x10 id up expecting form
@@ -562,10 +574,9 @@ constexpr std::uint64_t kWeatherClassification = 56775;
 // count, the only native of that name.
 constexpr std::uint64_t kActorBaseDeadCount = 55987;
 
-// The equip and sleep queries, located the same way and present in all 12
+// The equip queries, located the same way and present in all 12
 // shipped versionlibs. Live-image RVAs (1.6.1170), GOG 1.6.659 in brackets:
 //   bool  Actor.IsEquipped(Form)           0x9e8d20  [0x98a070]
-//   int   Actor.GetSleepState()            0x9e9030  [0x98a380]
 //   int   Actor.GetEquippedItemType(int)   0x9e8710  [0x989a60]
 //   Spell Actor.GetEquippedSpell(int)      0x9e8630  [0x989980]
 //
@@ -586,7 +597,6 @@ constexpr std::uint64_t kActorBaseDeadCount = 55987;
 constexpr std::size_t kOffActorMoveFlags = 0xCC;
 constexpr std::uint32_t kActorFlagForceSneak = 4;
 constexpr std::uint64_t kActorIsEquipped = 54707;
-constexpr std::uint64_t kActorGetSleepState = 54715;
 constexpr std::uint64_t kActorEquippedItemType = 54685;
 constexpr std::uint64_t kActorEquippedSpell = 54683;
 
@@ -823,6 +833,12 @@ constexpr std::uint32_t kGfxValueManaged = 0x40;
 // "Notification": the same shape as Debug.MessageBox one id before it. What
 // OpenMW's buttonless messageBox is.
 constexpr std::uint64_t kDebugNotification = 55377;
+
+// Game.PlayBink(string, bool abortOnFocusLost, bool abortOnEscape, bool loop,
+// bool pauseVoice) (0xa0d0b0), global, the callback beside "PlayBink" at its
+// registration: it reads the file through [r9] and the four flags from
+// [rsp+0x28..0x40] at entry, and plays Bink 1 ("BIK") and Bink 2 ("KB2").
+constexpr std::uint64_t kGamePlayBink = 55488;
 
 // Crime natives, each found at its registration in 1.6.1170 (the callback's
 // lea beside the name's): Actor.GetCrimeFaction, Faction.GetCrimeGold /

@@ -625,6 +625,7 @@ void DiscoveryTickCases();
 void DeathOnUnloadCases();
 void UnnamedCellTickCases();
 void PausedTickCases();
+void SleepLatchCases();
 
 // The placement the fake `loadedRef` reports as being in the world, and the
 // runtime FormID it answers with. 0 means "nothing is loaded".
@@ -884,6 +885,7 @@ void TickCases() {
     DeathOnUnloadCases();
     UnnamedCellTickCases();
     PausedTickCases();
+    SleepLatchCases();
 }
 
 // 🛑 A paused game must not tick, and the runtime clock must not advance
@@ -922,6 +924,47 @@ void PausedTickCases() {
     Hooks().playerCell = nullptr;
     Hooks().playerInWorld = nullptr;
     ClearInstances();
+}
+
+bool ScriptSeesSleep() {
+    GameActor actor("test_actor");
+    DialogueContext context(actor, "Test Actor", "Player");
+    State().SetGlobal("TestGlobal", 0.0f);
+    RunResultScript("if ( GetPCSleep == 1 )\n    set TestGlobal to 1\nendif",
+                    context);
+    return State().Global("TestGlobal") == 1.0f;
+}
+
+// 🛑 The Sleep/Wait menu pauses the tick for the WHOLE sleep, so a script
+// polling `GetPCSleep` can only see it on the first tick after. The latch the
+// engine's sleep events drive must still answer 1 then, and let go after.
+void SleepLatchCases() {
+    std::printf("GetPCSleep holds a sleep the paused menu hid from the tick\n");
+    ResetTickState();
+    Hooks().playerInWorld = InWorld;
+    Hooks().gamePaused = FakeGamePaused;
+    Check(!ScriptSeesSleep(), "awake, GetPCSleep is 0");
+
+    NoteSleepStarted();
+    g_gamePaused = true;
+    TickObjectScripts(TickDelta());
+    NoteSleepStopped();
+    TickObjectScripts(TickDelta());
+    Check(ScriptSeesSleep(), "a sleep that ended behind the menu still reads 1");
+
+    g_gamePaused = false;
+    TickObjectScripts(TickDelta());
+    Check(!ScriptSeesSleep(), "and lets go once a tick has run after it");
+
+    NoteSleepStarted();
+    GameActor actor("test_actor");
+    DialogueContext context(actor, "Test Actor", "Player");
+    Check(RunResultScript("WakeUpPC", context), "WakeUpPC compiles and runs");
+    Check(!ScriptSeesSleep(), "WakeUpPC lets go at once");
+
+    Hooks().gamePaused = nullptr;
+    Hooks().playerInWorld = nullptr;
+    ResetTickState();
 }
 
 // 🛑 A spawn binds the frame `PlaceAtMe` returns, BEFORE its 3D exists. Reading

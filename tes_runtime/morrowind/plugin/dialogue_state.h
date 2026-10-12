@@ -221,6 +221,9 @@ struct GameHooks {
     bool  (*say)(const std::string& ref, const std::string& file,
                  const std::string& text) = nullptr;
     bool  (*sayDone)(const std::string& ref) = nullptr;
+    // `PlayBink file allowSkipping`: the engine's own full-screen Bink player
+    // on a file under Data\Video, skippable with Escape when `allowSkipping`.
+    void  (*playBink)(const std::string& file, bool allowSkipping) = nullptr;
     // `PositionCell`: moves `ref` into the cell of that name and puts it at
     // (x, y, z) with a Z rotation of `zRot` DEGREES.
     void (*moveToCell)(const std::string& ref, const std::string& cell,
@@ -283,9 +286,6 @@ struct GameHooks {
     // `HasItemEquipped`: is that item in any of the actor's equip slots.
     bool (*itemEquipped)(const std::string& actor,
                          const std::string& item) = nullptr;
-    // `GetPCSleep`: TES3 asks only whether the player is asleep; Skyrim's
-    // sleep state is an enum the call folds down to that one bit.
-    bool (*playerSleeping)() = nullptr;
     // `ForceSneak`/`ClearForceSneak`: puts the actor into the movement state
     // the latch now holds. `which` is a `MovementFlag`.
     void (*applyMovementFlag)(const std::string& actor, int which,

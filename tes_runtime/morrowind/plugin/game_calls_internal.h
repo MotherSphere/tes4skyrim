@@ -24,6 +24,8 @@ using SetValueFn = void (*)(void* vm, std::uint32_t stack, void* actor,
 using PlaceAtMeFn = void* (*)(void* vm, std::uint32_t stack, void* self,
                               void* base, std::int32_t count,
                               bool forcePersist, bool initiallyDisabled);
+// BSTEventSink<T>::ProcessEvent, the slot a VM sink hook replaces.
+using ProcessEventFn = int (*)(void* sink, const void* event, void* source);
 
 extern SetValueFn  g_setValue;
 extern PlaceAtMeFn g_placeAtMe;
@@ -148,9 +150,10 @@ void InstallAnimCalls(GameHooks& hooks);
 // See: docs/commentary/morrowind_runtime.md#the-control-switches
 void InstallControlCalls(GameHooks& hooks);
 // The engine's buttoned message box, which Debug.MessageBox cannot raise.
-// Hooked through ShowMessage rather than a hook of its own.
+// Hooked through ShowMessage rather than a hook of its own. Also the engine's
+// Bink player, which `PlayBink` reaches through its hook.
 // See: docs/commentary/morrowind_runtime.md#messagebox-buttons
-void InstallMessageCalls();
+void InstallMessageCalls(GameHooks& hooks);
 void ShowButtonMessage(const std::string& text,
                        const std::vector<std::string>& buttons);
 // Skyrim's corner notification, which is what OpenMW's buttonless message box

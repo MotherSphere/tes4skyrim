@@ -59,6 +59,11 @@ constexpr std::size_t kHeartbeatTicks = 150;
 std::size_t g_discoverAt = 0;
 std::size_t g_untilHeartbeat = 0;
 
+// Where the player's sleep stands for `GetPCSleep`: `kWoke` holds the answer
+// until one tick has run after the engine said the sleep ended.
+enum class Sleep { kAwake, kAsleep, kWoke };
+Sleep g_sleep = Sleep::kAwake;
+
 // Binds staged placements whose reference is now LOADED.
 //
 // 🛑 Without this the ONLY binding path is the Activate hook, so a script ran
@@ -267,6 +272,7 @@ void RunOneTick() {
         ++ran;
     }
     g_lastCount = ran + RunGlobalScripts() + RunCarriedScripts(cellChanged);
+    if (g_sleep == Sleep::kWoke) g_sleep = Sleep::kAwake;
 }
 
 }  // namespace
@@ -280,6 +286,16 @@ void AdvanceGameSeconds(double seconds) { g_gameSeconds += seconds; }
 std::size_t LastTickCount() { return g_lastCount; }
 
 std::size_t TicksRun() { return g_ticks; }
+
+void NoteSleepStarted() { g_sleep = Sleep::kAsleep; }
+
+void NoteSleepStopped() {
+    if (g_sleep == Sleep::kAsleep) g_sleep = Sleep::kWoke;
+}
+
+void WakePlayer() { g_sleep = Sleep::kAwake; }
+
+bool PlayerSleeping() { return g_sleep != Sleep::kAwake; }
 
 void TickObjectScripts(float frameSeconds) {
     if (frameSeconds <= 0.0f) return;
@@ -311,6 +327,7 @@ void ResetTickState() {
     g_cellSampled = false;
     g_accumulated = 0.0f;
     g_gameSeconds = 0.0;
+    g_sleep = Sleep::kAwake;
     ResetNpcAnims();
 }
 

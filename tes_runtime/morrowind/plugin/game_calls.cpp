@@ -1110,7 +1110,7 @@ void InstallGameCalls() {
     InstallControlCalls(hooks);
     InstallStateCalls(hooks);
     InstallCrimeCalls(hooks);
-    InstallMessageCalls();
+    InstallMessageCalls(hooks);
     InstallTeleportCalls();
     InstallFlightCalls(hooks);
     InstallStillCalls();
