@@ -884,18 +884,39 @@ WEAPON_ANIM_MULT: dict[int, float] = {
     8: 1.0,   # Staff
 }
 
-# DNAM stagger (U8 at offset 76) by anim type
-WEAPON_ANIM_STAGGER: dict[int, int] = {
-    1: 6,   # Sword     — Ragdoll
-    2: 5,   # Dagger    — Normal
-    3: 6,   # WarAxe    — Ragdoll
-    4: 6,   # Mace      — Ragdoll
-    5: 7,   # GreatSword — Large Ragdoll
-    6: 7,   # Battleaxe  — Large Ragdoll
-    7: 0,   # Bow       — None
-    9: 0,   # Crossbow (as Bow)
-    8: 0,   # Staff     — None
+#: WEAP DNAM skill (int32 actor value at offset 76) by anim type: 6 OneHanded, 7 TwoHanded, 8 Marksman, -1 none.
+# See: docs/commentary/tes5_import_magic.md#weapon-skill-and-stagger
+WEAPON_ANIM_SKILL: dict[int, int] = {
+    1: 6,    # Sword
+    2: 6,    # Dagger
+    3: 6,    # WarAxe
+    4: 6,    # Mace
+    5: 7,    # GreatSword
+    6: 7,    # Battleaxe
+    7: 8,    # Bow
+    9: 8,    # Crossbow (as Bow)
+    8: -1,   # Staff
 }
+
+#: WEAP DNAM stagger (float at offset 96) by anim type: Skyrim.esm's commonest value; a crossbow takes the bow's.
+# See: docs/commentary/tes5_import_magic.md#weapon-skill-and-stagger
+WEAPON_ANIM_STAGGER: dict[int, float] = {
+    1: 0.75,   # Sword
+    2: 0.0,    # Dagger
+    3: 0.85,   # WarAxe
+    4: 1.0,    # Mace
+    5: 1.1,    # GreatSword
+    6: 1.15,   # Battleaxe
+    7: 0.0,    # Bow
+    9: 0.0,    # Crossbow (as Bow)
+    8: 0.0,    # Staff
+}
+
+
+def weapon_skill_stagger(anim_type: int) -> tuple:
+    """(DNAM skill, stagger) of a weapon animation type; (-1, 0.0) with no row."""
+    return WEAPON_ANIM_SKILL.get(anim_type, -1), WEAPON_ANIM_STAGGER.get(anim_type, 0.0)
+
 
 # DNAM flags (U32 at offset 12) by anim type
 # 0x40 = PlayerOnly (set for slower weapons: mace, greatsword, battleaxe)

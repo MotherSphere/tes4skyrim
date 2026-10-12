@@ -16,6 +16,7 @@
 - [Menu display object](#menu-display-object)
 - [Rules for working in this area](#rules-working-this-area)
 - [Enchantment charge (ANAM to EAMT)](#enchantment-charge-eamt)
+- [Weapon skill and stagger](#weapon-skill-and-stagger)
 - [No Magnitude makes a value modifier apply 1.0](#no-magnitude-forces-one)
 
 Status as of 2026-07-31. Measured with `python tools/audit/magic_audit.py export/<Plugin>`
@@ -987,6 +988,72 @@ armor record has no TES5 counterpart and is correctly discarded.
 The u16 clamp is real, not defensive: the field is 2 bytes on disk, so an
 authored `ANAM` above 65535 must saturate rather than wrap to a near-zero
 pool.
+
+## <a id="weapon-skill-and-stagger"></a>Weapon skill and stagger
+
+**Code:** `tes5_import/record_types/equipment.py` (`convert_WEAP`),
+`tes5_import/base/equivalents.py` (`WEAPON_ANIM_SKILL`, `WEAPON_ANIM_STAGGER`,
+`weapon_skill_stagger`), tested by `tests/test_weapon_skill_stagger.py`.
+
+In the 100-byte SSE WEAP `DNAM`, offset 76 is the weapon's governing SKILL, an
+int32 actor-value index, and the stagger is the FLOAT at offset 96 (xEdit
+`wbDefinitionsTES5.pas`, WEAP `DNAM`: `Skill` is an `itS32`, `Stagger` the last
+float). `convert_WEAP` wrote a table named `WEAPON_ANIM_STAGGER` as one BYTE at
+offset 76 (5 Normal, 6 Ragdoll, 7 Large Ragdoll, 0 None) and nothing at 96.
+Read as a skill, that gave every converted bow, staff and firearm actor value 0
+and every dagger actor value 5, and left every weapon with stagger 0.0. The
+table's 6 and 7 happen to be OneHanded and TwoHanded, so the other melee types
+already parsed to the right skill.
+
+Both fields are now written per Skyrim animation type. `convert_WEAP` is the
+only WEAP `DNAM` writer in the tree: Oblivion, FO3/FNV and Morrowind weapons all
+go through it. An override keeps its master's converted `DNAM` unless the plugin
+changes a field that lands in it; then convert-and-diff substitutes this
+converter's whole `DNAM`.
+
+The values are a census of the real Skyrim.esm (2,484 WEAP, all with a 100-byte
+DNAM), by `DNAM` offset 0, value × count:
+
+| Animation type | Skill at 76 | Stagger at 96 | Written |
+|---|---|---|---|
+| 0 HandToHand | 6 ×17, −1 ×1 | 0.0 ×17, 1.0 ×1 | no row: −1, 0.0 |
+| 1 Sword | 6 ×373, 7 ×3 | 0.75 ×367, 0.0 ×7, 1.25 ×2 | 6, 0.75 |
+| 2 Dagger | 6 ×292 | 0.0 ×288, 0.25 ×4 | 6, 0.0 |
+| 3 WarAxe | 6 ×305 | 0.85 ×293, 0.0 ×12 | 6, 0.85 |
+| 4 Mace | 6 ×285 | 1.0 ×282, 0.0 ×3 | 6, 1.0 |
+| 5 GreatSword | 7 ×303 | 1.1 ×298, 1.5 ×3, 0.75 ×2 | 7, 1.1 |
+| 6 Battleaxe / Warhammer | 7 ×577 | 1.15 ×298, 1.25 ×277, 0.85 ×2 | 7, 1.15 |
+| 7 Bow | 8 ×254, 7 ×3 | 0.0 ×257 | 8, 0.0 |
+| 8 Staff | 20 ×23, 19 ×14, 21 ×12, 22 ×9, −1 ×5, 7 ×5, 18 ×3 | 0.0 ×71 | −1, 0.0 |
+| 9 Crossbow | none in Skyrim.esm (Dawnguard.esm: 8 ×36) | none in Skyrim.esm (Dawnguard.esm: 0.75 ×36) | 8, 0.0 (the bow's) |
+
+6 is OneHanded, 7 TwoHanded, 8 Marksman, 18–22 the magic schools, −1 none.
+
+- **Type 6 is two weapons.** Battleaxes carry 1.15 and warhammers 1.25: 294 of
+  the 298 records with 1.15 have `battleaxe` in their EditorID, 273 of the 277
+  with 1.25 have `warhammer`. The converter picks axe or mace from the mesh name
+  for one-handed blunt weapons only; a two-handed one is type 6 either way, so
+  it takes the battleaxe's 1.15, the more common value.
+- **A staff takes −1.** 61 of the 71 vanilla staves carry a magic school, 5
+  carry TwoHanded and 5 carry −1. The converted staff's school is not read at
+  this point, so it takes the value vanilla writes for no skill.
+- **Type 0 has no row.** No path emits it: `_weapon_anim_type` returns 1 to 8
+  from the TES4 type and the mesh name, or 9 for an FO3/FNV firearm. The 17
+  vanilla type-0 records with skill 6 are trap darts and effect weapons
+  (`TrapDartWeapon…`, `FXdustDrop…WEP`, `GasTrapDummy`); the real `Unarmed`
+  (`000001F4`) carries −1 and 0.0.
+- **An animation type in neither table** takes −1 and 0.0
+  (`weapon_skill_stagger`), which is `Unarmed`'s pair.
+- **The crossbow's stagger is the bow's, not vanilla's.** All 36 crossbows of
+  Dawnguard.esm carry 0.75. Type 9 is written only for a converted firearm,
+  and whether each shot of one should stagger has not been decided.
+- **`tools/esm/tes5_esm_reader.py` prints the same layout** (`DNAM.Skill`,
+  `DNAM.Stagger`); it used to print offset 76 as a stagger enum and offset 96
+  as `ColorRemapIdx`.
+- **Unconfirmed in game.** The bytes are checked by parse-back
+  (`tests/test_weapon_skill_stagger.py`); which skill a converted weapon then
+  uses, what −1 does to a staff, and how the stagger feels have not been looked
+  at in Skyrim.
 
 ## <a id="power-affects"></a>Power Affects Magnitude / Duration
 
