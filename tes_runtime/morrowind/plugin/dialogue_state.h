@@ -530,6 +530,9 @@ public:
     // Runtime FormIDs of the actors a Sanctuary has landed on whose faction
     // rank the tick still keeps; each leaves once its Sanctuary is gone.
     std::set<std::uint32_t> sanctuaryHolders;
+    // Runtime FormIDs of the placed NPCs a script gave AI or moved, or that
+    // fought: npc_anim no longer holds them on their authored spot.
+    std::set<std::uint32_t> holdReleased;
     // The rank last set per actor since this state was loaded; not saved, so
     // a load always sets every rank once.
     std::map<std::uint32_t, int> sanctuaryRanks;

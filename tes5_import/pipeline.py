@@ -57,6 +57,8 @@ from .actors.misc_stats import create_misc_stat_globals
 from .actors.stat_factions import create_stat_factions
 from script_convert.constants import FORCE_FLEE_QUEST, FORCE_GREET_QUEST
 from .packages.force_flee import write_force_flee_quest
+from .packages.actor_wiring import set_stand_still_list
+from .packages.stand_still import create_stand_still
 from script_convert.cross_ref import hosted_script_type, index_record_details
 from .dialogue.converter import build_npc_to_vtyp_map
 from .dialogue.force_greets import dial_index, write_force_greet_quest
@@ -311,6 +313,7 @@ def _prescan_special_records(by_type: dict, ctx, writer, export_dir: str, _step_
     create_combat_styles(writer, by_type, getattr(ctx, 'master_export', None),
                          getattr(ctx, 'master_index', None), wanted=tes4_source)
     WELL_KNOWN_PROPERTIES.update(create_combat_approach(writer, getattr(ctx, 'master_index', None)))
+    set_stand_still_list(create_stand_still(writer, getattr(ctx, 'master_index', None)))
     set_whole_day_global(create_day_clock(writer, by_type, ctx))
     _step_done('vtyp/special records')
 

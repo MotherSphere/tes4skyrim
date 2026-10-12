@@ -333,7 +333,7 @@ bool RefPoseOf(std::uint32_t id, float out[6]) {
 
 void GlideRef(std::uint32_t id, const float pose[6], float seconds) {
     void* ref = RefByRuntimeId(id);
-    if (!ref) return;
+    if (!Has3D(ref)) return;
     Pose goal{};
     for (int axis = 0; axis < kPoseAxes; ++axis) {
         goal.at[axis] = pose[axis];

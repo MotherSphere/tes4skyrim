@@ -74,7 +74,7 @@ cl %CXXFLAGS% %INCLUDES% plugin\plugin.cpp plugin\store.cpp plugin\scope.cpp ^
    plugin\levelup_menu.cpp plugin\scaleform_log.cpp ^
    plugin\chargen_menu.cpp plugin\chargen_tables.cpp ^
    "%COMMON%\ui_message.cpp" "%COMMON%\crafting_client.cpp" ^
-   "%COMMON%\glide.cpp" "%COMMON%\main_tick.cpp" ^
+   "%COMMON%\glide.cpp" "%COMMON%\main_tick.cpp" "%COMMON%\ref_handle.cpp" ^
    plugin\filter.cpp plugin\session.cpp plugin\activation.cpp ^
    plugin\game_actor.cpp plugin\conversation.cpp ^
    plugin\script_context.cpp plugin\dialogue_state.cpp ^
@@ -92,7 +92,7 @@ cl %CXXFLAGS% %INCLUDES% plugin\plugin.cpp plugin\store.cpp plugin\scope.cpp ^
    plugin\game_calls_query.cpp plugin\game_calls_spell.cpp ^
    plugin\game_calls_message.cpp plugin\game_calls_control.cpp ^
    plugin\game_calls_state.cpp plugin\game_calls_crime.cpp ^
-   plugin\game_calls_teleport.cpp plugin\game_calls_flight.cpp ^
+   plugin\game_calls_teleport.cpp plugin\game_calls_flight.cpp plugin\game_calls_still.cpp ^
    plugin\game_calls_sanctuary.cpp plugin\game_calls_anim.cpp ^
    plugin\game_calls_attributes.cpp ^
    "%COMMON%\gamebryo_sequence.cpp" ^

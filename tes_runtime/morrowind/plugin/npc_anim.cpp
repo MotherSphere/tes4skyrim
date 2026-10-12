@@ -103,6 +103,7 @@ struct Clip {
 };
 
 struct Binding {
+    // "" for an NPC with no package and no clips: only held on its spot.
     std::string slug;
     int chances[kIdleCount] = {};
     // The wander package's distance: 0 never leaves its placement.
@@ -375,12 +376,34 @@ void Choose(std::uint32_t id, Live& actor, const Binding& binding) {
     if (now - actor.emptySince >= kLeaveGrace) Leave(id, actor);
 }
 
-// One actor's evaluation; false once it has left the world or died.
+bool Released(std::uint32_t id) {
+    return State().holdReleased.count(id) != 0;
+}
+
+// An NPC with no package: held on its authored spot, as Morrowind leaves it,
+// until it fights -- which lets it go for good, where the fight ends.
+bool StepHeld(std::uint32_t id, Live& actor) {
+    if (Hooks().inCombat && Hooks().inCombat(id)) {
+        State().holdReleased.insert(id);
+        Leave(id, actor);
+        return false;
+    }
+    if (!actor.hasGoal) TakeGoal(id, actor);
+    Hold(id, actor);
+    return true;
+}
+
+// One actor's evaluation; false once it has left the world, died or been let go.
 bool Step(std::uint32_t id, Live& actor) {
     if (Hooks().is3DLoaded && !Hooks().is3DLoaded(id)) return false;
     if (Hooks().isDead && Hooks().isDead(id)) return false;
     const Binding* binding = FindBinding(actor.npc);
     if (!binding) return false;
+    if (Released(id)) {
+        Leave(id, actor);
+        return false;
+    }
+    if (binding->slug.empty()) return StepHeld(id, actor);
     if (Busy(id, actor)) {
         Leave(id, actor);
         return true;
@@ -422,7 +445,7 @@ void Discover(bool cellChanged) {
     for (const Place& place : g_places) {
         if (!FindBinding(place.npc)) continue;
         const std::uint32_t id = Hooks().loadedRef(place.plugin, place.local);
-        if (!id || g_live.count(id)) continue;
+        if (!id || g_live.count(id) || Released(id)) continue;
         Live& actor = g_live[id];
         actor.npc = place.npc;
         actor.hasPlaced = place.hasPose;
@@ -504,7 +527,26 @@ bool PlayNpcGroup(const std::string& npcIn, const std::string& groupIn,
     return true;
 }
 
+void ReleaseNpcHold(const std::string& npcIn) {
+    const std::string npc = Lower(npcIn);
+    if (!FindBinding(npc)) return;
+    const auto release = [npcIn]() {
+        const std::uint32_t id =
+            Hooks().refRuntimeId ? Hooks().refRuntimeId(npcIn) : 0;
+        if (!id || !State().holdReleased.insert(id).second) return;
+        const auto it = g_live.find(id);
+        if (it != g_live.end()) Leave(id, it->second);
+        LogVerbose("anim: %s (%08X) is let go", npcIn.c_str(), id);
+    };
+    if (!RunOnGameThread(release)) release();
+}
+
 void SetNpcAnimRollForTest(float (*roll)()) { g_roll = roll; }
+
+bool IsNpcHeld(std::uint32_t runtimeFormId) {
+    const auto it = g_live.find(runtimeFormId);
+    return it != g_live.end() && it->second.hasGoal;
+}
 
 std::size_t NpcAnimLiveCount() { return g_live.size(); }
 

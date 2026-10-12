@@ -858,8 +858,12 @@ bool IsDeadRef(std::uint32_t runtimeFormId) {
 // scripts of the previous cell ran on behind the player's back: measured, a
 // chargen script went on enabling its light for 48 seconds after the player
 // had been moved to another cell.
+bool Has3D(void* ref) {
+    return ref && g_is3DLoaded && g_is3DLoaded(PapyrusVm(), 0, ref);
+}
+
 bool InWorld(void* ref) {
-    if (g_is3DLoaded(PapyrusVm(), 0, ref)) return true;
+    if (Has3D(ref)) return true;
     if (!g_parentCell || !g_cellAttached || !g_isInterior) return false;
     void* cell = g_parentCell(PapyrusVm(), 0, ref);
     if (!cell || !g_cellAttached(PapyrusVm(), 0, cell)) return false;
@@ -1109,6 +1113,7 @@ void InstallGameCalls() {
     InstallMessageCalls();
     InstallTeleportCalls();
     InstallFlightCalls(hooks);
+    InstallStillCalls();
     InstallAttributeCalls(hooks);
     InstallAnimCalls(hooks);
     Log("game: %zu spell(s) and %zu magic effect(s) resolvable by id",

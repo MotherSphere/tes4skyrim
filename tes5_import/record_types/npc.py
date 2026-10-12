@@ -20,7 +20,7 @@ from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
 from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
 from ..actors.outfits import split_inventory
 from ..packages.actor_wiring import (CSTY_DEFAULT, DPLT_NPC_LIST, authored_packages,
-                                     default_package_list, npc_packages)
+                                     default_package_list, npc_packages, stand_still_list)
 from ..base.equivalents import map_hair_color
 from ..base.race_factions import race_faction
 from .actor_common import (GOLD001_FID, NAM5_UNKNOWN, SOUND_LEVEL_NORMAL,
@@ -44,7 +44,7 @@ from .common import (
 )
 from .crime import IS_GUARD_FACTION, crime_faction, is_guard_class
 from .spell_tomes import tome_items
-from .npc_morrowind import TES5_RACE_BASE_HEALTH
+from .npc_morrowind import TES5_RACE_BASE_HEALTH, is_morrowind_npc
 
 #: TES4 NPC_ ACBS bits that mean the same thing in TES5, Female included.
 _NPC_COMPATIBLE_FLAGS = 0x4C9B
@@ -352,7 +352,8 @@ def convert_NPC_(rec: dict, writer=None) -> bytes:
             'DOFT', build_outfit(writer, (edid or 'NPC') + '_Outfit',
                                   outfit_fids, get_formid(rec, 'FormID')))
 
-    subs += pack_formid_subrecord('DPLT', default_package_list(authored_packages(rec), DPLT_NPC_LIST))
+    standing = stand_still_list() if is_morrowind_npc(rec) else DPLT_NPC_LIST
+    subs += pack_formid_subrecord('DPLT', default_package_list(authored_packages(rec), standing))
     crime = _crime_faction_of(rec)
     if crime:
         subs += pack_formid_subrecord('CRIF', crime)

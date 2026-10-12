@@ -41,6 +41,13 @@ void TickNpcAnims(bool cellChanged);
 bool PlayNpcGroup(const std::string& npc, const std::string& group,
                   std::uint32_t loops);
 
+// A script gave `npc` AI or moved it: it is no longer held on its authored
+// spot, for good (the co-save keeps it). Nothing for an NPC with no binding.
+void ReleaseNpcHold(const std::string& npc);
+
+// Whether the actor is held on a spot now. Game thread.
+bool IsNpcHeld(std::uint32_t runtimeFormId);
+
 // The fraction 0..1 the next idle roll uses, for the tests: null is uniform at
 // random.
 void SetNpcAnimRollForTest(float (*roll)());

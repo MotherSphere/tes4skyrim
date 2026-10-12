@@ -40,6 +40,8 @@ void* ItemForm(const std::string& item);
 void* OwnerRef(const std::string& owner);
 void* PlayerRef();
 void* RefByRuntimeId(std::uint32_t runtimeFormId);
+// Whether `ref` has its 3D now: false for a disabled reference in a loaded cell.
+bool Has3D(void* ref);
 // World units between two references, or -1 when either cannot be measured.
 // The string form `Distance` resolves ids; this one takes what the caller
 // already holds.
@@ -106,6 +108,14 @@ constexpr int kSanctuaryEffect = 42;
 // active-effect list.
 // See: docs/commentary/morrowind_runtime.md#levitate-and-slowfall
 void InstallFlightCalls(GameHooks& hooks);
+// An actor's character controller, or null. game_calls_flight.cpp.
+void* CharController(void* actor);
+// OpenMW keeps an actor no AI is moving where it stands: the InAir and
+// OnGround steps hold each still non-player controller, and the tick names
+// the nearby actors that are not Morrowind's. game_calls_still.cpp.
+void InstallStillCalls();
+void HoldStill(void* controller, bool isPlayer);
+void TickStillActors(void* player);
 // The summed magnitude of every active instance of a runtime-carried effect
 // on `actor`, read off its active-effect list; with `attribute` set, only the
 // instances of that attribute's variant. Game thread.

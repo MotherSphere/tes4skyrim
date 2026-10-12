@@ -20,6 +20,7 @@ from asset_convert.havok.npc_anim_table import placement_pose, remove_table, wri
 from ..base.text_reader import get_formid, get_int
 from ..packages.converter import MARKER_IDLE, MARKER_KEY, MARKER_SIT
 from .common import pack_subrecord
+from .npc_morrowind import is_morrowind_npc
 
 #: derive_formid site of a marker per placement, keyed by its ACHR.
 _REF_SITE = 'MW_NPC_MARKER'
@@ -184,8 +185,14 @@ def _marker_ref(achr: dict, row: tuple, raw: int, base: int) -> dict:
 #: The marker REFRs planned this run, held back from the navmesh pass (flush_npc_markers).
 _PENDING: list = []
 
-#: This run's held idle placements: (placement FormID, NPC EditorID, pose, (event, seconds)).
+#: This run's held placements: (placement FormID, NPC EditorID, pose, (event, seconds) or None for no idle).
 _HELD: list = []
+
+
+def _packageless(by_type: dict) -> set:
+    """FormIDs of Morrowind NPCs with no AI package; they stay where placed."""
+    return {npc['FormID'] for npc in by_type.get('NPC_', [])
+            if is_morrowind_npc(npc) and get_int(npc, 'AIPackageCount', 0) == 0}
 
 
 def place_npc_markers(by_type: dict, writer, own_index: int) -> int:
@@ -194,7 +201,8 @@ def place_npc_markers(by_type: dict, writer, own_index: int) -> int:
     Flags wander packages (MARKER_KEY), drops props the stand-ins carry, and
     sets each seated placement's `XLKR.Reference` before the package and NPC
     converters run; the REFRs wait for flush_npc_markers, so no navmesh input
-    changes. Idle placements wait for write_idle_table.
+    changes. Idle placements, and those of NPCs with no package, wait for
+    write_idle_table.
     """
     _PENDING.clear()
     _HELD.clear()
@@ -202,9 +210,12 @@ def place_npc_markers(by_type: dict, writer, own_index: int) -> int:
     marked = _marked_npcs(by_type, {a.get('NAME') for a in own})
     _drop_carried_props(by_type, marked)
     names ={npc['FormID']: npc.get('EditorID') or npc['FormID'] for npc in by_type.get('NPC_', [])}
+    still = _packageless(by_type)
     for achr in own:
         kind, row = marked.get(achr.get('NAME')) or (None, None)
-        if kind == MARKER_IDLE:
+        if kind is None and achr.get('NAME') in still:
+            _HELD.append((achr['FormID'], names[achr['NAME']], placement_pose(achr), None))
+        elif kind == MARKER_IDLE:
             _HELD.append((achr['FormID'], names[achr['NAME']], placement_pose(achr), row))
         elif kind == MARKER_SIT:
             fid = writer.derive_formid(_REF_SITE, achr['FormID'])
@@ -215,18 +226,19 @@ def place_npc_markers(by_type: dict, writer, own_index: int) -> int:
 
 
 def write_idle_table(output_path: str) -> int:
-    """Write MorrowindRuntime's table of held idle placements beside the ESM (or
-    delete a stale one); how many placements."""
+    """Write MorrowindRuntime's table of held placements beside the ESM (or
+    delete a stale one); how many placements. A placement with no idle binds
+    no clip, which the runtime reads as held only."""
     plugin_out, plugin = os.path.dirname(output_path), os.path.basename(output_path)
     held = list(_HELD)
     _HELD.clear()
     if not held:
         remove_table(plugin_out, plugin)
         return 0
-    idles = {idle for _f, _n, _p, idle in held}
+    idles = {idle for _f, _n, _p, idle in held if idle is not None}
     write_table(plugin_out, plugin,
                 [(event.lower(), 'idle', event, seconds) for event, seconds in sorted(idles)],
-                {(npc, idle[0].lower(), '|0') for _f, npc, _p, idle in held},
+                {(npc, idle[0].lower() if idle else '', '|0') for _f, npc, _p, idle in held},
                 [(form_id, npc, pose) for form_id, npc, pose, _i in held])
     return len(held)
 

@@ -882,6 +882,37 @@ constexpr std::size_t kOffControllerVelocity = 0x90;
 constexpr std::size_t kOffControllerFallStart = 0x240;
 constexpr std::size_t kControllerGetPositionSlot = 2;
 
+// A still actor is never pushed out of what it stands in (game_calls_still.cpp).
+//   bhkCharProxyController vtable  0x19edff0  [1.7.104 0x1a89578]  the one
+//        GetCharController's pointer carries; its GetPositionImpl (0xed1dc0,
+//        [0x1098920]) reads the bhkCharacterProxy at +0x330, whose
+//        hkpCharacterProxy is at +0x10
+//   hkpCharacterProxy+0xdc  penetrationRecoverySpeed: copied to and from the
+//        Cinfo's +0x7c (0xb80497, 0xb8058c), the offset Havok's own class
+//        table gives it; at 0xb83c44 a penetrating contact adds
+//        -distance * this along its normal, then is clamped to distance 0
+//   ProcessLists singleton pointer  0x20f69b0: the nearby actors' handles at
+//        +0x30, their count at +0x40 (the two fields its 443 readers use most)
+constexpr std::uint64_t kProxyControllerVtable = 240560;
+constexpr std::size_t kOffProxyControllerProxy = 0x340;
+constexpr std::size_t kOffProxyRecoverySpeed = 0xdc;
+constexpr std::uint64_t kProcessListsSingleton = 400315;
+constexpr std::size_t kOffHighActorHandles = 0x30;
+constexpr std::size_t kOffHighActorCount = 0x40;
+
+// An NPC npc_anim holds on its spot is taken out of the physics simulation
+// the way the engine takes a paired-animation actor out of it: bit 17 of the
+// bhkCharacterController flags at +0x218 (CommonLib's kNoSim).
+//   0x54a070 (ID 32847) sets it on an actor's controller; its only caller,
+//        0x547e10 (ID 32803), looks up two ACHR handles and freezes both
+//   0xed505b, in the proxy controller's step (ID 79206): the bit jumps past
+//        the whole step, so no gravity, push-out or support moves the actor
+//   0x6ab9c8: the move onto the navmesh skips an actor carrying the bit
+//   0x688156..0x6881f6: SetPosition sets the bit around its move and puts
+//        the old value back, so a TranslateTo glide keeps the hold
+constexpr std::size_t kOffControllerFlags = 0x218;
+constexpr std::uint32_t kControllerNoSim = 1u << 17;
+
 // PlayerControlsData.moveInputVec: strafe then forward, -1..1. The input sink
 // (0x79a970) zeroes it, then hands `this+0x24` to each handler, and
 // MovementHandler writes x at +0 and y at +4 -- on 1.7.104 too.
