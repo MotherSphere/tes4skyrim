@@ -9,6 +9,7 @@
 
 #include "npc_anim.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iterator>
@@ -33,9 +34,9 @@ constexpr const char* kClipPrefix = "clip.";
 constexpr const char* kActorPrefix = "actor.";
 constexpr const char* kPlacePrefix = "place.";
 
-// What leaves the clip state; the converter adds it beside the engine's own
-// `IdleStop` (npc_graph_morrowind.py STOP_EVENT).
-constexpr const char* kStopEvent = "TES3AnimStop";
+// What leaves the clip state: the engine's own idle stop, which ends a vanilla
+// idle and which the converted clip state also takes (npc_graph_morrowind.py).
+constexpr const char* kStopEvent = "IdleStop";
 
 // The animation file's own default pose, which plays whenever no numbered
 // idle does, and the numbered idles a wander package's chances pick among.
@@ -58,9 +59,11 @@ constexpr double kStillFor = 1.0;
 // stand a seated NPC up for one tick at the end of a cycle.
 constexpr double kLeaveGrace = 0.5;
 
-// The playing clip's event is sent again this often: the engine sends its own
-// `IdleStop` (dialogue, a hit), and nothing tells us that it did. A repeat
-// while the state is still active is a self-transition the machine ignores.
+// The playing clip's event is sent again this often, or after the clip's own
+// seconds when longer: the engine sends its own `IdleStop` (dialogue, a hit),
+// and nothing tells us that it did. A repeat while the state is still active
+// is a self-transition the machine ignores; a one-shot idle (a cough) plays
+// again each time its seconds run out.
 constexpr double kRefresh = 2.0;
 
 constexpr double kForever = std::numeric_limits<double>::infinity();
@@ -308,7 +311,8 @@ bool Start(std::uint32_t id, Live& actor, const std::string& group,
     const double now = GameSeconds();
     if (actor.playing.empty() && !actor.hasGoal) TakeGoal(id, actor);
     Hold(id, actor);
-    if (actor.playing != group || now - actor.sentAt >= kRefresh) {
+    if (actor.playing != group ||
+        now - actor.sentAt >= std::max<double>(kRefresh, clip.seconds)) {
         if (!Hooks().sendAnimEvent || !Hooks().sendAnimEvent(id, clip.event)) {
             return false;
         }

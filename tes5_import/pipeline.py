@@ -46,7 +46,7 @@ from .overrides.nested import (DELETED_FLAG as OVERRIDE_DELETED_FLAG,
                         detect_injected_records, open_masters)
 from .record_types import magic_art
 from .record_types.crime import plan_crime
-from .record_types.npc_markers_morrowind import place_npc_markers
+from .record_types.npc_markers_morrowind import place_npc_markers, write_idle_table
 from .record_types.spell_tomes import create_spell_tomes
 from .record_types.spell_tomes_morrowind import chain_tables
 from .record_types.world_falloutnv import is_fallout_export
@@ -1201,6 +1201,7 @@ def _run_prescans(st: ImportState, all_records: list, num_new_masters: int,
     plan_crime(by_type, ctx, writer, export_dir, st.plugin_out_dir,
                st.output_path, st.output_root)
     place_npc_markers(by_type, writer, st.num_tes4_masters)
+    write_idle_table(st.output_path)
     _scpt_master_export = _prescan_script_plans(by_type, ctx, st.xref,
                                                 st.fid_to_edid, export_dir,
                                                 _step_done)

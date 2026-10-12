@@ -18,8 +18,7 @@ from asset_convert.havok.gun_graph_falloutnv import GunGraphBuilder
 from asset_convert.havok.humanoid_graph import (THIRD_PERSON, HumanoidGraph,
                                                 load_vanilla, param_text,
                                                 register_clips)
-from asset_convert.havok.npc_anim_morrowind import (anim_layout,
-                                                    remove_runtime_table)
+from asset_convert.havok.npc_anim_morrowind import anim_layout
 
 #: The graph every humanoid's root machine lives in, and that machine's name.
 MASTER = 'behaviors\\0_master.hkx'
@@ -80,10 +79,11 @@ def build_npc_graphs(manifest: dict, out_meshes_dir: str, work_dir: str,
     return {'animdata_append': animdata}
 
 
-def remove_npc_graphs(export_dir: str, out_meshes_dir: str, log=print) -> None:
-    """Delete the clips, humanoid graph patch and runtime table an earlier build shipped.
+def remove_npc_graphs(out_meshes_dir: str, log=print) -> None:
+    """Delete the clips and humanoid graph patch an earlier build shipped.
 
     Only for a plugin without guns: the gun patch ships the same humanoid files.
+    The runtime table stays: the import stage writes it (npc_anim_table).
     """
     char_out = os.path.join(out_meshes_dir, 'actors', 'character')
     patched = [os.path.join(char_out, *rel.split('\\'))
@@ -95,7 +95,5 @@ def remove_npc_graphs(export_dir: str, out_meshes_dir: str, log=print) -> None:
     if os.path.isdir(clips):
         shutil.rmtree(clips)
         stale.append(clips)
-    plugin_out = os.path.dirname(os.path.normpath(out_meshes_dir))
-    remove_runtime_table(plugin_out, os.path.basename(os.path.normpath(export_dir)))
     if stale:
         log(f'  Removed {len(stale)} stale NPC animation outputs (conversion is off)')

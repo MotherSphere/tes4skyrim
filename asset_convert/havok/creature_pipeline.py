@@ -508,7 +508,7 @@ def humanoid_appends(export_dir: str, out_meshes_dir: str, workers: int = None,
     if guns:
         return guns
     if not NPC_ANIMS:
-        remove_npc_graphs(export_dir, out_meshes_dir, log)
+        remove_npc_graphs(out_meshes_dir, log)
         return {}
     work = os.path.join(str(EXPORT), 'skyrim_assets', 'humanoid_graph_tes3')
     manifest = convert_npc_anims(export_dir, out_meshes_dir, work, workers, log)

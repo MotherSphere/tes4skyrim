@@ -1,27 +1,20 @@
-"""Morrowind NPC animation files become vanilla furniture and idle markers."""
+"""Morrowind NPC animation files become vanilla furniture and idles."""
 
 import math
 import struct
 
 from tes5_import.packages.converter import MARKER_KEY, convert_PACK
 from tes5_import.record_types.npc_markers_morrowind import (flush_npc_markers,
-                                                            place_npc_markers)
+                                                            place_npc_markers,
+                                                            write_idle_table)
 
 
 class _Writer:
     """Just the writer calls the pass makes."""
 
-    def __init__(self):
-        """No records yet."""
-        self.records = []
-
     def derive_formid(self, site, key):
         """A stable id per (site, key)."""
         return 0x00800000 | (hash((site, key)) & 0xFFFF)
-
-    def add_record(self, sig, data):
-        """Keep what was written."""
-        self.records.append(sig)
 
 
 def _by_type(anim: str, shared: bool = False) -> dict:
@@ -52,14 +45,19 @@ def test_seated_npc_gets_a_linked_chair():
     assert abs(float(marker['RotZ']) - (math.pi / 2 + math.radians(3))) < 1e-6
 
 
-def test_dancer_gets_a_new_idle_marker():
-    """A dance file has no vanilla marker: one IDLM is minted and used."""
-    by_type = _by_type('Arktwend\\\\Ani\\\\TanzDynamic.nif')
-    writer = _Writer()
-    place_npc_markers(by_type, writer, 0)
-    assert writer.records == ['IDLM']
+def test_sweeper_is_held_by_the_runtime_table(tmp_path):
+    """A sweep file places no marker: its placement and vanilla idle go to the runtime table."""
+    by_type = _by_type('AM\\\\AM_Sweeping.nif')
+    by_type['NPC_'][0]['EditorID'] = 'Sweeper'
+    assert place_npc_markers(by_type, _Writer(), 0) == 0
     assert by_type['PACK'][0][MARKER_KEY] == 'idle'
-    flush_npc_markers(by_type)
+    assert 'XLKR.Reference' not in by_type['ACHR'][0]
+    assert write_idle_table(str(tmp_path / 'Test.esm')) == 1
+    table = tmp_path / 'SKSE' / 'Plugins' / 'MorrowindRuntime' / 'Test.anims.txt'
+    assert table.read_text(encoding='utf-8').splitlines() == [
+        'clip.idleloosesweepingstart.idle=idleLooseSweepingStart|0.000',
+        'actor.Sweeper=idleloosesweepingstart||0',
+        'place.00000C01=Test.esm|Sweeper|100.000,200.000,50.000,0.000,0.000,90.000']
 
 
 def test_shared_package_with_an_unmapped_npc_keeps_its_sandbox():

@@ -1675,7 +1675,7 @@ void NpcAnimCases() {
     Check(NpcAnimPlaying(kFisherRef) == "idle",
           "with no idle chosen the file's default pose plays");
     AnimRun(10);
-    Check(!SentTo(kSitterRef, "TES3AnimStop") || NpcAnimPlaying(kSitterRef).empty(),
+    Check(!SentTo(kSitterRef, "IdleStop") || NpcAnimPlaying(kSitterRef).empty(),
           "a stop is only sent once the choice stays empty");
     g_animRoll = 0.5f;
     AnimRun(2);
@@ -1695,7 +1695,7 @@ void NpcAnimCases() {
 
     // An NPC whose package has a distance walks when its roll gives no idle.
     // It was sent walking by the empty rolls above, and idles again after.
-    Check(SentTo(kWalkerRef, "TES3AnimStop") || NpcAnimPlaying(kWalkerRef) == "idle9",
+    Check(SentTo(kWalkerRef, "IdleStop") || NpcAnimPlaying(kWalkerRef) == "idle9",
           "a wanderer is let go to walk when no idle is rolled");
     AnimRun(90);
     Check(NpcAnimPlaying(kWalkerRef) == "idle9", "and idles again where it then stands");

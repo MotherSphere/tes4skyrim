@@ -68,7 +68,7 @@ def test_runtime_table_rows(tmp_path):
 
 
 def test_switched_off_build_removes_earlier_outputs(tmp_path):
-    """With the conversion off, a rebuild deletes every file an earlier build shipped."""
+    """With the conversion off, a rebuild deletes the clips and graphs, not the import's table."""
     export_dir = _export(tmp_path)
     meshes = tmp_path / 'out' / 'meshes'
     table = write_runtime_table(str(tmp_path / 'out'), 'Test.esm', [], {}, [])
@@ -82,4 +82,4 @@ def test_switched_off_build_removes_earlier_outputs(tmp_path):
     assert humanoid_appends(export_dir, str(meshes), log=lambda _m: None) == {}
     assert not any(p.exists() for p in shipped)
     assert not Path(anim_layout(str(meshes))['dir']).exists()
-    assert not os.path.exists(table)
+    assert os.path.exists(table)

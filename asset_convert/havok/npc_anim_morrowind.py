@@ -10,7 +10,6 @@ See: docs/commentary/asset_convert_animation.md#morrowind-npc-animation-files
 """
 
 import json
-import math
 import os
 import re
 import zlib
@@ -29,6 +28,7 @@ from asset_convert.havok.creature_split_morrowind import (group_clips, slashed,
                                                           write_skeleton)
 from asset_convert.havok.hkx_anim import write_clip_hkx
 from asset_convert.havok.hkx_xml import convert_hkx_to_amd64
+from asset_convert.havok.npc_anim_table import placement_pose, write_table
 from asset_convert.sources import base_plugins
 from asset_convert.sources.morrowind_assets import resolve_mesh
 from core.worker_budget import worker_count
@@ -52,10 +52,6 @@ IDLE_KEY = 'MorrowindIdle'
 EVENT_PREFIX = 'TES3Anim_'
 
 ANIM_MANIFEST = 'anims_manifest.json'
-
-#: Where MorrowindRuntime reads a plugin's animation table, beside its sidecar folder.
-RUNTIME_DIR = os.path.join('SKSE', 'Plugins', 'MorrowindRuntime')
-RUNTIME_SUFFIX = '.anims.txt'
 
 _POSE_DELTAS = 'best_animation_pose_morrowind.json'
 
@@ -105,16 +101,9 @@ def npc_bindings(export_dirs: list) -> dict:
     return out
 
 
-def _pose(rec: dict) -> str:
-    """A placement's authored `x,y,z,rx,ry,rz`, the angles in degrees."""
-    at = [float(rec.get(key) or 0) for key in ('PosX', 'PosY', 'PosZ')]
-    turn = [math.degrees(float(rec.get(key) or 0)) for key in ('RotX', 'RotY', 'RotZ')]
-    return ','.join(f'{value:.3f}' for value in at + turn)
-
-
 def placements(export_dir: str, bindings: dict) -> list:
     """(placement FormID, NPC id, pose) per reference the plugin places of a bound NPC."""
-    return [(rec['FormID'], bindings[rec['NAME']][0], _pose(rec))
+    return [(rec['FormID'], bindings[rec['NAME']][0], placement_pose(rec))
             for rec in parse_export_file(os.path.join(export_dir, 'ACHR.txt'))
             if rec.get('NAME') in bindings]
 
@@ -219,36 +208,16 @@ def _convert_pool(sources: dict, skeleton: tuple, out_dir: str, workers: int,
 
 def write_runtime_table(plugin_out: str, plugin_name: str, clips: list,
                         bindings: dict, placed: list) -> str:
-    """Write the table MorrowindRuntime plays the clips from; its path.
-
-    `clip.<slug>.<group>=event|seconds`, `actor.<npc id>=slug|chances|distance`
-    and `place.<placement FormID>=plugin|npc id|x,y,z,rx,ry,rz`.
-    See: docs/commentary/morrowind_runtime.md#npc-animation-files
-    """
+    """Write the table MorrowindRuntime plays the clips from (npc_anim_table); its path."""
     have = {c['slug'] for c in clips}
-    lines = [f"clip.{c['slug']}.{c['group']}={c['event']}|{c['duration']:.3f}"
-             for c in clips]
     bound = {npc: (anim_slug(model), wander)
              for npc, model, wander in bindings.values()
              if anim_slug(model) in have}
-    lines += [f'actor.{npc}={slug}|{wander}'
-              for npc, (slug, wander) in sorted(bound.items())]
-    lines += [f'place.{form_id}={plugin_name}|{npc}|{pose}'
-              for form_id, npc, pose in sorted(placed) if npc in bound]
-    stem = os.path.splitext(os.path.basename(plugin_name))[0]
-    path = os.path.join(plugin_out, RUNTIME_DIR, stem + RUNTIME_SUFFIX)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as handle:
-        handle.write('\n'.join(lines) + '\n')
-    return path
-
-
-def remove_runtime_table(plugin_out: str, plugin_name: str) -> None:
-    """Delete the table an earlier build left for a plugin that now binds no animation."""
-    stem = os.path.splitext(os.path.basename(plugin_name))[0]
-    path = os.path.join(plugin_out, RUNTIME_DIR, stem + RUNTIME_SUFFIX)
-    if os.path.isfile(path):
-        os.remove(path)
+    return write_table(
+        plugin_out, plugin_name,
+        [(c['slug'], c['group'], c['event'], c['duration']) for c in clips],
+        [(npc, slug, wander) for npc, (slug, wander) in bound.items()],
+        [row for row in placed if row[1] in bound])
 
 
 def convert_npc_anims(export_dir: str, out_meshes_dir: str, work_dir: str,
@@ -267,7 +236,6 @@ def convert_npc_anims(export_dir: str, out_meshes_dir: str, work_dir: str,
     sources = _sources(bindings, roots, log) if bindings else {}
     base = resolve_mesh(roots, BASE_ANIM, paths.EXPORT) if sources else None
     if base is None:
-        remove_runtime_table(plugin_out, plugin_name)
         return {}
     layout = anim_layout(out_meshes_dir)
     os.makedirs(layout['dir'], exist_ok=True)
