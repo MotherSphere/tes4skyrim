@@ -12,6 +12,8 @@
 - [Prescreening the LODGen input](#prescreening-the-lodgen-input)
 - [`write_lodgen_input`: master modes and `only_cells`](#write-lodgen-input-master-modes)
   - [The input file's shape, and the per-base memo](#lodgen-input-shape)
+  - [The scan reads each reference's enable parent](#enable-parent-scan)
+  - [Object LOD lists the new-game state](#object-lod-selection)
 - [Terrain LOD invents ground over cells that own no LAND](#lod-invents-terrain-over-cells-with-no-land)
 - [GENERATED `_far.nif` belong to the LOD mod](#generated-far-nif-belong-to-the-lod-mod)
   - [Why one LOD folder, not one per plugin](#one-lod-folder-not-one-per-plugin)
@@ -431,6 +433,97 @@ started with its own folder, `external\lodgen`, as the working directory
 (`_invoke_lodgen`), so a relative `PathData` would fail its Data-directory
 existence check and a relative `PathOutput` would write the `.bto` under that
 folder.
+
+### <a id="enable-parent-scan"></a>The scan reads each reference's enable parent
+
+**Code:** `asset_convert/lod/esm_scan.py` (`_read_xesp`, `_read_ref`)
+
+`parse_esm` returns `ref['xesp'] = (parent, opposite)` for a REFR that carries
+an XESP subrecord and `None` for one that does not. The parent FormID is
+normalized into the same global index space as `form_id`, so a parent placed
+by another plugin is found by its id whatever index byte each file gives it.
+`opposite` is flags bit 0, "Set Enable State to Opposite of Parent", and no
+other bit is read: the importer writes the field as `<II` parent + flags
+(`tes5_import/record_types/world.py`) and a converted Oblivion.esm holds only 0
+and 1 there, but in the five Skyrim SE masters (Skyrim, Update, Dawnguard,
+HearthFires, Dragonborn; winning records) 6,269 of 32,892 REFR XESP fields
+hold some other value, so the whole field must never be compared.
+
+Measured on one converted Oblivion.esm: **8,670 of 1,025,412 scanned REFRs
+carry XESP**, 1,489 of them with the opposite bit. 8,515 of the parents are
+scanned REFRs themselves; the other 155 are ACHR records, which the scan does
+not read, so a reader of `xesp` finds no record for them. Knights.esp has 995
+in 6,795 REFRs and DLCFrostcrag.esp 491 in 1,055.
+
+### <a id="object-lod-selection"></a>Object LOD lists the new-game state
+
+**Code:** `asset_convert/lod/lod_gen.py` (`_refs_on_at_game_start`,
+`_initially_enabled`)
+
+**The rule.** A LOD-flagged reference that the plugin's records leave OFF at new
+game is not listed. A reference without an enable parent is off when it carries
+Initially Disabled (0x800). A reference with an enable parent takes its parent's
+state, inverted when its `opposite` bit is set, and so on up the chain; for such
+a reference only the chain is read. `_initially_enabled` walks the chain
+iteratively with no depth cap and memoises every reference it passes, so the
+answer does not depend on which reference of a chain is asked first. Anything
+that cannot be resolved stays listed, as every reference was before: a parent
+that is not a scanned REFR (an actor, the player), a parent none of the merged
+files defines, a cycle.
+
+`_refs_on_at_game_start` filters the reference list once, before the prefetch
+and the row loop, so neither screens or stages a mesh that only a left-out
+reference uses. It prints `Object-LOD selection: N LOD-flagged reference(s) off
+at game start left out, K kept with an unresolved enable parent`. N counts
+references that pass `_lod_candidate`, before their base is resolved, so it can
+exceed the number of rows that go.
+
+**What it drops**, measured on one converted Oblivion.esm with no other plugin
+(LODGen not run). TES4Tamriel has 180,702 LOD-flagged references; **1,043 are
+off at new game: 4 by their own flag and 1,039 through an enable parent**, 8 of
+which carry the flag too. 1,023 are STAT and 20 TREE. By model folder:
+`rocks\oblivionplane` 551, `oblivion\clutter` 226, `architecture\kvatch` 160,
+`oblivion\architecture` 49, `speedtrees` 20, and 37 in eight other folders. The
+1,039 hang off 88 chain roots; 83 of those are also the enable parent of a door
+reference, 80 of them an `OblivionGatetoOblivion`, and 924 of the 1,039 are
+under those 83: the scenery of Oblivion-gate sites. **The input goes from
+180,635 rows to 179,629**, 1,006 fewer: 37 of the `rocks\oblivionplane`
+references have a base that was never listed. SEWorld goes from 17,071 rows to
+17,067: four `effects\seflamesofagnon*` meshes under three parents. The other
+16 worldspaces that get LOD have no such reference and their input is
+byte-identical. No tile at level 4, 8 or 16 loses its last row (TES4Tamriel
+725 / 199 / 56 tiles and SEWorld 92 / 31 / 13, before and after). No chain
+among these references is deeper than three links, none is unresolved, and none
+has its own flag set while its chain leaves it on. With Knights.esp and
+DLCFrostcrag.esp overlaid the same 1,043 go (180,784 rows to 179,778).
+
+**Limit.** Parents are read only from the files merged for this worldspace: its
+owner and the dependents that place something in it (see
+[Overlay scoping](#lod-suppliers-vs-contributors)). A dependent that changes a
+parent elsewhere and places nothing in the worldspace is not overlaid, so its
+change is not seen. In the measured data no left-out plugin overrides a member
+of such a chain (52 worldspace-and-plugin pairs).
+
+**The trade-off.** Object LOD is static: a tile holds one set of objects
+whatever the state of the game. Until this rule every state was listed at once,
+so the before and the after of a scripted change were both drawn at distance
+from the first minute. Bethesda's own tiles do the same where it can be
+measured: of the LOD-capable references under Skyrim SE's shipped level-4
+object tiles (records of Skyrim, Update and Dawnguard), 33 have an enable
+parent or their own Initially Disabled flag, and all 33 are in the tiles -- 27
+that the same reading of the records leaves on and 6 that it leaves off. (Each
+reference's LOD mesh was placed and matched against the tile's vertices within
+0.05 units; 17,245 of 17,778 plain references are found that way, 97.00 %, and
+none of them once shifted.) With this rule the LOD shows the new-game state
+only. An object a quest or script switches ON later is missing at distance from
+then on, and one it switches OFF stays: 666 of TES4Tamriel's kept references
+are the `opposite` children of an off parent (312 Great Forest rocks, 151
+trees), on at new game and off once that parent is enabled. xEdit's Skyrim pass
+(`wbGenerateLODTES5`, `Core/wbLOD.pas` lines 2779-2790 on branch `dev-4.1.6` @
+`9fb01688`) draws the line elsewhere: it skips a reference that is Initially
+Disabled or Deleted, and a non-VWD reference that has any enable parent. By
+those two tests it would also skip 521 references kept here, all on at new
+game, and list 14 VWD trees left out here.
 
 
 ## <a id="prescreening-the-lodgen-input"></a>Prescreening the LODGen input

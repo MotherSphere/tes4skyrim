@@ -16,11 +16,12 @@ import re as _re
 import shutil
 import struct
 import sys
-from collections import namedtuple
+from collections import Counter, namedtuple
 from pathlib import Path
 
 from asset_convert.game_paths import win_join
-from asset_convert.lod.esm_scan import (FLAG_DISTANT_LOD, parse_esm,
+from asset_convert.lod.esm_scan import (FLAG_DISTANT_LOD,
+                                        FLAG_INITIALLY_DISABLED, parse_esm,
                                         parse_esm_cached)
 
 # ---------------------------------------------------------------------------
@@ -759,6 +760,58 @@ def _lod_candidate(ref, stats, scope) -> bool:
     return bool(stat_flags_val & FLAG_DISTANT_LOD)
 
 
+def _initially_enabled(fid, by_fid, state):
+    """Whether reference `fid` is on at game start by the records; None if unknown.
+
+    A reference with an enable parent takes the parent's state, inverted when
+    its `opposite` bit is set; one without takes its own Initially Disabled
+    flag. A parent that is not in `by_fid` and a parent cycle are unknown.
+    Iterative, no depth cap; `state` memoises every reference walked, so the
+    answer does not depend on which reference of a chain is asked first.
+    See: docs/commentary/asset_convert_terrain.md#object-lod-selection
+    """
+    chain = []
+    while fid not in state:
+        ref = by_fid.get(fid)
+        state[fid] = None
+        if ref is None:
+            break
+        if not ref['xesp']:
+            state[fid] = not ref['flags'] & FLAG_INITIALLY_DISABLED
+            break
+        chain.append(ref)
+        fid = ref['xesp'][0]
+    on = state[fid]
+    for ref in reversed(chain):
+        if on is not None:
+            on = on != ref['xesp'][1]
+        state[ref['form_id']] = on
+    return on
+
+
+def _refs_on_at_game_start(refs, stats, scope) -> list:
+    """`refs` without the references the records leave OFF at game start.
+
+    Object LOD is static, so it lists one state, the new game's. A reference
+    whose state cannot be resolved stays listed. Prints how many LOD
+    candidates are left out and how many unresolved ones are kept.
+    See: docs/commentary/asset_convert_terrain.md#object-lod-selection
+    """
+    by_fid = {r['form_id']: r for r in refs}
+    state = {}
+    linked = [r for r in refs
+              if r['xesp'] or r['flags'] & FLAG_INITIALLY_DISABLED]
+    for ref in linked:
+        _initially_enabled(ref['form_id'], by_fid, state)
+    tally = Counter(state[r['form_id']] for r in linked
+                    if _lod_candidate(r, stats, scope))
+    print(f"  Object-LOD selection: {tally[False]} LOD-flagged reference(s) "
+          f"off at game start left out, {tally[None]} kept with an "
+          f"unresolved enable parent")
+    off = {fid for fid, on in state.items() if on is False}
+    return [r for r in refs if r['form_id'] not in off]
+
+
 def _resolve_base_entry(base_fid, stat, roots, skipped_unsafe):
     """The base half of a LODGen row, or None when this base is not listed.
 
@@ -913,13 +966,14 @@ def write_lodgen_input(esm_path: Path, output_dir: Path,
     scope = _Scope(cell_wrld, wrld_fid, keep_cells)
     roots = _BaseRoots(output_meshes_dir, owned_meshes, master_meshes,
                        replace_tiles)
+    on_refs = _refs_on_at_game_start(refs, stats, scope)
 
     _prescreen_meshes(_screenable_mesh_paths(
-                          refs, stats, cell_wrld, wrld_fid, keep_cells,
+                          on_refs, stats, cell_wrld, wrld_fid, keep_cells,
                           (output_meshes_dir, *master_meshes)),
                       output_meshes_dir, source_meshes=master_meshes)
 
-    lines, skipped_unsafe = _reference_lines(refs, stats, scope, roots)
+    lines, skipped_unsafe = _reference_lines(on_refs, stats, scope, roots)
     _warn_unsafe(skipped_unsafe)
 
     if not lines:

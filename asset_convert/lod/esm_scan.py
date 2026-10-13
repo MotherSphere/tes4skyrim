@@ -19,6 +19,9 @@ from tes5_import.base.tes5_reader import masters, walk, zstr
 #: Has Distant LOD -- SSELodGen bakes LOD for this object.
 FLAG_DISTANT_LOD = 0x00008000
 
+#: Initially Disabled -- the reference is off until something enables it.
+FLAG_INITIALLY_DISABLED = 0x00000800
+
 #: Placement values beyond this are junk, not geometry.
 _PLACEMENT_LIMIT = 1e9
 
@@ -135,12 +138,25 @@ def _read_base_object(rec) -> dict:
     }
 
 
+def _read_xesp(xesp: bytes, g):
+    """`(parent FormID, opposite)` of an XESP enable parent, else None.
+
+    The parent is normalized like every other id. `opposite` is flags bit 0,
+    "Set Enable State to Opposite of Parent"; no other bit is read.
+    See: docs/commentary/asset_convert_terrain.md#enable-parent-scan
+    """
+    if not xesp or len(xesp) < 8:
+        return None
+    parent, flags = struct.unpack_from('<II', xesp)
+    return g(parent), bool(flags & 1)
+
+
 def _read_ref(rec, fid: int, pw: int, pc: int, g) -> dict:
     """One placed reference, with every float clamped by `finite`.
 
     NAME points at the placed base object, which very often lives in a MASTER
     -- the most collision-prone field in the merge, and the one deciding which
-    mesh a distant object draws.
+    mesh a distant object draws. `xesp` is its enable parent (`_read_xesp`).
     """
     subs = rec.sub_map()
     name = subs.get(b'NAME')
@@ -157,6 +173,7 @@ def _read_ref(rec, fid: int, pw: int, pc: int, g) -> dict:
         'x': x, 'y': y, 'z': z, 'rx': rx, 'ry': ry, 'rz': rz,
         'scale': (finite(struct.unpack_from('<f', xscl)[0], 1.0)
                   if xscl and len(xscl) >= 4 else 1.0),
+        'xesp': _read_xesp(subs.get(b'XESP'), g),
     }
 
 
@@ -167,7 +184,7 @@ def parse_esm(esm_path: Path):
     cells:       {fid: {parent_wrld, grid_x, grid_y}}
     stats:       {fid: {edid, sig, flags, model, obnd, lod4, lod8, lod16}}
     refs:        [{form_id, flags, base_fid, parent_wrld, parent_cell,
-                   x, y, z, rx, ry, rz, scale}]
+                   x, y, z, rx, ry, rz, scale, xesp}]
 
     Every FormID is normalized into the global index space.
     """
