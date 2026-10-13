@@ -963,6 +963,8 @@ class TestQUST:
         assert quest_name({**named, 'name': ''}) == 'Report to Caius Cosades'
         assert (quest_name({'id': 'TR_m7_Shin_NasarKill', 'name': ''})
                 == 'Enemy of the Nasar')
+        assert (quest_name({'id': 'A_I_TAVERNE', 'name': ''})
+                == 'The Fur Seal Tavern')
         assert quest_name({'id': 'NoSuch_Journal', 'name': ''}) == 'NoSuch_Journal'
 
     def test_uesp_quest_id_field_spellings(self):

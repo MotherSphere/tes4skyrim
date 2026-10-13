@@ -2828,7 +2828,11 @@ Morrowind Mod, Tamriel Rebuilt and Project Tamriel namespaces. An id a page
 lists FIRST beats the same id in another page's `also` list.
 
 The authored file covers only what UESP misses and a player would see -- it
-is hand-written and has no generator.
+is hand-written and has no generator. Arktwend (English) is the extreme case:
+it kept its German journal ids and authors QSTN names for only 31 of its 123
+journals, so 89 journals with pages showed raw ids like `A_I_TAVERNE`. Their
+names live in the authored file, taken from a title the first page carries
+where it has one ("The Patriarch Inn"), else composed from the pages.
 
 ### <a id="game-calls"></a>Natives, found at their registrations
 
