@@ -14,6 +14,7 @@ import re
 from script_convert.command_rows import KNOWN_COMMANDS
 from script_convert.constants import record_type_to_papyrus, safe_property_name
 from script_convert.cross_ref import CrossRefGraph
+from script_convert.resolve_name import script_type_binds
 
 #: PlayerRef 0x14 and the player base NPC_ 0x07: both are the `player` keyword, never a bound property.
 _PLAYER_FORMIDS = frozenset({'00000014', '00000007'})
@@ -122,9 +123,11 @@ def add_scro_ref(conv, fid: str, xref: CrossRefGraph) -> None:
     """Add a single SCRO FormID as a property ref on the converter.
 
     A QUST stays the generic `Quest` (the body promotes it on dot access);
-    other records take their attached script's type.  A property already
-    typed more specifically than `Quest`, or typed `ActorBase`, is kept.
+    other records take their attached script's type where that class can
+    bind the record.  A property already typed more specifically than
+    `Quest`, or typed `ActorBase`, is kept.
     See: docs/commentary/script_convert.md#property-type-merge
+    See: docs/commentary/script_convert.md#script-type-property-binding
     """
     if fid in _PLAYER_FORMIDS:
         return
@@ -134,7 +137,9 @@ def add_scro_ref(conv, fid: str, xref: CrossRefGraph) -> None:
     rtype = xref.record_type.get(fid, '')
     ptype = record_type_to_papyrus(rtype)
     if rtype != 'QUST':
-        ptype = xref.get_record_script_type(edid) or ptype
+        script_type = xref.get_record_script_type(edid)
+        if script_type and script_type_binds(xref, ptype, fid):
+            ptype = script_type
     key = safe_property_name(edid)
     cur = conv.sc.property_refs.get(key, '')
     if cur == 'ActorBase' or (cur and cur != 'Quest' and ptype == 'Quest'):
