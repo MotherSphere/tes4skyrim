@@ -157,6 +157,7 @@ def _empty_batch_stats(total):
 def _collect_nifs(mesh_path, subdir_filter, fixtures=()):
     """(files to convert, how many the filters dropped).
 
+    A mesh counts whatever the case of its `.nif` extension.
     Each `subdir_filter` entry is a path prefix under the mesh root: a root
     folder (`clutter`), a nested one (`tr/l`) or a single mesh.  A SKIP_PATHS
     mesh still converts when a placed-fixture record names it (`fixtures`,
@@ -167,7 +168,7 @@ def _collect_nifs(mesh_path, subdir_filter, fixtures=()):
                 for s in subdir_filter]
                if subdir_filter is not None else None)
     keep, skipped = [], 0
-    for nf in mesh_path.rglob('*.nif'):
+    for nf in mesh_path.rglob('*.nif', case_sensitive=False):
         parts = tuple(p.lower() for p in nf.relative_to(mesh_path).parts)
         if (any(seg in parts for seg in SKIP_PATHS)
                 and '/'.join(parts) not in fixtures):

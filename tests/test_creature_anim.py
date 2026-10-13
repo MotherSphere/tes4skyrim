@@ -280,6 +280,29 @@ class TestPerPluginProjectNamespace:
             assert obl[key] != fnv[key], key
         assert fnv['project_txt'] == 'falloutnvoblivion_scampproject.txt'
 
+    def test_project_files_are_named_by_the_layouts_last_segment(
+            self, tmp_path, monkeypatch):
+        """The layout's backslash paths contribute a file name, not folders."""
+        import types
+        from asset_convert.game_paths import set_namespace
+        from asset_convert.havok import hkx_behavior
+        set_namespace('tes4')
+        written = []
+        monkeypatch.setattr(hkx_behavior, '_write_and_compile',
+                            lambda xml, path: written.append(path))
+        for build in ('build_behavior_xml', 'build_character_xml',
+                      'build_project_xml'):
+            monkeypatch.setattr(hkx_behavior, build, lambda *a, **k: '')
+        clip_set = types.SimpleNamespace(clips={}, clip_meta=[],
+                                         cast_release_offset=None)
+        hkx_behavior._write_project_files(
+            hkx_behavior.project_layout('rat', 'oblivion'), str(tmp_path),
+            clip_set, [], {}, None, [], [])
+        assert written[1:] == [
+            os.path.join(str(tmp_path), 'characters',
+                         'tes4oblivion_ratcharacter.hkx'),
+            os.path.join(str(tmp_path), 'tes4oblivion_ratproject.hkx')]
+
     def test_namespace_is_the_plugin_stem(self):
         from asset_convert.havok.creature_pipeline import plugin_namespace
         assert plugin_namespace('Oblivion.esm') == 'oblivion'
