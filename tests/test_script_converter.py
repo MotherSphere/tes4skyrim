@@ -2515,6 +2515,111 @@ End
         assert 'RegisterForSleep' not in result
 
 
+class TestOwnerIsABase:
+    """SetOwnership and IsOwner name an actor BASE, a placed actor or a faction."""
+
+    @staticmethod
+    def _conv(edid, sig):
+        """A converter whose graph holds one record, `edid`, of type `sig`."""
+        x = CrossRefGraph()
+        x.edid_to_formid[edid.lower()] = '01001234'
+        x.formid_to_edid['01001234'] = edid
+        x.record_type['01001234'] = sig
+        return ScriptConverter(x)
+
+    @pytest.mark.parametrize('sig', ['NPC_', 'CREA'])
+    def test_a_base_owner_is_passed_as_it_is(self, sig):
+        """DLCFrostcrag's quest says `SetOwnership Aurelinwae`, an NPC_ base."""
+        conv = self._conv('Aurelinwae', sig)
+        out = conv_line(conv, 'AddonsRef.SetOwnership Aurelinwae', 'Quest')
+        assert out.strip() == 'AddonsRef.SetActorOwner(Aurelinwae)'
+        assert conv.sc.property_refs['Aurelinwae'] == 'ActorBase'
+
+    def test_a_placed_actor_owner_is_read_for_its_base(self):
+        """A reference is not the owner Skyrim wants; its base is."""
+        conv = self._conv('AurelinwaeRef', 'ACHR')
+        out = conv_line(conv, 'AddonsRef.SetOwnership AurelinwaeRef', 'Quest')
+        assert out.strip() == 'AddonsRef.SetActorOwner(AurelinwaeRef.GetActorBase())'
+        assert conv.sc.property_refs.get('AurelinwaeRef') != 'ActorBase'
+
+    def test_is_owner_compares_a_base_as_it_is(self):
+        """The read side is split the same way as the write side."""
+        conv = self._conv('Aurelinwae', 'NPC_')
+        out = conv_expr(conv, 'AddonsRef.IsOwner Aurelinwae', 'Quest')
+        assert out == '(AddonsRef.GetActorOwner() == Aurelinwae)'
+        assert conv.sc.property_refs['Aurelinwae'] == 'ActorBase'
+
+    def test_is_owner_reads_a_placed_actor_for_its_base(self):
+        """Unchanged: a reference is compared through its base."""
+        conv = self._conv('AurelinwaeRef', 'ACHR')
+        out = conv_expr(conv, 'AddonsRef.IsOwner AurelinwaeRef', 'Quest')
+        assert out == '(AddonsRef.GetActorOwner() == AurelinwaeRef.GetActorBase())'
+
+    def test_a_faction_owner_is_untouched(self):
+        """A faction never reaches the base test."""
+        conv = self._conv('ThievesGuild', 'FACT')
+        out = conv_line(conv, 'AddonsRef.SetOwnership ThievesGuild', 'Quest')
+        assert out.strip() == 'AddonsRef.SetFactionOwner(ThievesGuild)'
+        assert conv.sc.property_refs.get('ThievesGuild') != 'ActorBase'
+
+    @pytest.mark.parametrize('operand', ['aurelinwae', '"Aurelinwae"'])
+    def test_the_type_goes_to_the_property_however_the_owner_is_spelled(self, operand):
+        """Scripts spell an EditorID in any case, and some quote it."""
+        conv = self._conv('Aurelinwae', 'NPC_')
+        out = conv_line(conv, f'AddonsRef.SetOwnership {operand}', 'Quest')
+        assert out.strip() == 'AddonsRef.SetActorOwner(Aurelinwae)'
+        assert conv.sc.property_refs.get('Aurelinwae') == 'ActorBase'
+
+    def test_the_record_is_found_by_the_name_the_script_wrote(self):
+        """A property cannot start with a digit, so its name is not the EditorID."""
+        conv = self._conv('1stOwner', 'NPC_')
+        out = conv_line(conv, 'AddonsRef.SetOwnership 1stOwner', 'Quest')
+        assert out.strip() == 'AddonsRef.SetActorOwner(d1stOwner)'
+        assert conv.sc.property_refs.get('d1stOwner') == 'ActorBase'
+
+    @pytest.mark.parametrize('operand', ['player', 'Player', 'PlayerRef'])
+    def test_the_player_is_never_retyped(self, operand):
+        """`Player` is an NPC_ record, and every other command passes that name as a reference."""
+        conv = self._conv('Player', 'NPC_')
+        out = conv.convert_standalone(
+            'T', f'scn T\n\nbegin onactivate\n\tsetownership {operand}\n\tmoveto player\nend\n',
+            'ObjectReference', 'T')
+        assert 'ActorBase Property' not in out
+        assert 'SetActorOwner(Player)' not in out and 'SetActorOwner(PlayerRef)' not in out
+
+    def test_an_unresolved_owner_keeps_the_old_read(self):
+        """A local `ref`, or a name no record carries, is read as a reference."""
+        conv = self._conv('Aurelinwae', 'NPC_')
+        out = conv_line(conv, 'AddonsRef.SetOwnership myOwner', 'Quest')
+        assert out.strip() == 'AddonsRef.SetActorOwner(myOwner.GetActorBase())'
+        assert 'ActorBase' not in conv.sc.property_refs.values()
+
+    def test_a_record_that_is_no_actor_keeps_the_old_read(self):
+        """Only NPC_ and CREA are actor bases."""
+        conv = self._conv('SomeDoor', 'DOOR')
+        out = conv_line(conv, 'AddonsRef.SetOwnership SomeDoor', 'Quest')
+        assert out.strip() == 'AddonsRef.SetActorOwner(SomeDoor.GetActorBase())'
+        assert conv.sc.property_refs.get('SomeDoor') != 'ActorBase'
+
+    def test_is_owner_compares_a_faction_as_before(self):
+        """The only form the game files use (15 in Oblivion.esm)."""
+        conv = self._conv('ThievesGuild', 'FACT')
+        out = conv_expr(conv, 'AddonsRef.IsOwner ThievesGuild', 'Quest')
+        assert out == '(AddonsRef.GetFactionOwner() == ThievesGuild)'
+        assert conv.sc.property_refs.get('ThievesGuild') != 'ActorBase'
+
+    @pytest.mark.parametrize('body', ['setessential Aurelinwae 0\n\tsetownership Aurelinwae',
+                                      'setownership Aurelinwae\n\tsetessential Aurelinwae 0'])
+    def test_an_owner_that_is_also_set_essential_is_one_actorbase(self, body):
+        """SetEssential types the name `ActorBase`; reading its base then did not compile."""
+        conv = self._conv('Aurelinwae', 'NPC_')
+        out = conv.convert_standalone('T', f'scn T\n\nbegin onactivate\n\t{body}\nend\n',
+                                      'ObjectReference', 'T')
+        assert 'ActorBase Property Aurelinwae Auto' in out
+        assert 'SetActorOwner(Aurelinwae)' in out and 'Aurelinwae.SetEssential(false)' in out
+        assert 'Aurelinwae.GetActorBase()' not in out
+
+
 class TestInfoFragmentVmadLayout:
     """Every INFO VMAD declares BOTH fragments: Fragment_1 (OnBegin) and
     Fragment_0 (OnEnd) -- the line hooks TES4Polyfill.SayLine relies on.
