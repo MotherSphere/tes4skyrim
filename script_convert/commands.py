@@ -21,7 +21,7 @@ from script_convert.constants import (
     ANIM_GROUP_EVENTS, ATTRIBUTE_STUB_VALUE, AV_ARGUMENT_NAMES, CASTABLE, CONV_WALK_VAR,
     FORCE_FLEE_QUEST, FORCE_GREET_QUEST, PLACED_REF_SIGS, PRIMARY_STATS, TES4_ASSAULT_BOUNTY,
     SPLIT_SKILLS, TES4_MISC_STAT_NAMES, TES4_MURDER_BOUNTY,
-    TES4_STEAL_BOUNTY, is_generated_script_type, mgef_family_keyword_name,
+    TES4_STEAL_BOUNTY, is_generated_script_type,
     record_type_to_papyrus, safe_property_name, papyrus_script_name
 )
 from script_convert.command_rows import (
@@ -35,6 +35,7 @@ from script_convert.poll_motion import axis_key, rate_scale
 from script_convert.emit import expr as _expr
 from script_convert.constants import typed_already
 from script_convert.constants_falloutnv import FALLOUT_COMMAND_ALIASES, FALLOUT_UNMAPPED_ACTOR_VALUES
+from tes5_import.base.constants import mgef_family_keyword_name
 from tes5_import.dialogue.say_topics import PLAYER_TOKENS
 from tes5_import.actors.confidence import (
     FACTION_EDID as CONFIDENCE_FACTION, FLEE_SPELL_EDID as CONFIDENCE_FLEE_SPELL,

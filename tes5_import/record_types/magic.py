@@ -26,12 +26,12 @@ TES5 record order: EDID VMAD FULL MDOB KSIZ/KWDA DATA ESCE* SNDD DNAM CTDA
 
 import struct
 
-from script_convert.constants import mgef_family_keyword_name
 from tes4_export.record_types.morrowind import MW_ENCHANT_SKILL
 
 from . import magic_art, magic_art_morrowind
 from .common import pack_keywords
 from ..generated.vanilla_mgef_data import VANILLA_MGEF_DATA
+from ..base.constants import mgef_family_keyword_name
 from ..base.conditions import (FUNC_HAS_KEYWORD, FUNC_HAS_MAGIC_EFFECT_KEYWORD,
                                build_ctda)
 from ..base.owned_records import MGEF_FAMILY_KEYWORDS, WELL_KNOWN_PROPERTIES

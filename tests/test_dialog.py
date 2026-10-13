@@ -397,6 +397,17 @@ class TestCTDAConversion:
         player = convert_ctda(_tes4_ctda(type_byte=0x62, comp=0x41F00000, func=14, p1=0), offset=1)
         assert (player[0], struct.unpack_from('<HxxI', player, 8)) == (0x60, (74, 0x01000A01))
 
+    def test_get_vampire_tests_the_vampirism_effect(self, monkeypatch):
+        """GetVampire becomes HasMagicEffectKeyword on VAMP's family; with no family it drops."""
+        from tes5_import.base import owned_records
+        from tes5_import.base.constants import mgef_family_keyword_name
+        ctda = _tes4_ctda(type_byte=0x02, func=40)
+        assert convert_ctda(ctda, offset=1) is None
+        monkeypatch.setitem(owned_records.WELL_KNOWN_PROPERTIES,
+                            mgef_family_keyword_name('VAMP'), 0x01000B01)
+        out = convert_ctda(ctda, offset=1)
+        assert struct.unpack_from('<HxxIxxxxI', out, 8) == (699, 0x01000B01, 1)
+
     def test_quest_stage_param2_not_remapped(self):
         """59 GetStageDone(ptQuest, ptQuestStage): p1 is a FormID, p2 is the
         stage NUMBER and must stay a small integer."""

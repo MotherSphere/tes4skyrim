@@ -523,6 +523,9 @@ def gather_navm_jobs(by_type: dict, door_fids: set = None,
     See: docs/commentary/tes5_import_navmesh.md#pool-orchestration
     """
     cells = by_type.get('CELL', [])
+    if not by_type.get('PGRD'):
+        _gather_exteriors([], by_type, cells, ({}, lambda _square: None, {}, {}), {})
+        return []
     refr_by_cell = _by_parent_cell(_merged(by_type, master_export, 'REFR'))
     pgrd_by_cell = _by_parent_cell(by_type.get('PGRD', []))
     indexes = (refr_by_cell, navmesh_land_at(by_type, master_export),
