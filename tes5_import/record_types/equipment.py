@@ -27,8 +27,8 @@ from ..base.equivalents import (
     WEAPON_ANIM_MULT,
     WEAPON_ANIM_NAM8,
     WEAPON_ANIM_NAM9,
-    WEAPON_ANIM_STAGGER,
     WEAPON_ANIM_VNAM,
+    weapon_skill_stagger,
 )
 from .magic_variants import (DELIVERY_CONTACT, MGEF_CAST_FOR_OWNER, RANGE_DELIVERY,
                              UNCASTABLE_SPELL_TYPES, ability_variant,
@@ -480,7 +480,9 @@ def convert_WEAP(rec: dict, writer=None) -> bytes:
     struct.pack_into('<I', dnam, 12, WEAPON_ANIM_FLAGS.get(anim_type, 0))
     struct.pack_into('<B', dnam, 26, max(1, get_int(rec, 'DNAM.ProjectileCount', 1)))
     struct.pack_into('<f', dnam, 44, speed)
-    struct.pack_into('<B', dnam, 76, WEAPON_ANIM_STAGGER.get(anim_type, 0)) # Stagger
+    skill, stagger = weapon_skill_stagger(anim_type)
+    struct.pack_into('<i', dnam, 76, skill)
+    struct.pack_into('<f', dnam, 96, stagger)
     subs += pack_subrecord('DNAM', bytes(dnam))
 
     # CRDT — Critical data (24 bytes for SSE, form version 44)
