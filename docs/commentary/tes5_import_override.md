@@ -836,7 +836,12 @@ in the master parent's children group:
   ([origin faction](tes5_import_actors.md#origin-faction)). Without it,
   Morroblivion's "I would gladly let you invest in my shop!" under an
   Oblivion.esm topic, gated only on Oblivion classes, played on Oblivion's
-  merchants.
+  merchants. Under the master's Barter or Training topic it also takes that
+  topic's service gate (the merchant or trainer marker faction, plus
+  GetOffersServicesNow) and opens the menu, exactly as the topic's own replies
+  do; without it the reply offered barter on any NPC. A plugin with no merchants
+  or trainers of its own adopts its master's marker for this, and a reply with
+  no marker anywhere to gate on is left out.
 
 ROAD remains genuinely unmappable: it converts to nothing at all.
 

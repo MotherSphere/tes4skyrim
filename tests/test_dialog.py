@@ -1832,6 +1832,56 @@ class TestOriginGate:
                 + struct.pack('<H', func) + bytes(2)
                 + struct.pack('<I', param1) + bytes(4)).hex()
 
+    @pytest.mark.parametrize('own_actor', [False, True])
+    def test_an_actorless_addon_gates_on_its_masters_audience(self, own_actor):
+        """A dialogue-only add-on's own faction has no members to speak its lines."""
+        from tes5_import.base.writer import PluginWriter
+        from tes5_import.record_types.actor_common import (
+            create_origin_faction, origin_gate, reset_origin_faction)
+
+        class MasterIndex:
+            def find_all_by_edid(self, sig, edid):
+                return [0x02000010]
+
+        set_formid_index_offset(2)
+        try:
+            reset_origin_faction(MasterIndex())
+            writer = PluginWriter(masters=['Skyrim.esm', 'Oblivion.esm', 'Master.esm'])
+            by_type = {'NPC_': [{'FormID': '01000042' if own_actor else '00000042'}]}
+            own = create_origin_faction(writer, False, by_type)
+            gate = origin_gate({'FormID': '01000200'})
+            expected = own if own_actor else 0x02000010
+            assert struct.pack('<I', expected) in gate
+            assert struct.pack('<I', 0x02000010 if own_actor else own) not in gate
+        finally:
+            set_formid_index_offset(0)
+            reset_origin_faction()
+
+    @pytest.mark.parametrize('master_marker', [0x01000777, 0])
+    def test_a_reply_under_the_masters_barter_topic_is_service_gated(self, master_marker):
+        """Without the gate a dependent's barter reply opened barter on any NPC."""
+        from types import SimpleNamespace
+        from tes5_import.base.writer import PluginWriter
+        from tes5_import.dialogue.converter import DIAL_TYPE_SERVICE
+        from tes5_import.overrides.nested import _nested_info
+        from tes5_import.record_types.actor_common import create_vendor_factions
+
+        class MasterIndex:
+            def find_by_edid(self, sig, edid):
+                return master_marker if edid == 'TES4MerchantFaction' else 0
+
+        create_vendor_factions({}, PluginWriter(masters=['Skyrim.esm']), MasterIndex())
+        ctx = SimpleNamespace(master_export={'0000010F': {
+            'FormID': '0000010F', 'DATA.Type': str(DIAL_TYPE_SERVICE)}})
+        rec = {'FormID': '01000200', 'ParentDIAL': '0000010F', 'DATA.Flags': '0',
+               'ResponseCount': '1', 'Response[0].ResponseNumber': '1',
+               'Response[0].ResponseText': 'Have a look.'}
+        info = _nested_info(rec, ctx)
+        if master_marker:
+            assert struct.pack('<I', master_marker) in info
+        else:
+            assert info == b''
+
     def test_run_on_target_pin_does_not_scope_the_speaker(self):
         """A Target-side test is about the LISTENER, not who is talking.
 

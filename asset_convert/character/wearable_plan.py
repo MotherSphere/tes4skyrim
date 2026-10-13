@@ -278,6 +278,15 @@ def _inherit(plan: dict, inherited: dict) -> None:
             plan[k] = v
 
 
+def merge_sibling(plan: dict, sibling: dict) -> None:
+    """Add a plan sharing `plan`'s mesh tree: variant bits OR, nested maps merge."""
+    for k, v in sibling.items():
+        if k in _NESTED_KEYS:
+            plan.setdefault(k, {}).update(v)
+        else:
+            plan[k] = plan.get(k, 0) | v
+
+
 def build_plan(export_dir, _seen=None) -> dict:
     """Map mesh-relative NIF path -> bitmask of the variants the plugin uses.
 

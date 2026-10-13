@@ -593,7 +593,12 @@ race every plugin shares, so Nehrim NPCs passed them. Race was Oblivion's
 plugin boundary only because Oblivion was the only file loaded.
 
 EVERY converted plugin creates its own, root or dependent, and gates its own
-new lines on it. A plugin's actors join its own and every converted master's
+new lines on it -- unless it defines no actor of its own (a dialogue-only
+add-on, or one that only overrides its masters' actors). Then nobody can join
+its faction, so its lines gate on the factions of the masters its header lists
+instead, the only speakers its author could have meant. Measured on every
+dependent exported here, none is such an add-on, so no current build changes.
+A plugin's actors join its own and every converted master's
 (`origin_memberships`, found by EditorID through
 `ChainedMasterIndex.find_all_by_edid`), so dialogue flows DOWN the master chain
 and never up or across: Oblivion's generic lines reach Morroblivion's actors,
