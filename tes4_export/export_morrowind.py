@@ -25,7 +25,7 @@ from .morroblivion import (MORROBLIVION_PREFIX, MorroblivionModels,
                            remap_vanilla_models)
 from .morrowind_patch import PATCH_NAME, blacklisted_bases
 from .morroblivion_origin import OriginShifts
-from .morrowind_armor import load_body_models
+from .morrowind_armor import add_body_models, master_records
 from .morrowind_cell import (FLAG_HAS_WATER, FLAG_INTERIOR,
                              FLAG_QUASI_EXTERIOR, parse_cell)
 from .morrowind_ids import (IdIndex, encode_editor_id, exterior_key,
@@ -48,6 +48,7 @@ from .record_types.morrowind import (MORROWIND_ITEM_EXPORTERS, emit_ref,
                                      filled_soulgem_id, filled_soulgems,
                                      tes4_signature)
 from .record_types.morrowind_actors import (MORROWIND_ACTOR_EXPORTERS,
+                                            RACE_FORMIDS, RaceTable,
                                             register_sound_gens)
 from .record_types.morrowind_packages import (package_records,
                                               prune_dropped_packages)
@@ -128,7 +129,6 @@ class MorrowindContext:
         self.index = index if index is not None else IdIndex()
         self.own_index = own_index
         self.master_bounds = None
-        self.body_models = {}
         self.morroblivion = None
         self.origin_shifts = None
         self.derived = {}
@@ -147,10 +147,6 @@ class MorrowindContext:
         self._master_weat = None
         self.pending_teleports = []
         self.doors_by_cell = {}
-        self.pending_packages = []
-        self.dropped_packages = set()
-        self.placements = {}
-        self.sound_gens = {}
         self.gap_ids = {}
         self.unlinked_doors = 0
         self.vtex_by_cell = {}
@@ -159,6 +155,16 @@ class MorrowindContext:
         self.game_settings = {}
         self._init_terrain()
         self._init_barks()
+        self._init_actors()
+
+    def _init_actors(self) -> None:
+        """The actor tables: body-part meshes, races, sound generators, packages, placements."""
+        self.body_models = {}
+        self.race_formids = dict(RACE_FORMIDS)
+        self.sound_gens = {}
+        self.pending_packages = []
+        self.dropped_packages = set()
+        self.placements = {}
 
     def _init_terrain(self) -> None:
         """Where this plugin sits among the converted exports, and its land textures."""
@@ -593,7 +599,7 @@ def export_plugin(source_path: str, export_dir: str, masters=()) -> dict:
     plugin = os.path.basename(source_path)
     header, records = read_file(source_path)
     ctx = _plugin_context(export_dir, masters, records, plugin)
-    ctx.body_models = load_body_models(source_path, records, export_dir)
+    _load_part_tables(ctx, source_path, records, export_dir)
     own_meshes = assets_for(record_dir(export_dir, plugin)) / 'meshes'
     ctx.morroblivion = MorroblivionModels(
         export_dir, masters, source_path, own_meshes)
@@ -617,6 +623,18 @@ def export_plugin(source_path: str, export_dir: str, masters=()) -> dict:
     return {'plugin': plugin, 'output': out_dir, 'counts': counts,
             'dropped': sum(ctx.unresolved.values()),
             'unlinked_doors': ctx.unlinked_doors}
+
+
+def _load_part_tables(ctx: MorrowindContext, source_path: str, records, export_dir: str) -> None:
+    """Fill ctx.body_models and ctx.race_formids from every declared master, then `records`.
+
+    See: docs/commentary/tes4_export_morrowind.md#custom-races
+    """
+    races = RaceTable()
+    for recs in (*master_records(source_path, export_dir), records):
+        add_body_models(ctx.body_models, recs)
+        races.add(recs)
+    ctx.race_formids = races.formids()
 
 
 def _plugin_context(export_dir: str, masters, records,

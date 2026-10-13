@@ -17,6 +17,7 @@ from ..actors.confidence import flee_memberships, flee_spells
 from ..actors.stat_factions import stat_memberships
 from ..base.constants import TES5_SKILL_ORDER
 from ..actors.creature_races import TES5_HEALTH_LEVEL_BONUS
+from ..actors import npc_face_morrowind as morrowind_faces
 from ..actors.npc_face_mapper import build_face_tail_subs, build_pnam_subs
 from ..actors.outfits import split_inventory
 from ..packages.actor_wiring import (CSTY_DEFAULT, DPLT_NPC_LIST, authored_packages,
@@ -240,22 +241,32 @@ def _inventory_subs(carried: list, barter_gold: int) -> bytes:
     return subs
 
 
-def _appearance_subs(rec: dict, race_edid: str, gender: str, writer) -> bytes:
+def _hair_color_fid(rec: dict, writer) -> int:
+    """HCLF: a Morrowind hair texture's nearest vanilla color, else the authored HCLR's CLFM."""
+    mw_rgb = morrowind_faces.hair_color(rec)
+    if mw_rgb:
+        return map_hair_color(*mw_rgb)
+    rgb = (get_int(rec, 'HCLR.R', 100), get_int(rec, 'HCLR.G', 80),
+           get_int(rec, 'HCLR.B', 60))
+    return hair_color_formid(writer, *rgb) if writer is not None else map_hair_color(*rgb)
+
+
+def _appearance_subs(rec: dict, race_edid: str, gender: str, writer,
+                     skyrim_race: int) -> bytes:
     """Head parts, hair color, combat style and the four required NAM slots.
 
     ZNAM is the converted combat style; a source whose styles are not
     converted keeps the vanilla default for an authored one. NAM6/NAM7 are
-    neutral 1.0 so the race's own scale applies.
+    neutral 1.0 so the race's own scale applies, except a Morrowind NPC's
+    weight, which takes its race's vanilla weight.
 
     See: docs/commentary/tes5_import_actors.md#required-nam-subrecords
     """
+    female = gender == 'Female'
     subs = build_pnam_subs(rec, race_edid, gender, writer)
-
-    rgb = (get_int(rec, 'HCLR.R', 100), get_int(rec, 'HCLR.G', 80),
-           get_int(rec, 'HCLR.B', 60))
-    hclf = (hair_color_formid(writer, *rgb) if writer is not None
-            else map_hair_color(*rgb))
-    subs += pack_formid_subrecord('HCLF', hclf)
+    if morrowind_faces.is_morrowind_face(rec):
+        subs += morrowind_faces.head_part_subs(rec, skyrim_race, female)
+    subs += pack_formid_subrecord('HCLF', _hair_color_fid(rec, writer))
 
     style = actor_combat_style(rec) or (CSTY_DEFAULT if get_formid(rec, 'ZNAM.CombatStyle') else 0)
     if style:
@@ -263,7 +274,9 @@ def _appearance_subs(rec: dict, race_edid: str, gender: str, writer) -> bytes:
 
     subs += pack_subrecord('NAM5', NAM5_UNKNOWN)
     subs += pack_subrecord('NAM6', struct.pack('<f', 1.0))
-    subs += pack_subrecord('NAM7', struct.pack('<f', 1.0))
+    weight = (morrowind_faces.weight(rec, skyrim_race, female)
+              if morrowind_faces.is_morrowind_face(rec) else None)
+    subs += pack_subrecord('NAM7', struct.pack('<f', 1.0 if weight is None else weight))
     subs += pack_uint32_subrecord('NAM8', SOUND_LEVEL_NORMAL)
     return subs
 
@@ -308,6 +321,16 @@ def _identity_subs(rec: dict, skyrim_race: int, gender: str, carried: list,
     return subs
 
 
+def _face_tail(rec: dict, race_edid: str, gender: str, skyrim_race: int) -> bytes:
+    """FTST..TIAS, with a Morrowind NPC's measured sliders and head-texture skin."""
+    if not morrowind_faces.is_morrowind_face(rec):
+        return build_face_tail_subs(rec, race_edid, gender)
+    return build_face_tail_subs(
+        rec, race_edid, gender,
+        morrowind_faces.face_morphs(rec, skyrim_race, gender == 'Female'),
+        morrowind_faces.skin_color(rec))
+
+
 def convert_NPC_(rec: dict, writer=None) -> bytes:
     """NPC_ → NPC_ with TES5 restructuring.
 
@@ -345,7 +368,7 @@ def convert_NPC_(rec: dict, writer=None) -> bytes:
     subs += _identity_subs(rec, skyrim_race, gender, carried,
                            vendor_fid, trainer_clas_fid)
 
-    subs += _appearance_subs(rec, race_edid, gender, writer)
+    subs += _appearance_subs(rec, race_edid, gender, writer, skyrim_race)
 
     if writer is not None and outfit_fids:
         subs += pack_formid_subrecord(
@@ -357,7 +380,7 @@ def convert_NPC_(rec: dict, writer=None) -> bytes:
     crime = _crime_faction_of(rec)
     if crime:
         subs += pack_formid_subrecord('CRIF', crime)
-    subs += build_face_tail_subs(rec, race_edid, gender)
+    subs += _face_tail(rec, race_edid, gender, skyrim_race)
 
     return pack_record('NPC_', get_formid(rec, 'FormID'), get_int(rec, 'RecordFlags'), subs)
 

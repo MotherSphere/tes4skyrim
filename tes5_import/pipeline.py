@@ -54,6 +54,7 @@ from .actors.combat_approach import create_combat_approach
 from .actors.combat_style import create_combat_styles
 from .actors.confidence import create_confidence_records
 from .actors.misc_stats import create_misc_stat_globals
+from .actors import npc_face_morrowind
 from .actors.stat_factions import create_stat_factions
 from script_convert.constants import FORCE_FLEE_QUEST, FORCE_GREET_QUEST
 from .packages.force_flee import write_force_flee_quest
@@ -973,6 +974,24 @@ def _prescan_outfits_hair_skin(by_type: dict, ctx, export_dir: str, writer):
               f"from authored textures")
     except Exception as _skin_exc:
         print(f"  WARNING: race skin tone index unavailable: {_skin_exc}")
+    _measure_morrowind_heads(by_type, ctx, export_dir)
+
+
+def _measure_morrowind_heads(by_type: dict, ctx, export_dir: str) -> None:
+    """Measure the head and hair parts this plugin's Morrowind NPCs wear.
+
+    See: docs/commentary/tes5_import_actors.md#morrowind-faces
+    """
+    npcs = [r for r in by_type.get('NPC_', []) if npc_face_morrowind.is_morrowind_face(r)]
+    if not npcs:
+        return
+    dirs = [getattr(ctx, 'export_dir', None) or export_dir]
+    if ctx:
+        dirs.extend(master_export_dirs(ctx))
+    started = time.time()
+    n = npc_face_morrowind.load(npcs, dirs)
+    print(f"  Morrowind faces: {n} head and hair parts measured for {len(npcs)} NPCs "
+          f"in {time.time() - started:.1f}s")
 
 
 def _apply_dobj_battle_override(battle, writer) -> None:

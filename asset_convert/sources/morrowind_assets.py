@@ -44,6 +44,15 @@ def _archive_index(data_dir: str) -> dict:
     return index
 
 
+def _cache_entry(cached: Path, entry) -> Path:
+    """Extract an archive `entry` to `cached` atomically, so a concurrent reader never sees half a file."""
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cached.with_name(f'{cached.name}.{os.getpid()}.tmp')
+    tmp.write_bytes(read_entry(*entry))
+    os.replace(tmp, cached)
+    return cached
+
+
 def _normalize(rel: str) -> str:
     """A mesh path in archive form: lower case, backslashes, no doubling."""
     rel = rel.replace(chr(92) * 2, chr(92)).replace('/', chr(92))
@@ -63,11 +72,7 @@ def find_vanilla_mesh(export_root, rel: str):
     if cached.is_file():
         return cached
     entry = _archive_index(data_dir).get(_MESHES + chr(92) + rel)
-    if entry is None:
-        return None
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    cached.write_bytes(read_entry(*entry))
-    return cached
+    return None if entry is None else _cache_entry(cached, entry)
 
 
 def find_archived_mesh(export_root, rel: str):
@@ -88,11 +93,7 @@ def find_archived_mesh(export_root, rel: str):
     if cached.is_file():
         return cached
     entry = _archive_index(data_dir).get(_MESHES + chr(92) + rel)
-    if entry is None:
-        return None
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    cached.write_bytes(read_entry(*entry))
-    return cached
+    return None if entry is None else _cache_entry(cached, entry)
 
 
 def resolve_mesh(roots, rel: str, export_root):
@@ -124,9 +125,7 @@ def find_archived_file(export_root, rel: str):
     if entry is None:
         loose = Path(data_dir) / rel
         return loose if loose.is_file() else None
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    cached.write_bytes(read_entry(*entry))
-    return cached
+    return _cache_entry(cached, entry)
 
 
 def source_meshes(source_path: str) -> frozenset:
