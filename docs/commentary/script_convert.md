@@ -6193,6 +6193,19 @@ build's leftovers once. A name two plugins both write is reported; the one
 converted last wins, as `Data\Scripts` would resolve it.
 (`script_convert/ownership.py`)
 
+<a id="departed-owners"></a>**A departed member's list is dropped.** A list
+outlives its plugin: after a patch was deleted from an imported mod folder its
+list kept protecting the scripts it once wrote, among them an old
+`TES4Polyfill`, whose two-argument `LineBegan` then broke thousands of fragment
+compiles against the master's new three-argument calls (issue #84). Before a
+plugin's scripts are cleared, every list in its folder whose owner is no longer
+a live member of the same registered mod is deleted, with the scripts only it
+claimed. A member is gone when it is unregistered, or when it was imported from
+a folder that is still on disk and no longer holds it
+(`source_registry.removed_from_folder`). An archive import or an unreachable
+folder keeps every member, because nothing then says the plugin was removed.
+A plugin from a game Data folder belongs to no registered mod and is never judged.
+
 A directory another process holds open (an Explorer window or a shell sitting
 in `scripts/source`) empties but cannot be removed: Windows refuses the final
 `rmdir` with WinError 32. The wipe keeps that empty directory rather than
