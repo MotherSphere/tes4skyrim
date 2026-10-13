@@ -17,13 +17,14 @@ grass and _far.nif code can share one implementation without importing a heavy
 sibling module for a three-line path helper.
 """
 import os
+import unicodedata
 from pathlib import Path
 
 from core.plugin_masters import master_dir, masters_from_export_header
 
 __all__ = ["win_join", "find_nocase", "folder_names", "DEFAULT_NAMESPACE",
            "namespace_for", "set_namespace", "current_namespace",
-           "owns_namespace"]
+           "owns_namespace", "ascii_path"]
 
 #: Namespace for Oblivion and everything mastered on it, and the fallback.
 DEFAULT_NAMESPACE = 'tes4'
@@ -102,16 +103,53 @@ def current_namespace() -> str:
     return _ACTIVE['ns']
 
 
+def ascii_path(path: str) -> str:
+    """`path` as the plain-ASCII name every converted asset ships under.
+
+    Accents drop to their base letter; any other non-ASCII character becomes
+    `_xx` (its code point in hex).
+    See: docs/commentary/asset_convert_texture.md#ascii-asset-paths
+    """
+    if path.isascii():
+        return path
+    out = []
+    for ch in unicodedata.normalize('NFKD', path):
+        if ch.isascii():
+            out.append(ch)
+        elif not unicodedata.combining(ch):
+            out.append(f'_{ord(ch):02x}')
+    return ''.join(out)
+
+
+def ascii_dest(root, rel) -> Path:
+    """Where output for `rel` is written under `root`: its `ascii_path`."""
+    return Path(root) / ascii_path(str(rel))
+
+
+def remove_non_ascii(root) -> int:
+    """Delete every non-ASCII-named file under `root`, an older build's spelling; the count."""
+    gone = 0
+    for folder, _dirs, files in os.walk(root):
+        for name in files:
+            if not name.isascii():
+                os.remove(os.path.join(folder, name))
+                gone += 1
+    return gone
+
+
 def win_join(root, rel: str) -> Path:
     """Join a backslash-form (game-format) relative path onto `root`.
 
     Accepts either separator in `rel` and treats both as path separators, which
     is what the game's own loaders do.  Empty segments (a leading separator, or
     a doubled one) are dropped, so `rel` can never escape `root` the way
-    `Path(root) / '\\abs.nif'` would.
+    `Path(root) / '\\abs.nif'` would.  A path that does not exist as spelled
+    resolves to its `ascii_path` form, the name converted output ships under.
     """
-    parts = _segments(rel)
-    return Path(root).joinpath(*parts)
+    exact = Path(root).joinpath(*_segments(rel))
+    if str(rel).isascii() or exact.exists():
+        return exact
+    return Path(root).joinpath(*_segments(ascii_path(str(rel))))
 
 
 def _segments(rel) -> list:

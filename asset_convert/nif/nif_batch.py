@@ -19,7 +19,7 @@ from pathlib import Path
 from asset_convert.collision.mesh_scan_fragments import set_fragment_dir
 from asset_convert.nif.fixture_plan import FIXTURE_KEY
 from asset_convert.nif.nif_converter import convert_nif
-from asset_convert.game_paths import current_namespace, set_namespace
+from asset_convert.game_paths import ascii_dest, current_namespace, set_namespace
 from asset_convert.nif.shaders import (default_normal_texture, SPEC_STRENGTH,
                                        master_texture_roots)
 from core.process_job import join_pool_job
@@ -378,7 +378,7 @@ def batch_convert(mesh_dir, output_dir, *, fix_textures=True,
         return stats
 
     work_args = [
-        (str(nif_file), str(out_base / nif_file.relative_to(mesh_path)),
+        (str(nif_file), str(ascii_dest(out_base, nif_file.relative_to(mesh_path))),
          fix_textures, remap_skeleton, str(mesh_path), wearable_plan,
          parallax, textures_only, tex_fallback)
         for nif_file in nif_files

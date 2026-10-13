@@ -20,7 +20,8 @@ import shutil
 from pathlib import Path
 
 from core.plugin_masters import masters_from_export_header
-from asset_convert.game_paths import (namespace_for, owns_namespace,
+from asset_convert.game_paths import (ascii_dest, namespace_for,
+                                       owns_namespace, remove_non_ascii,
                                        set_namespace)
 from asset_convert.sources import bsa_extract
 from asset_convert.nif import grass_profile
@@ -272,12 +273,20 @@ def convert_meshes(source_file, extract_dir='export', output_dir='output',
     print("=" * 60)
 
     _copy_and_fix_textures(asset_dir, plugin_dir, ns, stats, rec_dir)
+    _finish_output(rec_dir, plugin_dir, output_dir, ns, stats)
+    return stats
+
+
+def _finish_output(rec_dir, plugin_dir, output_dir, ns, stats):
+    """Write the missing LTEX normals, then drop files an older build named non-ASCII."""
     checked, written = landscape_normals.ensure_ltex_normals(
         rec_dir, plugin_dir / 'textures', output_dir)
     stats['ltex_normals_written'] = written
     print(f"  LTEX normals: {checked} land textures, {written} flat normals "
           f"written for textures shipping none")
-    return stats
+    stale = sum(remove_non_ascii(plugin_dir / sub / ns)
+                for sub in ('meshes', 'textures'))
+    print(f"  Non-ASCII names from an older build removed: {stale}")
 
 
 def _master_meshes(rec_dir, output_dir, extract_dir) -> list:
@@ -428,8 +437,7 @@ def _copy_tree(src, dst):
     for root, _dirs, files in os.walk(src):
         for fname in files:
             src_file = Path(root) / fname
-            rel = src_file.relative_to(src)
-            dst_file = dst / rel
+            dst_file = ascii_dest(dst, src_file.relative_to(src))
             os.makedirs(dst_file.parent, exist_ok=True)
             shutil.copy2(str(src_file), str(dst_file))
             count += 1

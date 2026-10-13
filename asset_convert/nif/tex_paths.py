@@ -3,7 +3,7 @@
 Both are pure string/slot readers with no NIF state, so they sit below every
 module that needs them.
 """
-from asset_convert.game_paths import current_namespace
+from asset_convert.game_paths import ascii_path, current_namespace
 
 
 def bs_pp_texture_slots(prop):
@@ -31,6 +31,20 @@ def bs_pp_texture_slots(prop):
 #: Source extensions that always ship as DDS, whatever the mesh calls them.
 IMAGE_EXTS = ('tga', 'bmp')
 
+#: Byte encoding of AUTHORED NIF path strings (Windows-1252, as plugins store text).
+PATH_ENCODING = 'cp1252'
+
+
+def path_text(raw) -> str:
+    """A NIF path string as text; bytes are read as Windows-1252."""
+    return raw.decode(PATH_ENCODING, errors='replace') \
+        if isinstance(raw, bytes) else str(raw)
+
+
+def path_bytes(text) -> bytes:
+    """A path as the bytes a NIF stores: its `ascii_path`, the name output ships under."""
+    return ascii_path(text).encode('ascii')
+
 
 def texture_rel_path(raw) -> str:
     """An authored texture path below `textures\\`, separators normalized FIRST.
@@ -39,9 +53,7 @@ def texture_rel_path(raw) -> str:
     is kept, 'lowres\\' included (`full_res_twin` decides its fallback).
     See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
     """
-    path = raw.decode('utf-8', errors='replace') \
-        if isinstance(raw, bytes) else str(raw)
-    path = path.replace('/', '\\')
+    path = path_text(raw).replace('/', '\\')
     if path.lower().startswith('data\\'):
         path = path[len('data\\'):]
     if path.lower().startswith('textures\\'):

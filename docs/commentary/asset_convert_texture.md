@@ -936,6 +936,39 @@ differing from it only by case; now it writes the 6 that ship none.
 - A placeholder an earlier build wrote beside a real normal is not removed: it
   sits at the record's own spelling, so the exact probe finds it first.
 
+## Converted asset paths are plain ASCII
+<a id="ascii-asset-paths"></a>
+
+**Code:** `ascii_path`, `ascii_dest`, `remove_non_ascii` in `asset_convert/game_paths.py`;
+`path_text` / `path_bytes` in `asset_convert/nif/tex_paths.py`
+
+Skyrim mis-resolves a non-ASCII mesh path. Measured live on Arktwend (SSE
+1.6.1170): ref `1B86EC16`'s base was `a_Marktuberhang04` with MODL
+`...\Markt\xfcberhang04.nif`, the Data folder held exactly our file (same inode
+and MD5 as `output/`, no BSA carrying it), and the system code page was 1252
+(the loose-file open is `CreateFileA`). Yet the loaded 3D was
+`Marktüberhang05.nif`'s tree (`Furn_overhang_09`, cloth texture set
+`TX_Viking_Tent_Cloth_02`), whose cloth names a texture Arktwend never shipped:
+purple. Renaming every shipped path to ASCII fixed it in game. Vanilla ships
+zero non-ASCII asset paths.
+
+- `ascii_path` drops accents to the base letter (`Marktüberhang04` →
+  `Marktuberhang04`) and writes any other non-ASCII character as `_xx`
+  (`ß` → `_df`). No folded name collides in Arktwend (33 meshes, 8 textures).
+- It is applied where an output name is MADE: mesh and texture file names
+  (`ascii_dest`), NIF texture strings (`path_bytes`), and record paths
+  (`prefix_path`). Source lookups keep the authored spelling, because `export/`
+  keeps it; `win_join` falls back to the folded name on a miss, and the
+  bounds/collision getters accept either key, so the navmesh files (and the
+  shared navmesh cache hash) are untouched.
+- Authored NIF strings are Windows-1252 (`path_text`). Reading them as UTF-8
+  turned `0xFC` into U+FFFD, which wrote `w\xef\xbf\xbdstea03rock.dds` into 16
+  Arktwend/Nehrim/LOD meshes — purple even before the fold existed.
+- A full mesh run deletes every non-ASCII file under `meshes/<ns>` and
+  `textures/<ns>` (`remove_non_ascii`): an older build's spelling of a file now
+  shipped under its folded name.
+- Not yet folded: music (`Data\Music\...\Wüste01.xwm`), named by the music stage.
+
 ## The blacklist prune
 <a id="the-blacklist-prune"></a>
 

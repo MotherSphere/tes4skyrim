@@ -4,7 +4,7 @@ Shared helper functions for TES5 record converters.
 
 import struct
 
-from asset_convert.game_paths import current_namespace
+from asset_convert.game_paths import ascii_path, current_namespace
 from ..base.mesh_bounds import get_mesh_obnd
 from ..base.text_reader import get_float, get_formid, get_int, get_str
 from ..base.writer import (
@@ -28,9 +28,10 @@ from ..base.writer import (
 def prefix_path(path: str) -> str:
     """Prefix an AUTHORED asset path with the ACTIVE game namespace, always.
 
-    Strips a leading 'textures\\' since Skyrim auto-prefixes it. MUST agree
-    with asset_convert's rewrite_tex_path: if the record side and the asset
-    copy disagree, every record names a path no archive ships.
+    Strips a leading 'textures\\' since Skyrim auto-prefixes it, and names the
+    `ascii_path` the asset ships under. MUST agree with asset_convert's
+    rewrite_tex_path: if the record side and the asset copy disagree, every
+    record names a path no archive ships.
     See: docs/commentary/asset_convert_texture.md#per-game-asset-namespace
     """
     if not path:
@@ -38,7 +39,7 @@ def prefix_path(path: str) -> str:
     p = path
     if p.lower().startswith('textures\\') or p.lower().startswith('textures/'):
         p = p[9:]
-    return current_namespace() + '\\' + p
+    return current_namespace() + '\\' + ascii_path(p)
 
 
 def landscape_texture_path(icon_path: str) -> str:
