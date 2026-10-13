@@ -833,6 +833,22 @@ def _voice_root(source_dir: Path) -> Path:
             or source_dir / 'sound' / 'voice')
 
 
+def _own_voice_dirs(voice_root: Path, plugin_name) -> list:
+    """The `sound/Voice/<plugin>` folders `plugin_name`'s lines are in: its own
+    (any case), as the game looks them up; every folder when no plugin is named.
+
+    See: docs/commentary/asset_convert_audio.md#own-voice-folder
+    """
+    dirs = [d for d in voice_root.iterdir() if d.is_dir()]
+    if not plugin_name:
+        return dirs
+    own = [d for d in dirs if d.name.casefold() == plugin_name.casefold()]
+    if len(own) < len(dirs):
+        print(f'  Voice folders of other plugins left out: '
+              f'{", ".join(sorted(d.name for d in dirs if d not in own))}')
+    return own
+
+
 def organize_voice_files(
     source_dir,
     dest_dir,
@@ -904,9 +920,7 @@ def organize_voice_files(
     # prune so a VTYP relocation cannot strand the emptied source-race folder.
     plugin_roots: set = set()
 
-    for plugin_dir in voice_root.iterdir():
-        if not plugin_dir.is_dir():
-            continue
+    for plugin_dir in _own_voice_dirs(voice_root, plugin_name):
         effective_plugin = plugin_name or plugin_dir.name
         fallout = is_fallout_voice_root(plugin_dir)
         fnv_edids = load_voice_type_edids(source_dir) if fallout else {}

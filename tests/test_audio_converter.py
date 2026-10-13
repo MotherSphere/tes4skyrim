@@ -515,6 +515,23 @@ def test_organize_voice_files_basic(tmp_path):
 
 
 @needs_ffmpeg
+def test_organize_voice_files_takes_only_the_plugins_own_folder(tmp_path):
+    """A patch sharing its master's tree copies none of the master's lines."""
+    voice = tmp_path / 'extract' / 'sound' / 'voice'
+    for owner in ('master.esm', 'Patch.esp'):
+        (voice / owner / 'Nord' / 'M').mkdir(parents=True)
+    _make_wav(voice / 'master.esm' / 'Nord' / 'M' / 'hello_0000a1b2_0.wav')
+    _make_wav(voice / 'Patch.esp' / 'Nord' / 'M' / 'bye_0000c3d4_0.wav')
+
+    result = organize_voice_files(
+        source_dir=str(tmp_path / 'extract'), dest_dir=str(tmp_path / 'output'),
+        plugin_name='patch.esp', convert_audio=True, ffmpeg_path=FFMPEG)
+    assert result['errors'] == 0 and result['organized'] == 1
+    written = sorted(p.name for p in (tmp_path / 'output').rglob('*.xwm'))
+    assert written == ['bye_0000c3d4_0.xwm']
+
+
+@needs_ffmpeg
 def test_organize_voice_files_uses_voice_map(tmp_path):
     """The importer's voicemap renames files to the prefix Skyrim will
     actually look up (converted owning-quest + topic EditorIDs)."""
