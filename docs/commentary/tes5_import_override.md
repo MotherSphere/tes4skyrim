@@ -74,6 +74,27 @@ Ids BELOW that belong to the master's own masters and are translated by NAME
 through this plugin's list — the two orders usually agree, but relying on
 that is the same unchecked assumption this function exists to remove.
 
+<a id="script-graph-rekeys-masters"></a>**The script stage's scan re-keys the
+same way** (`script_convert/cross_ref.py:_index_remaps`, 2026-10-09). It asks
+`master_index_map` for every master of the chain, found by `master_dir`, and
+`_scan_record_lines` moves a master record's own id and its id fields (`SCRI`,
+`NAME`, `ParentWRLD`, the two MGEF shader ids, every `AIPackage[n]`) before
+anything is stored. A master whose every index already agrees is read as
+written: one whose own master list is the start of the plugin's list. A
+master the plugin does not list (a master's master) keeps what it says about
+the files the plugin does list; its own records, and any id that names an
+unlisted file, are dropped.
+
+Until then the scan merged the raw ids. DLCFrostcrag.esp and Knights.esp each
+have one master, so both number their own records `01xxxxxx`; of the records
+the scan reads, 82 ids are used by both, 71 of them for records of different
+types. For a plugin that masters both, the graph held Knights' record at all
+82 (79 with another type or name, 3 with another base) and none of Knights'
+8,551 at the `02xxxxxx` the plugin uses for them: `FrostcragSpireKey` resolved
+to `01000D50`, typed SCPT and named `ND05BookChestStatueScript`, and
+`FrostcragAtronachScript` was carried by Knights' eight `NDKnight*Generic`
+NPCs.
+
 ## FormIDs and master indices
 <a id="formids-master-indices"></a>
 

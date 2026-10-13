@@ -14,7 +14,9 @@ from script_convert.command_rows import (
 from tes5_import.base.mesh_bounds import get_mesh_physics_flags
 from tes5_import.base.text_reader import parse_export_file
 from asset_convert.game_paths import current_namespace
-from core.plugin_masters import master_chain, master_dir
+from core.plugin_masters import (
+    master_chain, master_dir, master_index_map, masters_from_export_header
+)
 from core.worker_budget import worker_count
 from core.worldspace_names import converted_worldspace_edid, renames_for
 
@@ -235,9 +237,59 @@ _SIG_SCANNERS = {'SCPT': _scan_scpt, 'CELL': _scan_cell, 'NPC_': _scan_actor,
                  'CREA': _scan_actor, 'PACK': _scan_pack, 'QUST': _scan_qust}
 
 
-def _scan_record_lines(sig: str, lines: list, out: dict):
-    """Scan one record's KEY=VALUE lines into the partial result dicts."""
+#: The fields of a record that hold a FormID, beside its own and every `AIPackage[n]`.
+_ID_FIELDS = ('SCRI', 'NAME', 'ParentWRLD', 'DATA.EffectShader', 'DATA.EnchantEffect')
+
+_FORMID_RE = re.compile(r'[0-9A-Fa-f]{8}')
+
+
+def _index_remaps(export_dir: str, dirs: list) -> list:
+    """For each folder of `dirs`: {index byte of its ids -> `export_dir`'s}, or None.
+
+    None reads the ids as written: the plugin's own folder, and a master whose
+    every index already agrees. A master the plugin does not list keeps only
+    the indexes that name a file it does list.
+    See: docs/commentary/tes5_import_override.md#script-graph-rekeys-masters
+    """
+    names = masters_from_export_header(export_dir)
+    slot_of = {n.lower(): i for i, n in enumerate(names)}
+    name_of = {master_dir(export_dir, n): n.lower() for n in master_chain(export_dir)}
+    remaps = []
+    for folder in dirs[:-1]:
+        slot = slot_of.get(name_of.get(folder))
+        remap = {k: v for k, v in master_index_map(folder, slot, names).items() if v is not None}
+        identity = slot is not None and remap == {i: i for i in range(slot + 1)}
+        remaps.append(None if identity else remap)
+    return remaps + [None]
+
+
+def _rekey(value: str, remap: dict) -> str:
+    """`value` (a hex FormID, text may follow) in the plugin's index space; '' for a file it does not load."""
+    m = _FORMID_RE.match(value or '')
+    if not m:
+        return value
+    raw = int(m.group(0), 16)
+    slot = remap.get(raw >> 24)
+    if slot is None:
+        return ''
+    return '%08X%s' % (slot << 24 | raw & 0xFFFFFF, value[8:])
+
+
+def _rekey_record(rec: dict, remap: dict) -> None:
+    """Move a master record's own id and its id fields into the plugin's index space."""
+    for key in rec:
+        if key == 'FormID' or key in _ID_FIELDS or key.startswith('AIPackage['):
+            rec[key] = _rekey(rec[key], remap)
+
+
+def _scan_record_lines(sig: str, lines: list, out: dict, remap: dict = None):
+    """Scan one record's KEY=VALUE lines into the partial result dicts.
+
+    `remap` is given for a master's record (`_index_remaps`).
+    """
     rec = _record_fields(lines)
+    if remap is not None:
+        _rekey_record(rec, remap)
     formid = rec.get('FormID')
     if not formid:
         return
@@ -259,14 +311,14 @@ def _scan_record_lines(sig: str, lines: list, out: dict):
 def _scan_range(args: tuple) -> dict:
     """Scan the records whose BEGIN delimiter starts in [start, end).
 
-    args = (fpath, sig, start, end). Module-level so it is picklable for
+    args = (fpath, sig, start, end, remap). Module-level so it is picklable for
     ProcessPoolExecutor; boundary rule matches text_reader.parse_file_range.
     """
 
     from tes5_import.base.text_reader import (DELIM_BEGIN, DELIM_END,
                                               find_delim_line)
 
-    fpath, sig, start, end = args
+    fpath, sig, start, end, remap = args
     out = _new_scan_out()
     try:
         f = open(fpath, 'rb')
@@ -287,7 +339,7 @@ def _scan_range(args: tuple) -> dict:
                 if rec_end < 0:
                     break
                 block = mm[nl + 1:rec_end].decode('utf-8', errors='replace')
-                _scan_record_lines(sig, block.split('\n'), out)
+                _scan_record_lines(sig, block.split('\n'), out, remap)
                 begin = find_delim_line(mm, DELIM_BEGIN,
                                          rec_end + len(DELIM_END))
         finally:
@@ -409,7 +461,9 @@ class CrossRefGraph:
 
         jobs = []
         dirs, self.worldspace_renames = _scan_chain(export_dir)
-        for d in dirs:
+        for d, remap in zip(dirs, _index_remaps(export_dir, dirs)):
+            if remap == {}:
+                continue
             for fname in sorted(os.listdir(d)):
                 if not fname.endswith('.txt'):
                     continue
@@ -422,8 +476,8 @@ class CrossRefGraph:
                 except OSError:
                     continue
                 for start in range(0, size, _SCAN_CHUNK_BYTES):
-                    jobs.append((fpath, sig,
-                                 start, min(start + _SCAN_CHUNK_BYTES, size)))
+                    jobs.append((fpath, sig, start,
+                                 min(start + _SCAN_CHUNK_BYTES, size), remap))
 
         if workers is None:
             workers = worker_count()
