@@ -61,6 +61,7 @@ from .record_types.morrowind_magic import (MORROWIND_MAGIC_EXPORTERS,
                                            synthesized_effects)
 from .record_types.morrowind_scripts import MORROWIND_SCRIPT_EXPORTERS
 from .record_types.common import escape_value
+from .text_encoding import HEADER_KEY
 from .tes3_reader import (file_type, get_subrecord, is_tes3, read_file,
                           read_masters)
 
@@ -619,7 +620,9 @@ def export_plugin(source_path: str, export_dir: str, masters=()) -> dict:
     out_dir = str(record_dir(export_dir, plugin))
     counts = write_export(out, out_dir)
     write_header(out_dir, ctx.master_names, sum(counts.values()),
-                 f'Converted from {plugin}', file_type(header) & 1)
+                 f'Converted from {plugin}', file_type(header) & 1,
+                 codec=header.page.codec)
+    print(f'  Text code page: {header.page.codec}')
     return {'plugin': plugin, 'output': out_dir, 'counts': counts,
             'dropped': sum(ctx.unresolved.values()),
             'unlinked_doors': ctx.unlinked_doors}
@@ -979,9 +982,11 @@ def write_export(out: dict, output_dir: str) -> dict:
 
 
 def write_header(output_dir: str, masters: list, num_records: int,
-                 description: str, flags: int, source: str = 'TES3') -> None:
+                 description: str, flags: int, source: str = 'TES3',
+                 codec: str = '') -> None:
     """Write the _HEADER.txt the import stage reads for masters, ESM flag and
-    source game; an empty `source` writes no `Source=` line."""
+    source game, plus the source's text `codec`; an empty `source` or
+    `codec` writes no line for it."""
     lines = ['HEDR.Version=1.0', f'HEDR.NumRecords={num_records}',
              'HEDR.NextObjectID=2048',
              'CNAM.Author=TESConversion',
@@ -990,6 +995,8 @@ def write_header(output_dir: str, masters: list, num_records: int,
     lines.append(f'Flags={flags}')
     if source:
         lines.append(f'Source={source}')
+    if codec:
+        lines.append(f'{HEADER_KEY}={codec}')
     with open(os.path.join(output_dir, '_HEADER.txt'), 'w',
               encoding='utf-8') as fh:
         fh.write('\n'.join(lines) + '\n')

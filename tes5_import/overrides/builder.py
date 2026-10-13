@@ -49,7 +49,7 @@ from ..actors.outfits import split_inventory
 from ..packages.actor_wiring import CSTY_DEFAULT
 from .vmad_swap import SCRIPT_SWAP_KEY, SCRIPTED_TYPES, swap_vmad_script
 
-from ..base.writer import RECORD_HEADER_SIZE
+from ..base.writer import RECORD_HEADER_SIZE, encode_string
 _COMPRESSED_FLAG = 0x00040000
 
 # Export key -> the output subrecord it writes, for keys whose value is a
@@ -203,10 +203,6 @@ def join_subrecords(header: bytes, subs: list) -> bytes:
     body = b''.join(sig + struct.pack('<H', len(p)) + p for sig, p in subs)
     return (header[:4] + struct.pack('<I', len(body))
             + header[8:RECORD_HEADER_SIZE] + body)
-
-
-def _encode_string(value: str) -> bytes:
-    return (value or '').encode('cp1252', errors='replace') + b'\x00'
 
 
 # --------------------------------------------------------------------------
@@ -1119,7 +1115,7 @@ def _classify_changes(changes: dict, sig_name: str, plugin_export: dict,
         if sub_sig is None:
             buckets.generic.add(key)
             continue
-        buckets.pending[sub_sig] = _encode_string(value)
+        buckets.pending[sub_sig] = encode_string(value)
     return buckets
 
 
@@ -1139,7 +1135,7 @@ def _substitute_strings(subs: list, buckets: _Buckets) -> tuple:
             seen[sub_sig] = n + 1
             values = buckets.indexed[sub_sig]
             if n < len(values):
-                out.append((sub_sig, _encode_string(values[n])))
+                out.append((sub_sig, encode_string(values[n])))
             else:
                 out.append((sub_sig, payload))
             replaced.add(sub_sig)

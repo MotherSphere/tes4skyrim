@@ -447,7 +447,7 @@ def phase_export(file_name: str, tes4_data: str, export_dir: str,
                  config: dict):
     """Export TES4 records using the Python binary reader."""
     from tes4_export.tes4_reader import read_file
-    from tes4_export.export import export_file, export_header
+    from tes4_export.export import export_file, export_header, use_source_codec
 
     if file_name == PATCH_NAME:
         return run_patch_export(export_dir)
@@ -475,6 +475,7 @@ def phase_export(file_name: str, tes4_data: str, export_dir: str,
     print(f"  Scanned {len(all_records)} records in {t1-t0:.2f}s")
 
     os.makedirs(out_dir, exist_ok=True)
+    use_source_codec(source, all_records)
     export_header(header, out_dir)
 
     # Export EVERY record in the file. Records carrying a master's load-order
