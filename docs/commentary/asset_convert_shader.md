@@ -353,7 +353,7 @@ real texture, because the manifest key never matched the shipped path.
 ## Resolving a source texture through the master's tree
 <a id="texture-fallback-roots"></a>
 
-**Code:** `resolve_source_texture`, `master_texture_roots` in
+**Code:** `resolve_source_texture`, `_source_listing`, `master_texture_roots` in
 `asset_convert/nif/shaders.py`
 
 [Master-export blindness](../../CLAUDE.md#master-blindness), the asset half. An
@@ -363,6 +363,30 @@ never reach. Measured on the author's parallax mod: of the **3357** distinct
 texture paths its **8665** meshes reference, **1464** were in the mod and **1602**
 ONLY in `Nehrim.esm`. Unreachable means no height map and no specular verdict, so
 the resolver falls back through the master roots in order.
+
+Each tree is tried exactly, then [ignoring case](asset_convert_texture.md#case-blind-lookups):
+a mesh keeps its author's `textures\dungeons\ayleidruins\ARStone02.dds` while
+the extracted file is `textures/dungeons/ayleidruins/arstone02.dds`. The own
+tree's case-blind pass comes before the first fallback root, so a mod's own
+copy under another spelling is found before its master's, as on a filesystem
+that ignores case.
+
+The resolver runs about three times for every textured shape, so the folder
+listings behind that second pass are remembered (`_source_listing`), each with
+its folder's modification time, change time and inode. When any of the three
+has moved the folder is listed again. A folder changed within the last two
+seconds is not remembered at all, because a later change could carry the same
+time, and neither is a listing that came back empty; so a tree written a
+moment ago is listed fresh until it has been still for two seconds. The care
+is needed because creature workers also resolve textures against a tree under
+`output/`, which the run is writing.
+
+Over Oblivion.esm's 40,984 textured shapes, the derived normal map was not
+found for 36,022 before and for 942 after (the pipeline's own count of
+defaulted normals). Its 124,399 lookups take 1.8 s where the exact probes took
+0.19 s, and 8.3 s with no memory at all. In a flat folder of 10,000 names,
+with every lookup a miss, a shape costs 0.15 ms with the memory and 29 ms
+without.
 
 ## Material defaults come from vanilla, not from Oblivion
 <a id="shader-material-defaults"></a>

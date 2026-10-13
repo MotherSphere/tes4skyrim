@@ -14,7 +14,9 @@ no plugin and no header, so the base is recorded at import time.
 """
 
 from asset_convert.nif import shaders
+import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -98,6 +100,177 @@ class TestResolutionThroughTheFallback:
             'textures\\tes4\\rock\\absent.dds',
             str(mod / 'meshes' / 'a.nif'),
             shaders.master_texture_roots(mod / 'meshes')) is None
+
+
+class TestCaseBlindResolution:
+    """NIFs keep their author's mixed case; extracted files are lowercase.
+
+    On a case-sensitive filesystem the exact join misses, and the shape falls
+    back to the flat default normal map with no specular mask or height map.
+    See: docs/commentary/asset_convert_texture.md#case-blind-lookups
+    """
+
+    def test_a_mixed_case_path_finds_the_lowercase_file(self, tmp_path):
+        """The mesh's spelling resolves to the file the tree really holds."""
+        mod = _tree(tmp_path, 'Base.esm', textures=['architecture/arstone02_n.dds'])
+        got = shaders.resolve_source_texture(
+            'textures\\tes4\\Architecture\\ARStone02_n.dds',
+            str(mod / 'meshes' / 'a.nif'))
+        assert isinstance(got, str) and os.path.samefile(
+            got, mod / 'textures' / 'architecture' / 'arstone02_n.dds')
+
+    def test_the_base_is_searched_case_blind_too(self, tmp_path):
+        """A fallback root is matched the same way as the mod's own tree."""
+        base = _tree(tmp_path, 'Base.esm', textures=['rock/stone.dds'])
+        mod = _tree(tmp_path, 'Mod.esp', header_masters=['Base.esm'])
+        got = shaders.resolve_source_texture(
+            'textures\\tes4\\Rock\\Stone.DDS', str(mod / 'meshes' / 'a.nif'),
+            shaders.master_texture_roots(mod / 'meshes'))
+        assert isinstance(got, str) and os.path.samefile(
+            got, base / 'textures' / 'rock' / 'stone.dds')
+
+    def test_the_mods_own_copy_in_another_case_comes_before_the_masters(
+            self, tmp_path):
+        """The own tree is searched in any case before the first fallback root."""
+        _tree(tmp_path, 'Base.esm', textures=['rock/stone.dds'])
+        mod = _tree(tmp_path, 'Mod.esp', textures=['Rock/Stone.dds'],
+                    header_masters=['Base.esm'])
+        got = shaders.resolve_source_texture(
+            'textures\\tes4\\rock\\stone.dds', str(mod / 'meshes' / 'a.nif'),
+            shaders.master_texture_roots(mod / 'meshes'))
+        assert isinstance(got, str) and os.path.samefile(
+            got, mod / 'textures' / 'Rock' / 'Stone.dds')
+
+    def test_every_fallback_root_is_searched_in_any_case(self, tmp_path):
+        """A second master is reached, and matched the same way, when the first lacks the file."""
+        _tree(tmp_path, 'First.esm', textures=['rock/other.dds'])
+        second = _tree(tmp_path, 'Second.esm', textures=['rock/stone.dds'])
+        mod = _tree(tmp_path, 'Mod.esp', header_masters=['First.esm', 'Second.esm'])
+        got = shaders.resolve_source_texture(
+            'textures\\tes4\\Rock\\Stone.DDS', str(mod / 'meshes' / 'a.nif'),
+            shaders.master_texture_roots(mod / 'meshes'))
+        assert isinstance(got, str) and os.path.samefile(
+            got, second / 'textures' / 'rock' / 'stone.dds')
+
+    def test_a_mod_folder_named_Textures_is_found(self, tmp_path):
+        """A loose mod's `Textures/` folder counts as its texture tree."""
+        d = tmp_path / 'Loose.esp'
+        (d / 'Meshes').mkdir(parents=True)
+        (d / 'Textures' / 'Tower').mkdir(parents=True)
+        (d / 'Textures' / 'Tower' / 'Wall.dds').write_bytes(b'DDS ')
+        got = shaders.resolve_source_texture(
+            'textures\\tes4\\tower\\wall.dds', str(d / 'Meshes' / 'a.nif'))
+        assert got is not None and os.path.samefile(
+            got, d / 'Textures' / 'Tower' / 'Wall.dds')
+
+    def test_an_exact_hit_is_the_path_the_join_builds(self, tmp_path):
+        """With the case already right, the string is the plain join."""
+        mod = _tree(tmp_path, 'Base.esm', textures=['rock/stone.dds'])
+        got = shaders.resolve_source_texture(
+            'textures\\tes4\\rock\\stone.dds', str(mod / 'meshes' / 'a.nif'))
+        assert got == str(mod) + os.sep + os.path.join('textures', 'rock', 'stone.dds')
+
+    def test_a_name_differing_beyond_case_still_misses(self, tmp_path):
+        mod = _tree(tmp_path, 'Base.esm', textures=['rock/stone.dds'])
+        assert shaders.resolve_source_texture(
+            'textures\\tes4\\Rock\\Stone_n.dds',
+            str(mod / 'meshes' / 'a.nif')) is None
+
+
+class TestSourceListings:
+    """A folder's listing is remembered only while its mtime stands still.
+
+    See: docs/commentary/asset_convert_shader.md#texture-fallback-roots
+    """
+
+    def _counted(self, monkeypatch):
+        """Record each folder the real lister is asked for."""
+        listed = []
+        real = shaders.folder_names
+        monkeypatch.setattr(shaders, 'folder_names',
+                            lambda folder: listed.append(folder) or real(folder))
+        return listed
+
+    def _settle(self, folder):
+        """Backdate `folder` the way an extracted tree is by the time meshes convert."""
+        (folder / 'a.dds').write_bytes(b'')
+        old = time.time() - 60
+        os.utime(folder, (old, old))
+        return str(folder)
+
+    def test_a_settled_folder_is_listed_once(self, tmp_path, monkeypatch):
+        """The second lookup in a folder nothing has touched reads no directory."""
+        listed = self._counted(monkeypatch)
+        folder = self._settle(tmp_path)
+        assert shaders._source_listing(folder) == {'a.dds': ['a.dds']}
+        assert shaders._source_listing(folder) == {'a.dds': ['a.dds']}
+        assert listed == [folder]
+
+    def test_a_change_to_the_folder_is_seen_at_the_next_lookup(self, tmp_path):
+        """A file written after the listing was remembered is found all the same."""
+        folder = self._settle(tmp_path)
+        assert 'b.dds' not in shaders._source_listing(folder)
+        (tmp_path / 'B.dds').write_bytes(b'')
+        assert shaders._source_listing(folder)['b.dds'] == ['B.dds']
+
+    def test_a_folder_changed_just_now_is_not_remembered(self, tmp_path, monkeypatch):
+        """Inside the settle window every lookup lists again."""
+        listed = self._counted(monkeypatch)
+        (tmp_path / 'a.dds').write_bytes(b'')
+        shaders._source_listing(str(tmp_path))
+        shaders._source_listing(str(tmp_path))
+        assert listed == [str(tmp_path), str(tmp_path)]
+
+    def test_a_listing_that_failed_is_not_remembered(self, tmp_path, monkeypatch):
+        """A folder that could not be read is asked again at the next lookup."""
+        folder = self._settle(tmp_path)
+        with monkeypatch.context() as patch:
+            patch.setattr(shaders, 'folder_names', lambda folder: {})
+            assert shaders._source_listing(folder) == {}
+        assert shaders._source_listing(folder) == {'a.dds': ['a.dds']}
+
+    def test_the_resolver_reads_a_settled_tree_once(self, tmp_path, monkeypatch):
+        """Both passes, the own tree's and a fallback root's, ask the memory."""
+        listed = self._counted(monkeypatch)
+        mod = _tree(tmp_path, 'Mod.esp', textures=['rock/stone.dds'])
+        base = _tree(tmp_path, 'Base.esm', textures=['rock/stone.dds'])
+        old = time.time() - 60
+        for folder, _dirs, _files in os.walk(tmp_path):
+            os.utime(folder, (old, old))
+        args = ('textures\\tes4\\Rock\\Stone_N.dds', str(mod / 'meshes' / 'a.nif'),
+                (str(base / 'textures'),))
+        assert shaders.resolve_source_texture(*args) is None
+        first = list(listed)
+        assert shaders.resolve_source_texture(*args) is None
+        assert listed == first
+        assert {str(mod / 'textures' / 'rock'), str(base / 'textures' / 'rock')} <= set(first)
+
+    def test_a_folder_whose_mtime_moves_back_is_listed_again(self, tmp_path):
+        """An mtime older than the one remembered is a change too."""
+        folder = self._settle(tmp_path)
+        assert 'b.dds' not in shaders._source_listing(folder)
+        (tmp_path / 'B.dds').write_bytes(b'')
+        older = time.time() - 600
+        os.utime(tmp_path, (older, older))
+        assert shaders._source_listing(folder)['b.dds'] == ['B.dds']
+
+    def test_two_folders_with_one_mtime_keep_their_own_names(self, tmp_path):
+        """Each folder has its own entry, whatever its mtime."""
+        old = time.time() - 60
+        for name, inside in (('rock', 'a.dds'), ('wood', 'b.dds')):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / inside).write_bytes(b'')
+            os.utime(tmp_path / name, (old, old))
+        assert list(shaders._source_listing(str(tmp_path / 'rock'))) == ['a.dds']
+        assert list(shaders._source_listing(str(tmp_path / 'wood'))) == ['b.dds']
+
+    def test_a_folder_that_is_not_there_has_no_names(self, tmp_path):
+        """A missing folder is empty, and is asked again next time."""
+        absent = tmp_path / 'absent'
+        assert shaders._source_listing(str(absent)) == {}
+        absent.mkdir()
+        (absent / 'Late.dds').write_bytes(b'')
+        assert shaders._source_listing(str(absent)) == {'late.dds': ['Late.dds']}
 
 
 class TestWearablePlanThroughTheBase:
